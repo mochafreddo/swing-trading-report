@@ -1,5 +1,6 @@
 import "server-only";
 
+import { normalizeHoldingTickerForMutation } from "@/lib/holding-ticker";
 import {
   applyScheduledTossQuarantine,
   captureBrokerHoldingsDigest,
@@ -27,6 +28,7 @@ import {
   type TossHoldingsItem,
   type TossTickerDirectoryCandidate,
 } from "@/lib/toss/holdings-sync";
+import { loadReviewedTossTickerMappingsFromEnv } from "@/lib/toss/ticker-mapping-registry";
 import qaTossHoldingsFixture from "../../../fixtures/toss-holdings.qa.json";
 import type {
   HoldingRecord,
@@ -95,6 +97,9 @@ export interface TossHoldingsSyncDependencies {
   listTickerDirectoryExactBaseCandidates: (
     symbols: readonly string[],
   ) => Promise<TickerDirectoryExactBaseResponse>;
+  listReviewedTickerMappings: (
+    symbols: readonly string[],
+  ) => Promise<TossTickerDirectoryCandidate[]>;
   replaceAllHoldings: (
     rows: HoldingReplaceSnapshot[],
     options?: { expectedCurrentHoldings?: readonly HoldingRecord[] },
@@ -134,6 +139,8 @@ const defaultTossHoldingsSyncDependencies: TossHoldingsSyncDependencies = {
   fetchBrokerHoldingsState,
   fetchTossHoldingsItems: fetchDefaultTossHoldingsItems,
   listTickerDirectoryExactBaseCandidates,
+  listReviewedTickerMappings: async (symbols) =>
+    loadReviewedTossTickerMappingsFromEnv(symbols),
   replaceAllHoldings,
   replaceAllHoldingsAndCaptureBrokerDigest,
   applyScheduledTossQuarantine,
@@ -153,6 +160,12 @@ const FIXTURE_SUPABASE_HOSTS = new Set([
   "::1",
   "host.docker.internal",
 ]);
+const EXPLICIT_US_SUFFIX_PATTERN = /^(.+)\.(NAS|NYS|AMS)$/;
+
+function normalizeUsBaseSymbol(value: string): string {
+  const normalized = normalizeHoldingTickerForMutation(`${value.trim()}.NAS`);
+  return EXPLICIT_US_SUFFIX_PATTERN.exec(normalized)?.[1] ?? "";
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -419,7 +432,7 @@ async function fetchTossTickerDirectoryCandidates(
   items: readonly TossHoldingsItem[],
   deps: Pick<
     TossHoldingsSyncDependencies,
-    "listTickerDirectoryExactBaseCandidates"
+    "listTickerDirectoryExactBaseCandidates" | "listReviewedTickerMappings"
   >,
   options: TossHoldingsSyncPreviewOptions = {},
 ): Promise<TossTickerDirectoryCandidate[]> {
@@ -435,15 +448,34 @@ async function fetchTossTickerDirectoryCandidates(
     return [];
   }
 
+  let directoryCandidates: TossTickerDirectoryCandidate[] = [];
   try {
     const result = await deps.listTickerDirectoryExactBaseCandidates(usSymbols);
-    return result.candidates.map((row) => ({ ticker: row.ticker }));
+    directoryCandidates = result.candidates.map((row) => ({
+      ticker: row.ticker,
+    }));
   } catch (error) {
     if (options.tickerDirectoryLookupFailureMode === "throw") {
       throw error;
     }
     return [];
   }
+
+  const directoryBases = new Set(
+    directoryCandidates
+      .map(
+        (candidate) => EXPLICIT_US_SUFFIX_PATTERN.exec(candidate.ticker)?.[1],
+      )
+      .filter((base): base is string => base !== undefined),
+  );
+  const unresolvedSymbols = usSymbols.filter(
+    (symbol) => !directoryBases.has(normalizeUsBaseSymbol(symbol)),
+  );
+  const reviewedCandidates =
+    unresolvedSymbols.length > 0
+      ? await deps.listReviewedTickerMappings(unresolvedSymbols)
+      : [];
+  return [...directoryCandidates, ...reviewedCandidates];
 }
 
 export async function buildTossHoldingsSyncPreview(

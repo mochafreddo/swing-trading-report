@@ -91,6 +91,7 @@ function deps(
         usableForAutoMapping: false,
       },
     })),
+    listReviewedTickerMappings: vi.fn(async () => []),
     replaceAllHoldings: vi.fn(async () => ({
       insertedCount: 0,
       updatedCount: 0,
@@ -255,6 +256,9 @@ describe("toss holdings sync service", () => {
   });
 
   it("dry-run preview degrades to blocked rows when ticker-directory lookup fails", async () => {
+    const listReviewedTickerMappings = vi.fn(async () => [
+      { ticker: "MSFT.NAS" },
+    ]);
     const testDeps = deps({
       fetchTossHoldingsItems: vi.fn(async () => [
         {
@@ -268,6 +272,7 @@ describe("toss holdings sync service", () => {
       listTickerDirectoryExactBaseCandidates: vi.fn(async () => {
         throw new Error("ticker directory unavailable");
       }),
+      listReviewedTickerMappings,
     });
 
     const preview = await buildTossHoldingsSyncPreview(testDeps);
@@ -276,6 +281,169 @@ describe("toss holdings sync service", () => {
     expect(preview.payload.blockedRows).toEqual([
       expect.objectContaining({ reason: "ticker_exchange_unresolved" }),
     ]);
+    expect(listReviewedTickerMappings).not.toHaveBeenCalled();
+  });
+
+  it("uses the reviewed registry when the ticker directory has no candidate", async () => {
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "MSFT",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "400",
+        },
+      ]),
+      listReviewedTickerMappings: vi.fn(async () => [{ ticker: "MSFT.NAS" }]),
+    });
+
+    const preview = await buildTossHoldingsSyncPreview(testDeps);
+
+    expect(preview.payload.applyBlocked).toBe(false);
+    expect(preview.payload.targetRows).toEqual([
+      expect.objectContaining({ ticker: "MSFT.NAS" }),
+    ]);
+  });
+
+  it("keeps an exact class-share directory match ahead of the registry fallback", async () => {
+    const listReviewedTickerMappings = vi.fn(async () => [
+      { ticker: "BRK.B.NAS" },
+    ]);
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "BRK/B",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "500",
+        },
+      ]),
+      listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
+        candidates: [{ ticker: "BRK.B.NYS", name: "Berkshire Hathaway" }],
+        directory: {
+          builtAtMs: Date.now(),
+          sourceReports: 1,
+          usableForAutoMapping: true,
+        },
+      })),
+      listReviewedTickerMappings,
+    });
+
+    const preview = await buildTossHoldingsSyncPreview(testDeps);
+
+    expect(preview.payload.applyBlocked).toBe(false);
+    expect(preview.payload.targetRows).toEqual([
+      expect.objectContaining({ ticker: "BRK.B.NYS" }),
+    ]);
+    expect(listReviewedTickerMappings).not.toHaveBeenCalled();
+  });
+
+  it("sends only unresolved symbols to the reviewed registry in a mixed batch", async () => {
+    const listReviewedTickerMappings = vi.fn(async () => [
+      { ticker: "MSFT.NAS" },
+    ]);
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "AAPL",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "190",
+        },
+        {
+          symbol: "MSFT",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "400",
+        },
+      ]),
+      listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
+        candidates: [{ ticker: "AAPL.NAS", name: "Apple" }],
+        directory: {
+          builtAtMs: Date.now(),
+          sourceReports: 1,
+          usableForAutoMapping: true,
+        },
+      })),
+      listReviewedTickerMappings,
+    });
+
+    const preview = await buildTossHoldingsSyncPreview(testDeps);
+
+    expect(listReviewedTickerMappings).toHaveBeenCalledWith(["MSFT"]);
+    expect(preview.payload.applyBlocked).toBe(false);
+    expect(preview.payload.targetRows.map((row) => row.ticker)).toEqual([
+      "AAPL.NAS",
+      "MSFT.NAS",
+    ]);
+  });
+
+  it("does not let the registry override ambiguous directory venues", async () => {
+    const listReviewedTickerMappings = vi.fn(async () => [
+      { ticker: "ABC.NAS" },
+    ]);
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "ABC",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "10",
+        },
+      ]),
+      listTickerDirectoryExactBaseCandidates: vi.fn(async () => ({
+        candidates: [
+          { ticker: "ABC.NAS", name: null },
+          { ticker: "ABC.NYS", name: null },
+        ],
+        directory: {
+          builtAtMs: Date.now(),
+          sourceReports: 1,
+          usableForAutoMapping: true,
+        },
+      })),
+      listReviewedTickerMappings,
+    });
+
+    const preview = await buildTossHoldingsSyncPreview(testDeps);
+
+    expect(listReviewedTickerMappings).not.toHaveBeenCalled();
+    expect(preview.payload.applyBlocked).toBe(true);
+    expect(preview.payload.blockedRows).toEqual([
+      expect.objectContaining({ reason: "ticker_exchange_unresolved" }),
+    ]);
+  });
+
+  it("scheduled auto apply propagates registry validation failure before writes", async () => {
+    const testDeps = deps({
+      fetchTossHoldingsItems: vi.fn(async () => [
+        {
+          symbol: "MSFT",
+          marketCountry: "US",
+          currency: "USD",
+          quantity: "1",
+          averagePurchasePrice: "400",
+        },
+      ]),
+      listReviewedTickerMappings: vi.fn(async () => {
+        throw new Error("reviewed registry invalid");
+      }),
+    });
+
+    await expect(
+      runScheduledTossAutoApply({ autoApplyEnabled: true }, testDeps),
+    ).rejects.toThrow("reviewed registry invalid");
+    expect(testDeps.replaceAllHoldings).not.toHaveBeenCalled();
+    expect(
+      testDeps.replaceAllHoldingsAndCaptureBrokerDigest,
+    ).not.toHaveBeenCalled();
+    expect(testDeps.applyScheduledTossQuarantine).not.toHaveBeenCalled();
+    expect(testDeps.captureBrokerHoldingsDigest).not.toHaveBeenCalled();
   });
 
   it("scheduled auto apply fails closed when ticker-directory lookup fails", async () => {

@@ -271,6 +271,14 @@ The local Toss holdings sync runs through `scripts/launchd/com.mochafreddo.sab.t
 
 Configure `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED` in the root `.env`. Docker Compose reads that file when creating the web container, and `scripts/toss_daily_auto_sync.sh` uses the same root `.env` by default. After changing either value, recreate the web container with `docker compose up -d --build web` before relying on the launchd runner. `TOSS_SYNC_ENV_FILE` is only an override for isolated smoke tests; do not use a separate scheduler-only env file for the production Toss auto-sync token because the route and runner must share the same value.
 
+The optional reviewed US ticker fallback is configured separately with the
+paired `TOSS_SYNC_REVIEWED_MAPPING_B64` and
+`TOSS_SYNC_REVIEWED_MAPPING_SHA256` values. Keep the decoded personal mapping
+outside Git, export the pair from the local private environment (for example,
+`.envrc.local`), and recreate the web container after changing it. This mapping
+configuration does not enable scheduled apply, seal a broker snapshot, or
+authorize any order operation.
+
 Manual smoke:
 
 ```bash
