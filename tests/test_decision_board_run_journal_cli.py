@@ -194,8 +194,8 @@ def test_shadow_wrapper_binds_manifest_hash_slot_and_runner_identity(
     ]
     config = JournalShadowProcessConfigV0.from_strings(
         run_kind="ENTRY",
-        expected_at="2026-08-17T12:30:00Z",
-        run_id="entry-shadow-20260817",
+        expected_at="2026-08-24T12:30:00Z",
+        run_id="entry-shadow-20260824",
         journal_dir=str(tmp_path / "journal"),
         grace_seconds="300",
         stale_seconds="1800",
@@ -212,8 +212,8 @@ def test_shadow_wrapper_binds_manifest_hash_slot_and_runner_identity(
 
     mismatched = JournalShadowProcessConfigV0.from_strings(
         run_kind="ENTRY",
-        expected_at="2026-08-17T12:30:00Z",
-        run_id="entry-shadow-20260817",
+        expected_at="2026-08-24T12:30:00Z",
+        run_id="entry-shadow-20260824",
         journal_dir=str(tmp_path / "mismatch"),
         grace_seconds="300",
         stale_seconds="1800",
@@ -228,8 +228,8 @@ def test_shadow_wrapper_binds_manifest_hash_slot_and_runner_identity(
 
     unbound_equals_form = JournalShadowProcessConfigV0.from_strings(
         run_kind="ENTRY",
-        expected_at="2026-08-17T12:30:00Z",
-        run_id="entry-shadow-20260817",
+        expected_at="2026-08-24T12:30:00Z",
+        run_id="entry-shadow-20260824",
         journal_dir=str(tmp_path / "unbound-equals"),
         grace_seconds="300",
         stale_seconds="1800",
@@ -251,8 +251,8 @@ def test_non_dry_journal_validates_approved_bundle_before_claiming_started(
     journal_dir = tmp_path / "must-not-start"
     config = JournalShadowProcessConfigV0.from_strings(
         run_kind="ENTRY",
-        expected_at="2026-08-17T12:30:00Z",
-        run_id="entry-shadow-20260817",
+        expected_at="2026-08-24T12:30:00Z",
+        run_id="entry-shadow-20260824",
         journal_dir=str(journal_dir),
         grace_seconds="300",
         stale_seconds="1800",

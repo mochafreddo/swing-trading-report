@@ -126,7 +126,7 @@ def test_launchd_package_builds_disabled_unscheduled_entry_and_holding_plists(
 
     result = build_decision_board_launchd_dry_run_package_v0(
         manifest_path=MANIFEST,
-        session="2026-08-17",
+        session="2026-08-24",
         repo_root=ROOT,
         journal_dir=journal_dir,
         output_dir=output_dir,
@@ -136,7 +136,7 @@ def test_launchd_package_builds_disabled_unscheduled_entry_and_holding_plists(
     assert public["status"] == "PACKAGE_READY"
     assert public["mode"] == "DRY_RUN_ONLY"
     assert public["approval_state"] == "PENDING"
-    assert public["session"] == "2026-08-17"
+    assert public["session"] == "2026-08-24"
     assert public["lanes"] == ["ENTRY", "HOLDING"]
     assert public["disabled"] is True
     assert public["scheduled"] is False
@@ -181,7 +181,7 @@ def test_launchd_package_propagates_approved_ledgers_and_rejects_incomplete_pair
     output_dir = tmp_path / "approved-package"
     result = build_decision_board_launchd_dry_run_package_v0(
         manifest_path=manifest,
-        session="2026-08-17",
+        session="2026-08-24",
         repo_root=ROOT,
         journal_dir=tmp_path / "journal",
         output_dir=output_dir,
@@ -206,7 +206,7 @@ def test_launchd_package_propagates_approved_ledgers_and_rejects_incomplete_pair
     with pytest.raises(ShadowLaunchdPackageError, match="incomplete"):
         build_decision_board_launchd_dry_run_package_v0(
             manifest_path=MANIFEST,
-            session="2026-08-17",
+            session="2026-08-24",
             repo_root=ROOT,
             journal_dir=tmp_path / "incomplete-journal",
             output_dir=tmp_path / "incomplete-package",
@@ -222,7 +222,7 @@ def test_generated_launchd_program_arguments_execute_only_wrapper_dry_run(
     report_dir = tmp_path / "reports"
     build_decision_board_launchd_dry_run_package_v0(
         manifest_path=MANIFEST,
-        session="2026-08-17",
+        session="2026-08-24",
         repo_root=ROOT,
         journal_dir=journal_dir,
         output_dir=output_dir,
@@ -278,7 +278,7 @@ def test_launchd_package_cli_is_sanitized_and_refuses_existing_output(
                 / "build_decision_board_shadow_dry_run_package.py"
             ),
             "--session",
-            "2026-08-17",
+            "2026-08-24",
             "--journal-dir",
             str(tmp_path / "journal"),
             "--output-dir",
@@ -301,7 +301,7 @@ def test_launchd_package_cli_is_sanitized_and_refuses_existing_output(
     with pytest.raises(ShadowLaunchdPackageError, match="output directory"):
         build_decision_board_launchd_dry_run_package_v0(
             manifest_path=MANIFEST,
-            session="2026-08-17",
+            session="2026-08-24",
             repo_root=ROOT,
             journal_dir=tmp_path / "journal",
             output_dir=output_dir,
@@ -321,7 +321,7 @@ def test_launchd_package_normalizes_valid_manifest_slot_order(tmp_path: Path) ->
 
     result = build_decision_board_launchd_dry_run_package_v0(
         manifest_path=manifest,
-        session="2026-08-17",
+        session="2026-08-24",
         repo_root=ROOT,
         journal_dir=tmp_path / "journal",
         output_dir=output_dir,

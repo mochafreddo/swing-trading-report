@@ -1,6 +1,6 @@
 {
   "schema_version": "decision-board-shadow-gate.v0",
-  "gate_version": "us-swing-shadow-v1-20260817",
+  "gate_version": "us-swing-shadow-v1-20260824",
   "horizon": "SWING",
   "approval": {
     "state": "PENDING",
@@ -10,15 +10,10 @@
   },
   "market": "US",
   "calendar": "XNYS",
-  "start_session": "2026-08-17",
-  "end_session": "2026-09-14",
+  "start_session": "2026-08-24",
+  "end_session": "2026-09-21",
   "minimum_sessions": 20,
   "sessions": [
-    "2026-08-17",
-    "2026-08-18",
-    "2026-08-19",
-    "2026-08-20",
-    "2026-08-21",
     "2026-08-24",
     "2026-08-25",
     "2026-08-26",
@@ -33,7 +28,12 @@
     "2026-09-09",
     "2026-09-10",
     "2026-09-11",
-    "2026-09-14"
+    "2026-09-14",
+    "2026-09-15",
+    "2026-09-16",
+    "2026-09-17",
+    "2026-09-18",
+    "2026-09-21"
   ],
   "lanes": [
     "ENTRY",
@@ -73,66 +73,6 @@
     "stale_seconds": 1800
   },
   "expected_slots": [
-    {
-      "session": "2026-08-17",
-      "run_kind": "ENTRY",
-      "expected_at": "2026-08-17T12:30:00Z",
-      "run_id": "entry-shadow-20260817"
-    },
-    {
-      "session": "2026-08-17",
-      "run_kind": "HOLDING",
-      "expected_at": "2026-08-17T22:40:00Z",
-      "run_id": "holding-shadow-20260817"
-    },
-    {
-      "session": "2026-08-18",
-      "run_kind": "ENTRY",
-      "expected_at": "2026-08-18T12:30:00Z",
-      "run_id": "entry-shadow-20260818"
-    },
-    {
-      "session": "2026-08-18",
-      "run_kind": "HOLDING",
-      "expected_at": "2026-08-18T22:40:00Z",
-      "run_id": "holding-shadow-20260818"
-    },
-    {
-      "session": "2026-08-19",
-      "run_kind": "ENTRY",
-      "expected_at": "2026-08-19T12:30:00Z",
-      "run_id": "entry-shadow-20260819"
-    },
-    {
-      "session": "2026-08-19",
-      "run_kind": "HOLDING",
-      "expected_at": "2026-08-19T22:40:00Z",
-      "run_id": "holding-shadow-20260819"
-    },
-    {
-      "session": "2026-08-20",
-      "run_kind": "ENTRY",
-      "expected_at": "2026-08-20T12:30:00Z",
-      "run_id": "entry-shadow-20260820"
-    },
-    {
-      "session": "2026-08-20",
-      "run_kind": "HOLDING",
-      "expected_at": "2026-08-20T22:40:00Z",
-      "run_id": "holding-shadow-20260820"
-    },
-    {
-      "session": "2026-08-21",
-      "run_kind": "ENTRY",
-      "expected_at": "2026-08-21T12:30:00Z",
-      "run_id": "entry-shadow-20260821"
-    },
-    {
-      "session": "2026-08-21",
-      "run_kind": "HOLDING",
-      "expected_at": "2026-08-21T22:40:00Z",
-      "run_id": "holding-shadow-20260821"
-    },
     {
       "session": "2026-08-24",
       "run_kind": "ENTRY",
@@ -312,6 +252,66 @@
       "run_kind": "HOLDING",
       "expected_at": "2026-09-14T22:40:00Z",
       "run_id": "holding-shadow-20260914"
+    },
+    {
+      "session": "2026-09-15",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-15T12:30:00Z",
+      "run_id": "entry-shadow-20260915"
+    },
+    {
+      "session": "2026-09-15",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-15T22:40:00Z",
+      "run_id": "holding-shadow-20260915"
+    },
+    {
+      "session": "2026-09-16",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-16T12:30:00Z",
+      "run_id": "entry-shadow-20260916"
+    },
+    {
+      "session": "2026-09-16",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-16T22:40:00Z",
+      "run_id": "holding-shadow-20260916"
+    },
+    {
+      "session": "2026-09-17",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-17T12:30:00Z",
+      "run_id": "entry-shadow-20260917"
+    },
+    {
+      "session": "2026-09-17",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-17T22:40:00Z",
+      "run_id": "holding-shadow-20260917"
+    },
+    {
+      "session": "2026-09-18",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-18T12:30:00Z",
+      "run_id": "entry-shadow-20260918"
+    },
+    {
+      "session": "2026-09-18",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-18T22:40:00Z",
+      "run_id": "holding-shadow-20260918"
+    },
+    {
+      "session": "2026-09-21",
+      "run_kind": "ENTRY",
+      "expected_at": "2026-09-21T12:30:00Z",
+      "run_id": "entry-shadow-20260921"
+    },
+    {
+      "session": "2026-09-21",
+      "run_kind": "HOLDING",
+      "expected_at": "2026-09-21T22:40:00Z",
+      "run_id": "holding-shadow-20260921"
     }
   ],
   "allowed_diff_reasons": [

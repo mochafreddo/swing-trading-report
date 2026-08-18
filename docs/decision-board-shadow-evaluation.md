@@ -24,7 +24,7 @@ GitHub Actions sidecar, 주문 권한은 별도 명시 승인 없이는 계속 �
 ## 1. Validate and approve the gate manifest
 
 저장소의 [approval candidate](../config/decision-board-shadow-gate.proposed.json)는
-2026-08-17부터 2026-09-14까지 XNYS 20개 session과 ENTRY/HOLDING 40개 exact slot을
+2026-08-24부터 2026-09-21까지 XNYS 20개 session과 ENTRY/HOLDING 40개 exact slot을
 명시합니다. ENTRY 12:30Z, HOLDING 22:40Z는 아직 승인되지 않은 운영 후보입니다.
 provider failure rate 최대 5%, research coverage와 fresh source rate 최소 90%, 아래 hard
 failure 전부 0을 첫 실행 전에 고정합니다.
@@ -61,7 +61,7 @@ canonical이어야 합니다.
 
 ```json
 {
-  "gate_version": "us-swing-shadow-v1-20260817",
+  "gate_version": "us-swing-shadow-v1-20260824",
   "horizon": "SWING",
   "start_session": "approved future session",
   "minimum_sessions": 20,
@@ -101,10 +101,10 @@ provider, credential을 호출하지 않습니다.
 
 ```bash
 just decision-board-shadow-launchd-dry-run-package \
-  --session 2026-08-17 \
+  --session 2026-08-24 \
   --journal-dir "$PWD/logs/decision-board-journal" \
   --report-dir "$PWD/reports" \
-  --output-dir "$PWD/tmp/decision-board-shadow-20260817"
+  --output-dir "$PWD/tmp/decision-board-shadow-20260824"
 ```
 
 출력의 `mode=DRY_RUN_ONLY`, `disabled=true`, `scheduled=false`, `runner_execution=false`,
