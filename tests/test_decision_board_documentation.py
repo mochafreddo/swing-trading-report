@@ -54,6 +54,9 @@ def test_shadow_evaluation_freezes_the_approved_graduation_contract() -> None:
     assert "통과는 자동 활성화가 아닙니다" in evaluation
     assert "approval_signature_sha256" in evaluation
     assert "case_id/run_kind/sealed_input_hash/item_id" in evaluation
+    assert "decision-board-shadow-ledger-prepare" in evaluation
+    assert "chmod 600" in evaluation
+    assert "approval_signature_created=false" in evaluation
     assert "주문 실행은 그 이후에도 사용자 수동" in evaluation
     assert "<64-lowercase-hex>" not in evaluation
 

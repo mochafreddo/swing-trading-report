@@ -59,6 +59,45 @@ input ledger 각 case는 `case_id/run_kind/sealed_input_hash/item_id`, expected-
 case는 같은 `case_id`와 lane-compatible non-empty `expected_action_set`을 가지며 case ID 순서도
 canonical이어야 합니다.
 
+두 ledger는 raw broker snapshot을 직접 받지 않는 local-only preparation command로 만듭니다.
+입력 case-plan은 [case-plan schema](../schemas/decision-board-shadow-case-plan.v0.schema.json)의
+redacted identity와 사용자가 결과를 보기 전에 정한 expected-action set만 포함해야 합니다.
+private 입력 파일은 현재 사용자만 읽을 수 있도록 `chmod 600`으로 제한하고 absolute path로
+전달합니다. output directory도 아직 존재하지 않는 absolute private 경로를 지정하며, 그 parent는
+현재 사용자가 소유하고 group/world permission이 없는 기존 directory여야 합니다.
+
+```bash
+chmod 600 /private/path/decision-board-shadow-case-plan.json
+just decision-board-shadow-ledger-prepare \
+  --manifest "$PWD/config/decision-board-shadow-gate.proposed.json" \
+  --case-plan /private/path/decision-board-shadow-case-plan.json \
+  --output-dir /private/path/decision-board-shadow-ledgers-20260824
+```
+
+명령은 canonical input/expected-action ledger 두 개를 mode `0600`으로 생성하고 basename,
+SHA-256, case count만 출력합니다. 기존 output directory를 덮어쓰지 않으며 symlink 또는
+group/world-readable case-plan을 거부합니다. 출력의 `approval_signature_created=false`,
+`network_access=false`, `scheduled=false`를 확인합니다. 이 단계는 manifest를 승인하거나
+signature를 만들지 않고 credential, provider, Supabase, launchd를 호출하지 않습니다.
+
+case-plan 예시는 private 값 대신 redacted identity만 보여 줍니다.
+
+```json
+{
+  "schema_version": "decision-board-shadow-case-plan.v0",
+  "gate_version": "us-swing-shadow-v1-20260824",
+  "cases": [
+    {
+      "case_id": "case-entry-example",
+      "run_kind": "ENTRY",
+      "sealed_input_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "item_id": "entry-example",
+      "expected_action_set": ["BUY", "REVIEW"]
+    }
+  ]
+}
+```
+
 ```json
 {
   "gate_version": "us-swing-shadow-v1-20260824",
