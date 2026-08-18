@@ -183,12 +183,12 @@ def test_proposed_gate_is_schema_valid_and_covers_twenty_xnys_sessions() -> None
 
     assert validated.to_public_dict() == {
         "status": "VALID_PROPOSAL",
-        "gate_version": "us-swing-shadow-v1-20260817",
+        "gate_version": "us-swing-shadow-v1-20260824",
         "approval_state": "PENDING",
         "market": "US",
         "calendar": "XNYS",
-        "start_session": "2026-08-17",
-        "end_session": "2026-09-14",
+        "start_session": "2026-08-24",
+        "end_session": "2026-09-21",
         "session_count": 20,
         "slot_count": 40,
         "lanes": ["ENTRY", "HOLDING"],
@@ -360,7 +360,7 @@ def test_approved_gate_requires_explicit_user_identity_before_window() -> None:
         validate_shadow_gate_manifest_v0(raw)
 
     approval["approved_by"] = "user"
-    approval["approved_at"] = "2026-08-17T12:30:00Z"
+    approval["approved_at"] = "2026-08-24T12:30:00Z"
     with pytest.raises(ShadowGateManifestError, match="precede the evaluation window"):
         validate_shadow_gate_manifest_v0(raw)
 
@@ -511,7 +511,7 @@ def test_shadow_execution_requires_exact_manifest_slot_and_ledger_input(
                 run_kind=str(first_slot["run_kind"]),
                 run_id=str(first_slot["run_id"]),
                 idempotency_key="sha256:" + "8" * 64,
-                created_at="2026-08-17T12:31:00Z",
+                created_at="2026-08-24T12:31:00Z",
                 sealed_input_hash="sha256:" + "3" * 64,
                 upload_mode="DISABLED",
                 report_dir=str(tmp_path),

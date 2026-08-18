@@ -1164,7 +1164,7 @@ def test_approved_gate_and_sealed_snapshot_hash_form_a_unidirectional_binding() 
                 "run_kind": "ENTRY",
                 "run_id": "entry-gate-bundle",
                 "idempotency_key": "sha256:" + "c" * 64,
-                "created_at": "2026-08-17T12:30:00Z",
+                "created_at": "2026-08-24T12:30:00Z",
                 "sealed_input_hash": sealed_hash,
                 "upload_mode": "DISABLED",
             }

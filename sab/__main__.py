@@ -44,6 +44,11 @@ from .decision_board.shadow_gate import (
     ShadowGateManifestError,
     load_shadow_gate_manifest_v0,
 )
+from .decision_board.shadow_ledger_prepare import (
+    ShadowLedgerPreparationError,
+    load_shadow_evaluation_case_plan_v0,
+    prepare_shadow_evaluation_ledgers_v0,
+)
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
@@ -331,6 +336,14 @@ def _build_parser() -> argparse.ArgumentParser:
     shadow_gate.add_argument("--input-ledger", default=None)
     shadow_gate.add_argument("--expected-action-ledger", default=None)
     shadow_gate.add_argument("--require-approved", action="store_true")
+
+    shadow_ledger_prepare = sub.add_parser(
+        "decision-board-shadow-ledger-prepare",
+        help="Prepare canonical local shadow ledgers without approval or live access",
+    )
+    shadow_ledger_prepare.add_argument("--manifest", required=True)
+    shadow_ledger_prepare.add_argument("--case-plan", required=True)
+    shadow_ledger_prepare.add_argument("--output-dir", required=True)
 
     journal_status = sub.add_parser(
         "decision-board-journal-status",
@@ -817,6 +830,32 @@ def _run_decision_board_shadow_gate_validate_command(ns: argparse.Namespace) -> 
     return 0
 
 
+def _run_decision_board_shadow_ledger_prepare_command(ns: argparse.Namespace) -> int:
+    try:
+        manifest = load_shadow_gate_manifest_v0(ns.manifest)
+        case_plan = load_shadow_evaluation_case_plan_v0(ns.case_plan)
+        result = prepare_shadow_evaluation_ledgers_v0(
+            manifest=manifest,
+            case_plan=case_plan,
+            output_dir=ns.output_dir,
+        )
+    except ShadowGateManifestError, ShadowLedgerPreparationError, TypeError:
+        print(
+            json.dumps(
+                {
+                    "status": "FAILED",
+                    "exit_code": 2,
+                    "issue_code": "LEDGER_PREPARATION_INVALID",
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    print(json.dumps(result.to_public_dict(), sort_keys=True))
+    return 0
+
+
 def _journal_cli_failure() -> int:
     print(
         json.dumps(
@@ -1258,6 +1297,9 @@ def _dispatch_command(
         "decision-board-shadow-live": _run_decision_board_command,
         "decision-board-shadow-gate-validate": (
             _run_decision_board_shadow_gate_validate_command
+        ),
+        "decision-board-shadow-ledger-prepare": (
+            _run_decision_board_shadow_ledger_prepare_command
         ),
         "decision-board-journal-status": (_run_decision_board_journal_status_command),
         "decision-board-journal-reconcile": (
