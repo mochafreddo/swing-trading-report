@@ -21,6 +21,12 @@ from sab.decision_board.shadow_ledger_prepare import (
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "config" / "decision-board-shadow-gate.proposed.json"
 CASE_PLAN_SCHEMA = ROOT / "schemas" / "decision-board-shadow-case-plan.v0.schema.json"
+_PYTHON_314T_PANDAS_GIL_WARNING = (
+    ": RuntimeWarning: The global interpreter lock (GIL) has been enabled to "
+    "load module 'pandas._libs.pandas_parser', which has not declared that it "
+    "can run safely without the GIL. To override this behavior and keep the GIL "
+    "disabled (at your own risk), run with PYTHON_GIL=0 or -Xgil=0."
+)
 
 
 def _case_plan(*, two_lanes: bool = False) -> dict[str, object]:
@@ -96,6 +102,17 @@ def _run_prepare(
     )
 
 
+def _without_known_python_runtime_warning(stderr: str) -> str:
+    return "".join(
+        line
+        for line in stderr.splitlines(keepends=True)
+        if not (
+            line.rstrip("\r\n").startswith("<frozen importlib._bootstrap>:")
+            and line.rstrip("\r\n").endswith(_PYTHON_314T_PANDAS_GIL_WARNING)
+        )
+    )
+
+
 def _assert_sanitized_failure(
     completed: subprocess.CompletedProcess[str],
     *,
@@ -103,13 +120,29 @@ def _assert_sanitized_failure(
 ) -> None:
     assert completed.returncode == 2
     assert completed.stdout == ""
-    assert json.loads(completed.stderr) == {
+    sanitized_stderr = _without_known_python_runtime_warning(completed.stderr)
+    assert json.loads(sanitized_stderr) == {
         "exit_code": 2,
         "issue_code": "LEDGER_PREPARATION_INVALID",
         "status": "FAILED",
     }
     assert str(output_dir.parent) not in completed.stderr
     assert not output_dir.exists()
+
+
+def test_cli_stderr_allows_only_python_314t_pandas_gil_warning() -> None:
+    warning = (
+        "<frozen importlib._bootstrap>:491: RuntimeWarning: The global interpreter "
+        "lock (GIL) has been enabled to load module 'pandas._libs.pandas_parser', "
+        "which has not declared that it can run safely without the GIL. To override "
+        "this behavior and keep the GIL disabled (at your own risk), run with "
+        "PYTHON_GIL=0 or -Xgil=0.\n"
+    )
+
+    assert _without_known_python_runtime_warning(warning) == ""
+    assert _without_known_python_runtime_warning("unexpected failure\n") == (
+        "unexpected failure\n"
+    )
 
 
 def test_local_cli_prepares_canonical_ledgers_without_approval_or_live_access(
@@ -124,7 +157,7 @@ def test_local_cli_prepares_canonical_ledgers_without_approval_or_live_access(
     completed = _run_prepare(case_plan, output_dir)
 
     assert completed.returncode == 0
-    assert completed.stderr == ""
+    assert _without_known_python_runtime_warning(completed.stderr) == ""
     public = json.loads(completed.stdout)
     assert public == {
         "approval_signature_created": False,
@@ -416,7 +449,7 @@ def test_local_cli_refuses_to_overwrite_existing_output_directory(
 
     assert completed.returncode == 2
     assert completed.stdout == ""
-    assert json.loads(completed.stderr) == {
+    assert json.loads(_without_known_python_runtime_warning(completed.stderr)) == {
         "exit_code": 2,
         "issue_code": "LEDGER_PREPARATION_INVALID",
         "status": "FAILED",
