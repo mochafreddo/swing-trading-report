@@ -224,12 +224,12 @@ class SupabaseSealedRequestSourceV0:
             storage_key,
             max_bytes=_MAX_SNAPSHOT_BYTES,
         )
-        snapshot = _decode_snapshot(payload)
+        snapshot = decode_sealed_request_snapshot_v0(payload)
         if decision_payload_hash(snapshot) != config.sealed_input_hash:
             raise ValueError("Decision Board snapshot hash does not match its identity")
         if snapshot["run_kind"] != config.run_kind.value:
             raise ValueError("Decision Board snapshot lane does not match its identity")
-        items = _parse_items(snapshot["items"], run_kind=config.run_kind.value)
+        items = parse_sealed_request_snapshot_items_v0(snapshot)
         selection = (
             None
             if config.run_kind.value == "ENTRY"
@@ -313,6 +313,27 @@ def _decode_snapshot(payload: object) -> dict[str, object]:
     return decoded
 
 
+def decode_sealed_request_snapshot_v0(
+    payload: object,
+) -> dict[str, object]:
+    """Decode one exact public sealed request snapshot."""
+
+    return _decode_snapshot(payload)
+
+
+def parse_sealed_request_snapshot_items_v0(
+    snapshot: dict[str, object],
+) -> tuple[object, ...]:
+    """Issue compiler item values from one decoded public snapshot."""
+
+    if type(snapshot) is not dict or set(snapshot) != _SNAPSHOT_FIELDS:
+        raise ValueError("Decision Board snapshot shape is invalid")
+    run_kind = snapshot["run_kind"]
+    if type(run_kind) is not str:
+        raise ValueError("Decision Board snapshot lane is invalid")
+    return _parse_items(snapshot["items"], run_kind=run_kind)
+
+
 def _parse_items(value: object, *, run_kind: str) -> tuple[object, ...]:
     if type(value) is not list:
         raise ValueError("Decision Board snapshot items are invalid")
@@ -367,4 +388,6 @@ __all__ = [
     "SupabaseDecisionInputConfigV0",
     "SupabaseSealedRequestSourceV0",
     "SupabaseSnapshotDownloaderV0",
+    "decode_sealed_request_snapshot_v0",
+    "parse_sealed_request_snapshot_items_v0",
 ]

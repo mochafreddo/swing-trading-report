@@ -1075,6 +1075,76 @@ def test_supabase_sealed_request_source_reissues_only_hashed_public_snapshot() -
     }
 
 
+def test_supabase_sealed_request_source_reissues_holding_snapshot_via_shared_parser() -> (
+    None
+):
+    snapshot = {
+        "schema": "sab.decision_board.sealed_request.v0",
+        "run_kind": "HOLDING",
+        "metadata": {
+            "policy_version": "decision-policy.v0",
+            "registry_version": "ticker-directory.v0",
+            "researcher_version": "live-research.v0",
+            "verifier_version": "openai-claim.v0",
+        },
+        "items": [
+            {
+                "item_id": "holding-AAPL.NAS",
+                "instrument": _instrument().to_public_dict(),
+                "item_state": "APPROVED",
+                "identity_state": "APPROVED",
+                "hard_exit_state": "NONE",
+                "broker_state": "CURRENT",
+                "candle_state": "CURRENT",
+                "rule_state": "CURRENT",
+                "research_priority": 10,
+                "research_order": "000010-AAPL.NAS",
+            }
+        ],
+    }
+    sealed_hash = decision_payload_hash(snapshot)
+    calls: list[tuple[str, int]] = []
+
+    class Downloader:
+        def download(self, storage_key: str, *, max_bytes: int) -> bytes:
+            calls.append((storage_key, max_bytes))
+            return canonical_json_bytes(snapshot)
+
+    request = cast(
+        DecisionRunRequestV0,
+        SupabaseSealedRequestSourceV0(downloader=Downloader()).load_sealed_request(
+            {
+                "run_kind": "HOLDING",
+                "run_id": "holding-live-snapshot",
+                "idempotency_key": "sha256:" + "d" * 64,
+                "created_at": "2026-08-16T12:00:00Z",
+                "sealed_input_hash": sealed_hash,
+                "upload_mode": "DISABLED",
+            }
+        ),
+    )
+
+    assert calls == [
+        (
+            f"decision-board-inputs/v0/{sealed_hash.removeprefix('sha256:')}.json",
+            1_048_576,
+        )
+    ]
+    assert request.run_kind is RunKindV0.HOLDING
+    assert request.sealed_input_hash == sealed_hash
+    assert request.selection is not None
+    assert request.selection.selected_item_ids == ("holding-AAPL.NAS",)
+    assert request.items[0].item_id == "holding-AAPL.NAS"
+    assert set(request.metadata) == {
+        "eligible_count",
+        "policy_version",
+        "registry_version",
+        "researcher_version",
+        "selected_count",
+        "verifier_version",
+    }
+
+
 def test_approved_gate_and_sealed_snapshot_hash_form_a_unidirectional_binding() -> None:
     snapshot = {
         "schema": "sab.decision_board.sealed_request.v0",
