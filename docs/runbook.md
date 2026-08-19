@@ -58,7 +58,8 @@ research/claim-verifier adapter가 연결돼 있으며, 이 경로도 기존 wor
 schema/compiler/runner/UI 테스트나 explicit adapter의 recorded fixture가 green이어도 live 비교나
 schedule 승인을 뜻하지 않습니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질
 표본으로 세지 않습니다. 실제 측정은 recorded/live 비교와 별도 manifest 승인 뒤
-[shadow evaluation 절차](decision-board-shadow-evaluation.md)의 frozen manifest와 최소 20 US
+[shadow evaluation 절차](decision-board-shadow-evaluation.md)의 local-only
+`decision-board-shadow-case-prepare`, frozen manifest와 최소 20 US
 거래 session을 사용합니다.
 
 ```bash

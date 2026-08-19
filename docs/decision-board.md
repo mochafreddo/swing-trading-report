@@ -155,6 +155,9 @@ manifest와 private input/expected-action ledger 경로 및 `--gate-manifest-sha
 model digest, ledger hash/count, sealed input membership을 provider 호출 전에 재검증합니다.
 `sealed_input_hash`에 해당하는 public snapshot이 먼저 Supabase Storage의
 `decision-board-inputs/v0/<64hex>.json`에 immutable canonical JSON으로 존재해야 합니다.
+snapshot과 그 hash에 결속된 private case-plan은 승인 전 local-only
+`decision-board-shadow-case-prepare`로 만들며, 이 명령 자체는 upload/network/provider/
+signature/schedule을 수행하지 않습니다. upload는 별도 명시 승인을 받은 뒤에만 진행합니다.
 snapshot exact field set은 `schema`, `run_kind`, `metadata`, `items`이며 ENTRY/HOLDING item은
 compiler의 public deterministic enum과 `InstrumentRefV0`만 포함합니다. quantity, entry price,
 P/L, notes, tags, account field나 unknown field는 전체 snapshot을 거부합니다. snapshot은

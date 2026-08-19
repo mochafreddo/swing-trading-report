@@ -1,12 +1,28 @@
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
+
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _read(relative_path: str) -> str:
     return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+
+
+def _documented_case_spec() -> object:
+    evaluation = _read("docs/decision-board-shadow-evaluation.md")
+    for raw_block in re.findall(r"```json\n(.*?)\n```", evaluation, flags=re.DOTALL):
+        value = json.loads(raw_block)
+        if (
+            type(value) is dict
+            and value.get("schema_version") == "decision-board-shadow-case-spec.v0"
+        ):
+            return value
+    raise AssertionError("documented shadow case spec not found")
 
 
 def test_decision_board_reference_is_linked_and_states_current_boundary() -> None:
@@ -55,10 +71,19 @@ def test_shadow_evaluation_freezes_the_approved_graduation_contract() -> None:
     assert "approval_signature_sha256" in evaluation
     assert "case_id/run_kind/sealed_input_hash/item_id" in evaluation
     assert "decision-board-shadow-ledger-prepare" in evaluation
+    assert "decision-board-shadow-case-prepare" in evaluation
+    assert "decision-board-shadow-case-spec.v0.schema.json" in evaluation
+    assert "uploaded=false" in evaluation
     assert "chmod 600" in evaluation
     assert "approval_signature_created=false" in evaluation
     assert "주문 실행은 그 이후에도 사용자 수동" in evaluation
     assert "<64-lowercase-hex>" not in evaluation
+
+
+def test_documented_shadow_case_spec_matches_the_public_schema() -> None:
+    schema = json.loads(_read("schemas/decision-board-shadow-case-spec.v0.schema.json"))
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(_documented_case_spec())
 
 
 def test_decision_board_docs_do_not_claim_default_production_activation() -> None:

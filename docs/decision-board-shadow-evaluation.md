@@ -59,18 +59,40 @@ input ledger 각 case는 `case_id/run_kind/sealed_input_hash/item_id`, expected-
 case는 같은 `case_id`와 lane-compatible non-empty `expected_action_set`을 가지며 case ID 순서도
 canonical이어야 합니다.
 
-두 ledger는 raw broker snapshot을 직접 받지 않는 local-only preparation command로 만듭니다.
-입력 case-plan은 [case-plan schema](../schemas/decision-board-shadow-case-plan.v0.schema.json)의
-redacted identity와 사용자가 결과를 보기 전에 정한 expected-action set만 포함해야 합니다.
-private 입력 파일은 현재 사용자만 읽을 수 있도록 `chmod 600`으로 제한하고 absolute path로
-전달합니다. output directory도 아직 존재하지 않는 absolute private 경로를 지정하며, 그 parent는
-현재 사용자가 소유하고 group/world permission이 없는 기존 directory여야 합니다.
+sealed public snapshot과 private case-plan은 먼저 local-only preparation command로 만듭니다.
+입력 case-spec은
+[case-spec schema](../schemas/decision-board-shadow-case-spec.v0.schema.json)의 exact public
+ENTRY/HOLDING snapshot과, 사용자가 결과를 보기 전에 각 item에 정한 lane-compatible
+expected-action set을 함께 담습니다. 하나의 case-spec은 ENTRY와 HOLDING lane을 각각 최소 한
+snapshot씩 포함해야 합니다. 모든 snapshot item은 정확히 한 case에 대응해야 하며 계좌
+번호, 수량, 단가, 손익, 메모, tag 같은 unknown/private field는 거부됩니다. private 입력 파일은
+현재 사용자만 읽을 수 있도록 `chmod 600`으로 제한하고 absolute path로 전달합니다. output
+directory도 아직 존재하지 않는 absolute private 경로를 지정하며, 그 parent는 현재 사용자가
+소유하고 group/world permission이 없는 기존 directory여야 합니다.
 
 ```bash
-chmod 600 /private/path/decision-board-shadow-case-plan.json
+chmod 600 /private/path/decision-board-shadow-case-spec.json
+just decision-board-shadow-case-prepare \
+  --manifest "$PWD/config/decision-board-shadow-gate.proposed.json" \
+  --case-spec /private/path/decision-board-shadow-case-spec.json \
+  --output-dir /private/path/decision-board-shadow-cases-20260824
+```
+
+명령은 `snapshots/<sha256>.json`과 `decision-board-shadow-case-plan.json`을 canonical
+JSON/mode `0600`으로 만들고 basename, SHA-256, snapshot/case count만 출력합니다. 출력의
+`uploaded=false`, `approval_signature_created=false`, `network_access=false`,
+`scheduled=false`를 확인합니다. 이 명령은 Supabase upload, credential, provider, signature,
+launchd를 호출하지 않습니다. 생성된 snapshot의 storage key는 나중에 별도 승인을 받은 upload
+단계에서만 `decision-board-inputs/v0/<sha256>.json`으로 사용합니다.
+
+그 다음 생성된 case-plan에서 두 ledger를 만듭니다. case-plan은
+[case-plan schema](../schemas/decision-board-shadow-case-plan.v0.schema.json)의 redacted identity와
+expected-action set만 포함합니다.
+
+```bash
 just decision-board-shadow-ledger-prepare \
   --manifest "$PWD/config/decision-board-shadow-gate.proposed.json" \
-  --case-plan /private/path/decision-board-shadow-case-plan.json \
+  --case-plan /private/path/decision-board-shadow-cases-20260824/decision-board-shadow-case-plan.json \
   --output-dir /private/path/decision-board-shadow-ledgers-20260824
 ```
 
@@ -80,7 +102,86 @@ group/world-readable case-plan을 거부합니다. 출력의 `approval_signature
 `network_access=false`, `scheduled=false`를 확인합니다. 이 단계는 manifest를 승인하거나
 signature를 만들지 않고 credential, provider, Supabase, launchd를 호출하지 않습니다.
 
-case-plan 예시는 private 값 대신 redacted identity만 보여 줍니다.
+case-spec의 최소 two-lane 예시는 private 값 대신 public identity만 보여 줍니다.
+
+```json
+{
+  "schema_version": "decision-board-shadow-case-spec.v0",
+  "gate_version": "us-swing-shadow-v1-20260824",
+  "snapshots": [
+    {
+      "snapshot": {
+        "schema": "sab.decision_board.sealed_request.v0",
+        "run_kind": "ENTRY",
+        "metadata": { "policy_version": "decision-policy.v0" },
+        "items": [
+          {
+            "item_id": "entry-AAPL.NAS",
+            "instrument": {
+              "market": "US",
+              "canonical_ticker": "AAPL.NAS",
+              "exchange": "NASDAQ",
+              "company_name": "Apple Inc.",
+              "identity_source": "ticker-directory",
+              "identity_version": "approved-registry-v0"
+            },
+            "item_state": "APPROVED",
+            "identity_state": "APPROVED",
+            "signal_state": "READY_ENTER",
+            "mandate_state": "CURRENT",
+            "price_state": "CURRENT",
+            "exposure_state": "PASS"
+          }
+        ]
+      },
+      "cases": [
+        {
+          "case_id": "case-entry-aapl",
+          "item_id": "entry-AAPL.NAS",
+          "expected_action_set": ["BUY", "REVIEW"]
+        }
+      ]
+    },
+    {
+      "snapshot": {
+        "schema": "sab.decision_board.sealed_request.v0",
+        "run_kind": "HOLDING",
+        "metadata": { "policy_version": "decision-policy.v0" },
+        "items": [
+          {
+            "item_id": "holding-MSFT.NAS",
+            "instrument": {
+              "market": "US",
+              "canonical_ticker": "MSFT.NAS",
+              "exchange": "NASDAQ",
+              "company_name": "Microsoft Corp.",
+              "identity_source": "ticker-directory",
+              "identity_version": "approved-registry-v0"
+            },
+            "item_state": "APPROVED",
+            "identity_state": "APPROVED",
+            "hard_exit_state": "NONE",
+            "broker_state": "CURRENT",
+            "candle_state": "CURRENT",
+            "rule_state": "CURRENT",
+            "research_priority": 10,
+            "research_order": "000010-MSFT.NAS"
+          }
+        ]
+      },
+      "cases": [
+        {
+          "case_id": "case-holding-msft",
+          "item_id": "holding-MSFT.NAS",
+          "expected_action_set": ["HOLD", "SELL"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+생성된 case-plan은 다음 형태입니다.
 
 ```json
 {
