@@ -5,15 +5,12 @@
 
 ### Features
 
-* **decision-board:** private shadow ledger를 로컬에서 준비한다 ([078d2ac](https://github.com/mochafreddo/swing-trading-report/commit/078d2ace4bbe40a6d45f5ba060fb1abef0a5fb97))
 * **decision-board:** private shadow ledger를 로컬에서 준비한다 ([5c44b5b](https://github.com/mochafreddo/swing-trading-report/commit/5c44b5be13a88dcd469e875f666a46dcc77c79eb))
-* **holdings:** 검토된 Toss 티커 매핑 fallback을 추가한다 ([85f97c0](https://github.com/mochafreddo/swing-trading-report/commit/85f97c09916d62df8e8494b1c72a1ea41ac85c89))
 * **holdings:** 검토된 Toss 티커 매핑을 연결한다 ([519e92e](https://github.com/mochafreddo/swing-trading-report/commit/519e92e596110ef319791fef126049f787376574))
 
 
 ### Bug Fixes
 
-* **decision-board:** live provider read timeout을 조정한다 ([45323b6](https://github.com/mochafreddo/swing-trading-report/commit/45323b64751310e16dc9e23f378453d47fcce2af))
 * **decision-board:** provider read timeout을 조정한다 ([e404a83](https://github.com/mochafreddo/swing-trading-report/commit/e404a83fc3a4f2df229b58f3cfff465bf557f847))
 * **decision-board:** 실패한 partial ledger를 정리한다 ([d80daf5](https://github.com/mochafreddo/swing-trading-report/commit/d80daf5ae5f7303dca43f925b8b72b363f3c6ea0))
 
