@@ -5,7 +5,6 @@
 
 ### Features
 
-* **decision-board:** shadow 평가 case 입력을 준비한다 ([c42c3ee](https://github.com/mochafreddo/swing-trading-report/commit/c42c3ee2270c40879bb65b6019e7d676470e172f))
 * **decision-board:** shadow 평가 case 입력을 준비한다 ([a839121](https://github.com/mochafreddo/swing-trading-report/commit/a839121773d42c6a118f960eb6b8d4af1c0da013))
 
 
