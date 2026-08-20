@@ -84,6 +84,9 @@ decision-board-claim-live-compare *args:
 decision-board-shadow-gate-validate *args:
   uv run python -m sab decision-board-shadow-gate-validate --manifest config/decision-board-shadow-gate.proposed.json {{args}}
 
+decision-board-shadow-case-prepare *args:
+  uv run python -m sab decision-board-shadow-case-prepare {{args}}
+
 decision-board-shadow-ledger-prepare *args:
   uv run python -m sab decision-board-shadow-ledger-prepare {{args}}
 

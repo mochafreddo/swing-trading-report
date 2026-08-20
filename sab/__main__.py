@@ -40,6 +40,11 @@ from .decision_board.run_journal_cli import (
 )
 from .decision_board.run_journal_public import read_public_journal_status_v0
 from .decision_board.runner import RunKindV0
+from .decision_board.shadow_case_prepare import (
+    ShadowCasePreparationError,
+    load_shadow_evaluation_case_spec_v0,
+    prepare_shadow_evaluation_cases_v0,
+)
 from .decision_board.shadow_gate import (
     ShadowGateManifestError,
     load_shadow_gate_manifest_v0,
@@ -344,6 +349,14 @@ def _build_parser() -> argparse.ArgumentParser:
     shadow_ledger_prepare.add_argument("--manifest", required=True)
     shadow_ledger_prepare.add_argument("--case-plan", required=True)
     shadow_ledger_prepare.add_argument("--output-dir", required=True)
+
+    shadow_case_prepare = sub.add_parser(
+        "decision-board-shadow-case-prepare",
+        help="Prepare canonical local shadow snapshots without live access",
+    )
+    shadow_case_prepare.add_argument("--manifest", required=True)
+    shadow_case_prepare.add_argument("--case-spec", required=True)
+    shadow_case_prepare.add_argument("--output-dir", required=True)
 
     journal_status = sub.add_parser(
         "decision-board-journal-status",
@@ -856,6 +869,32 @@ def _run_decision_board_shadow_ledger_prepare_command(ns: argparse.Namespace) ->
     return 0
 
 
+def _run_decision_board_shadow_case_prepare_command(ns: argparse.Namespace) -> int:
+    try:
+        manifest = load_shadow_gate_manifest_v0(ns.manifest)
+        case_spec = load_shadow_evaluation_case_spec_v0(ns.case_spec)
+        result = prepare_shadow_evaluation_cases_v0(
+            manifest=manifest,
+            case_spec=case_spec,
+            output_dir=ns.output_dir,
+        )
+    except ShadowGateManifestError, ShadowCasePreparationError, TypeError:
+        print(
+            json.dumps(
+                {
+                    "status": "FAILED",
+                    "exit_code": 2,
+                    "issue_code": "CASE_PREPARATION_INVALID",
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    print(json.dumps(result.to_public_dict(), sort_keys=True))
+    return 0
+
+
 def _journal_cli_failure() -> int:
     print(
         json.dumps(
@@ -1300,6 +1339,9 @@ def _dispatch_command(
         ),
         "decision-board-shadow-ledger-prepare": (
             _run_decision_board_shadow_ledger_prepare_command
+        ),
+        "decision-board-shadow-case-prepare": (
+            _run_decision_board_shadow_case_prepare_command
         ),
         "decision-board-journal-status": (_run_decision_board_journal_status_command),
         "decision-board-journal-reconcile": (
