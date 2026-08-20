@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.39.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.38.0...v1.39.0) (2026-08-20)
+
+
+### Features
+
+* **decision-board:** shadow 평가 case 입력을 준비한다 ([c42c3ee](https://github.com/mochafreddo/swing-trading-report/commit/c42c3ee2270c40879bb65b6019e7d676470e172f))
+* **decision-board:** shadow 평가 case 입력을 준비한다 ([a839121](https://github.com/mochafreddo/swing-trading-report/commit/a839121773d42c6a118f960eb6b8d4af1c0da013))
+
+
+### Documentation
+
+* **decision-board:** shadow case 준비 절차를 문서화한다 ([9d018f0](https://github.com/mochafreddo/swing-trading-report/commit/9d018f0fd481a8a02cdb4bd47fa4afa6b272bd2c))
+
 ## [1.38.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.37.0...v1.38.0) (2026-08-18)
 
 
