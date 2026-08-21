@@ -92,315 +92,67 @@ flowchart LR
 
 ### 3.1 BrokerSnapshotV0 경계
 
-`BrokerSnapshotV0` 배포 순서는 `migration -> Web producer -> Python consumer`로
-고정합니다. migration 직후의 `initial unsealed` 상태에서는 read RPC가 행을
-반환하지 않으며 소비자는 이를 정상 snapshot으로 추정하지 않고 차단합니다.
-Web producer는 numeric DTO에서 digest를 재구성하지 않습니다. DB mutation wrapper가
-lock 아래 영속 행에서 계산해 반환한 exact post-state digest만 seal CAS guard로
-전달합니다. unchanged는 preview의 DB pre-state token을 capture RPC가 다시 검증합니다.
-RPC와 private helper는 `service-role-only`이자 `SECURITY INVOKER`로
-유지하며 브라우저에는 비밀 키를 노출하지 않습니다. 이 경계는 `advice-only`로
-주문 생성·수정·취소 기능을 포함하지 않습니다.
+`BrokerSnapshotV0` 배포 순서는 `migration -> Web producer -> Python consumer`로 고정합니다. migration 직후의 `initial unsealed` 상태에서는 read RPC가 행을 반환하지 않으며 소비자는 이를 정상 snapshot으로 추정하지 않고 차단합니다. Web producer는 numeric DTO에서 digest를 재구성하지 않습니다. DB mutation wrapper가 lock 아래 영속 행에서 계산해 반환한 exact post-state digest만 seal CAS guard로 전달합니다. unchanged는 preview의 DB pre-state token을 capture RPC가 다시 검증합니다. RPC와 private helper는 `service-role-only`이자 `SECURITY INVOKER`로 유지하며 브라우저에는 비밀 키를 노출하지 않습니다. 이 경계는 `advice-only`로 주문 생성·수정·취소 기능을 포함하지 않습니다.
 
-Python consumer에서는 `validate_broker_snapshot_v0`가 유일한 공개 생성 경계입니다.
-`BrokerSnapshotV0` 직접 생성은 차단하고, holding과 marker를 각각
-`BrokerHoldingV0`, `BrokerSnapshotMarkerV0`로 바꾼 deep-immutable snapshot만
-반환합니다. HOLDING gate는 caller-injected `now`로 freshness를 다시 계산하며,
-seal status, digest, revision, session date와 canonical field set을 함께 재검증합니다.
-따라서 최초 검증 뒤의 시간 경과, 위조된 private factory 결과, 중첩 payload 변경도
-승인으로 전파되지 않습니다.
-시간 경계는 DB가 생성한 seal 의미와 맞춰 `sealed_at <= now < fresh_until`을
-강제하며 별도 clock-skew 허용값은 두지 않습니다.
+Python consumer에서는 `validate_broker_snapshot_v0`가 유일한 공개 생성 경계입니다. `BrokerSnapshotV0` 직접 생성은 차단하고, holding과 marker를 각각 `BrokerHoldingV0`, `BrokerSnapshotMarkerV0`로 바꾼 deep-immutable snapshot만 반환합니다. HOLDING gate는 caller-injected `now`로 freshness를 다시 계산하며, seal status, digest, revision, session date와 canonical field set을 함께 재검증합니다. 따라서 최초 검증 뒤의 시간 경과, 위조된 private factory 결과, 중첩 payload 변경도 승인으로 전파되지 않습니다. 시간 경계는 DB가 생성한 seal 의미와 맞춰 `sealed_at <= now < fresh_until`을 강제하며 별도 clock-skew 허용값은 두지 않습니다.
 
 ### 3.2 InstrumentRefV0와 SWING/ENTRY identity gate
 
-Decision Board shadow slice의 identity 전파 경로는
-`BrokerSnapshotV0 -> approve_swing_snapshot_v0 -> ApprovedSwingRefV0 -> public research`
-입니다. `VersionedInstrumentRegistryV0`는 호출자가 제공한 공개 레코드와 immutable
-source/version만 보유하며, canonical ticker와 명시적으로 등록된 alias만 해석합니다.
-거래소 family는 중앙 normalizer에서 `NASDAQ`/`NYSE`/`AMEX`로 정규화하고,
-registry의 `InstrumentRefV0.exchange`를 권위 값으로 사용합니다. ticker suffix는
-충돌을 찾는 hint일 뿐 종목 identity나 거래소를 추측하는 근거가 아닙니다. duplicate
-canonical ticker, ambiguous alias, source/version 누락은 registry 생성 단계에서
-실패하고, 미해결 또는 입력/registry 충돌은 개별 행의 typed REVIEW로 닫힙니다.
+Decision Board shadow slice의 identity 전파 경로는 `BrokerSnapshotV0 -> approve_swing_snapshot_v0 -> ApprovedSwingRefV0 -> public research` 입니다. `VersionedInstrumentRegistryV0`는 호출자가 제공한 공개 레코드와 immutable source/version만 보유하며, canonical ticker와 명시적으로 등록된 alias만 해석합니다. 거래소 family는 중앙 normalizer에서 `NASDAQ`/`NYSE`/`AMEX`로 정규화하고, registry의 `InstrumentRefV0.exchange`를 권위 값으로 사용합니다. ticker suffix는 충돌을 찾는 hint일 뿐 종목 identity나 거래소를 추측하는 근거가 아닙니다. duplicate canonical ticker, ambiguous alias, source/version 누락은 registry 생성 단계에서 실패하고, 미해결 또는 입력/registry 충돌은 개별 행의 typed REVIEW로 닫힙니다.
 
-market, canonical ticker, alias, exchange는 ASCII-only 문법을 사용합니다.
-company name, identity source/version은 NFC 공개 텍스트로 정규화한 뒤
-control/format, surrogate, Unicode noncharacter를 거부합니다. 승인과 REVIEW는
-frozen sum type이며,
-각 variant에는 자기 상태의 payload만 있어 반대 상태 payload나 임의 status를 만들 수
-없습니다.
+market, canonical ticker, alias, exchange는 ASCII-only 문법을 사용합니다. company name, identity source/version은 NFC 공개 텍스트로 정규화한 뒤 control/format, surrogate, Unicode noncharacter를 거부합니다. 승인과 REVIEW는 frozen sum type이며, 각 variant에는 자기 상태의 payload만 있어 반대 상태 payload나 임의 status를 만들 수 없습니다.
 
-registry resolver 결과와 approved constructor는 exact concrete `InstrumentRefV0`를
-다시 검증해 trusted frozen copy를 만들며 subclass/duck-typed 객체를 거부합니다.
-research projection은 polymorphic method를 호출하지 않고 shared schema의 여섯 public
-field를 직접 allowlist합니다.
+registry resolver 결과와 approved constructor는 exact concrete `InstrumentRefV0`를 다시 검증해 trusted frozen copy를 만들며 subclass/duck-typed 객체를 거부합니다. research projection은 polymorphic method를 호출하지 않고 shared schema의 여섯 public field를 직접 allowlist합니다.
 
-HOLDING gate는 검증된 `BrokerSnapshotV0`만 producer로 받고, 정확히 정규화된
-`SWING`이면서 active/confirmed인 행만 승인합니다. 각 행은 독립적으로 평가되어 한
-행의 REVIEW가 다른 승인 행을 막지 않습니다. `ApprovedSwingRefV0`, issue, research
-projection에는 `InstrumentRefV0` 외에 quantity, entry price, P/L, notes, tags,
-account ID, raw private holding payload를 포함하지 않습니다. ENTRY gate는 별도
-public-only mapping을 받아 unknown/private field를 즉시 REVIEW 처리합니다.
+HOLDING gate는 검증된 `BrokerSnapshotV0`만 producer로 받고, 정확히 정규화된 `SWING`이면서 active/confirmed인 행만 승인합니다. 각 행은 독립적으로 평가되어 한 행의 REVIEW가 다른 승인 행을 막지 않습니다. `ApprovedSwingRefV0`, issue, research projection에는 `InstrumentRefV0` 외에 quantity, entry price, P/L, notes, tags, account ID, raw private holding payload를 포함하지 않습니다. ENTRY gate는 별도 public-only mapping을 받아 unknown/private field를 즉시 REVIEW 처리합니다.
 
-배포 순서는 BrokerSnapshotV0 consumer 확인, versioned registry adapter 주입,
-HOLDING/ENTRY shadow gate 활성화, research/compiler consumer 연결 순입니다. V0 gate는
-네트워크, Toss, 주문 endpoint를 갖지 않으며 registry adapter와 후속 consumer는 이
-순서 밖의 별도 작업입니다. 롤백 시에는 shadow consumer 연결만 제거하고 기존
-BrokerSnapshot producer와 schema를 유지합니다. registry가 없거나 오래되었을 때
-ticker-only fallback을 켜는 롤백은 허용하지 않으며, REVIEW 상태를 유지합니다.
+배포 순서는 BrokerSnapshotV0 consumer 확인, versioned registry adapter 주입, HOLDING/ENTRY shadow gate 활성화, research/compiler consumer 연결 순입니다. V0 gate는 네트워크, Toss, 주문 endpoint를 갖지 않으며 registry adapter와 후속 consumer는 이 순서 밖의 별도 작업입니다. 롤백 시에는 shadow consumer 연결만 제거하고 기존 BrokerSnapshot producer와 schema를 유지합니다. registry가 없거나 오래되었을 때 ticker-only fallback을 켜는 롤백은 허용하지 않으며, REVIEW 상태를 유지합니다.
 
 ### 3.3 EvidenceResearcherV0 bounded research boundary
 
-`sab/research/`는 Decision Board V0의 독립된 shadow research owner입니다. 입력은
-exact concrete `InstrumentRefV0` 최대 5개, allowlisted public question enum,
-public freshness/source policy뿐입니다. 각 종목은 injectable `SearchProviderV0`를
-정확히 한 번 호출하며 provider 동시성은 2입니다. provider response는 exact schema,
-종목 binding, typed purpose(`PRIMARY`/`OPPOSING`/`ACTION_CHANGING`)를 검증하고 종목당
-최대 3개 source만 허용합니다. account ID, quantity, entry price, P/L, notes, tags,
-strategy, Toss/Supabase secret이나 arbitrary caller metadata를 입력 또는 provider
-request에 포함하지 않습니다.
+`sab/research/`는 Decision Board V0의 독립된 shadow research owner입니다. 입력은 exact concrete `InstrumentRefV0` 최대 5개, allowlisted public question enum, public freshness/source policy뿐입니다. 각 종목은 injectable `SearchProviderV0`를 정확히 한 번 호출하며 provider 동시성은 2입니다. provider response는 exact schema, 종목 binding, typed purpose(`PRIMARY`/`OPPOSING`/`ACTION_CHANGING`)를 검증하고 종목당 최대 3개 source만 허용합니다. account ID, quantity, entry price, P/L, notes, tags, strategy, Toss/Supabase secret이나 arbitrary caller metadata를 입력 또는 provider request에 포함하지 않습니다.
 
-입력 생성과 invocation 시작은 source policy를 field-by-field 재검증한 별도 copy로
-고정합니다. preflight와 각 verify 호출에도 서로 다른 child copy만 전달하며, artifact
-검증은 adapter가 접근하지 못한 invocation baseline을 사용합니다. source candidate도
-factory-owned exact value이며 canonical URL, purpose, timestamp와 전체 `InstrumentRefV0`
-binding을 함께 보유합니다. provider parsing 뒤 baseline copy를 만들고 verifier에는 다시
-별도 copy를 전달하므로 `object.__setattr__`을 포함한 adapter-side alias mutation은 결과로
-전파되지 않습니다.
+입력 생성과 invocation 시작은 source policy를 field-by-field 재검증한 별도 copy로 고정합니다. preflight와 각 verify 호출에도 서로 다른 child copy만 전달하며, artifact 검증은 adapter가 접근하지 못한 invocation baseline을 사용합니다. source candidate도 factory-owned exact value이며 canonical URL, purpose, timestamp와 전체 `InstrumentRefV0` binding을 함께 보유합니다. provider parsing 뒤 baseline copy를 만들고 verifier에는 다시 별도 copy를 전달하므로 `object.__setattr__`을 포함한 adapter-side alias mutation은 결과로 전파되지 않습니다.
 
-article verification은 source priority의 round-robin 순서로 스케줄하고 invocation 전체
-fetch attempt를 8회로 제한합니다. canonical URL은 전역 dedupe하되 동일 source의 종목별
-attribution은 유지합니다. URL은 HTTP(S) standard port와 qualified public hostname만
-허용하고 credentials/fragment/local·private·reserved address를 거부합니다. DNS answer
-하나라도 public IP가 아니면 전체 answer를 거부하며 모든 same-origin redirect에서 URL과
-DNS를 다시 검증합니다. invocation의 `ResearchSourcePolicyV0`는 preflight와 모든 verify
-호출에 전달하며, adapter가 설정한 redirect/byte/text/operation-timeout hard maximum보다
-느슨하면 provider 호출 전에 차단합니다. response byte, redirect, content type/encoding,
-normalized text 길이를 제한하고, 성공 artifact에는 exact normalized article text와
-`sha256:` content hash만 기록합니다. verifier 반환 artifact는 exact type, source binding,
-safe final URL, normalized text, length, hash를 orchestrator에서 다시 검증해 trusted copy로
-만듭니다. artifact 생성 경로는 canonical source/URL/text/hash와 계산된 integrity seal을
-직접 기록하고, 재검증 경로는 저장된 seal을 예외 없이 다시 계산해 비교합니다. 다만
-same-process Python의 underscore, frozen dataclass, seal 값은 보안 경계나 권위 증표가
-아닙니다. 실제 권위는 verifier가 받기 전에 별도로 복사한 invocation-owned source
-baseline과의 전체 field 비교입니다. `SUCCEEDED` item과 최종 `COMPLETED` container의
-public constructor를 모두 닫고, private final factory가 invocation policy, 입력 종목 순서,
-artifact별 source baseline으로 nested variant의 exact type/status/issues/instrument/artifact를
-다시 검증해 deep copy한 값만 반환합니다. 따라서 `object.__new__`으로 만든 raw object는
-authoritative completed output으로 승격되지 않습니다. 향후 외부 consumer 경계를 추가할
-때도 독립 baseline 없이 type이나 private field만 신뢰해서는 안 됩니다. claim span과
-entailment 판단은 이 계층의 책임이 아닙니다.
+article verification은 source priority의 round-robin 순서로 스케줄하고 invocation 전체 fetch attempt를 8회로 제한합니다. canonical URL은 전역 dedupe하되 동일 source의 종목별 attribution은 유지합니다. URL은 HTTP(S) standard port와 qualified public hostname만 허용하고 credentials/fragment/local·private·reserved address를 거부합니다. DNS answer 하나라도 public IP가 아니면 전체 answer를 거부하며 모든 same-origin redirect에서 URL과 DNS를 다시 검증합니다. invocation의 `ResearchSourcePolicyV0`는 preflight와 모든 verify 호출에 전달하며, adapter가 설정한 redirect/byte/text/operation-timeout hard maximum보다 느슨하면 provider 호출 전에 차단합니다. response byte, redirect, content type/encoding, normalized text 길이를 제한하고, 성공 artifact에는 exact normalized article text와 `sha256:` content hash만 기록합니다. verifier 반환 artifact는 exact type, source binding, safe final URL, normalized text, length, hash를 orchestrator에서 다시 검증해 trusted copy로 만듭니다. artifact 생성 경로는 canonical source/URL/text/hash와 계산된 integrity seal을 직접 기록하고, 재검증 경로는 저장된 seal을 예외 없이 다시 계산해 비교합니다. 다만 same-process Python의 underscore, frozen dataclass, seal 값은 보안 경계나 권위 증표가 아닙니다. 실제 권위는 verifier가 받기 전에 별도로 복사한 invocation-owned source baseline과의 전체 field 비교입니다. `SUCCEEDED` item과 최종 `COMPLETED` container의 public constructor를 모두 닫고, private final factory가 invocation policy, 입력 종목 순서, artifact별 source baseline으로 nested variant의 exact type/status/issues/instrument/artifact를 다시 검증해 deep copy한 값만 반환합니다. 따라서 `object.__new__`으로 만든 raw object는 authoritative completed output으로 승격되지 않습니다. 향후 외부 consumer 경계를 추가할 때도 독립 baseline 없이 type이나 private field만 신뢰해서는 안 됩니다. claim span과 entailment 판단은 이 계층의 책임이 아닙니다.
 
-invocation 시작에서 injected monotonic clock을 한 번 읽어 기본 45.0초 `Deadline`을
-만들고 search, retry/backoff, DNS, redirect, fetch가 같은 객체의 감소하는 timeout을
-사용합니다. clock 역행은 typed `FAILED`, shared verifier preflight 실패는 provider 호출
-전 `BLOCKED`, provider timeout/malformed/empty는 peer와 격리된 item variant입니다.
-예상된 provider/verifier 예외와 각 result variant의 issue code는 고정 allowlist로
-제한하며, 예상하지 않은 예외나 잘못된 boundary code는 public detail을 노출하지 않는
-typed `FAILED`로 닫힙니다.
-typed operational exception을 분류하기 전에도 deadline을 다시 확인해 만료는
-`TIMED_OUT`, clock rollback은 `FAILED/DEADLINE_INVARIANT`가 우선합니다. `TIMED_OUT`
-item은 supplemental issue가 있더라도 `ARTICLE_TIMEOUT` 또는 `PROVIDER_TIMEOUT`을 최소
-하나 포함해야 합니다.
-deadline에 남은 시간이 없으면 queued/in-flight async work를 cancel하고 drain합니다.
-article verification 중 deadline이 만료되면 이미 완료된 peer와 같은 종목의 기존
-artifact는 보존하고, 현재 및 이후 schedule attribution에만 `ARTICLE_TIMEOUT`을 붙여
-새 verify를 중단합니다. 따라서 artifact가 있는 item은 timeout issue를 포함한
-`SUCCEEDED`, artifact가 없는 영향 item은 `TIMED_OUT`으로 finalization됩니다.
-result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
+invocation 시작에서 injected monotonic clock을 한 번 읽어 기본 45.0초 `Deadline`을 만들고 search, retry/backoff, DNS, redirect, fetch가 같은 객체의 감소하는 timeout을 사용합니다. clock 역행은 typed `FAILED`, shared verifier preflight 실패는 provider 호출 전 `BLOCKED`, provider timeout/malformed/empty는 peer와 격리된 item variant입니다. 예상된 provider/verifier 예외와 각 result variant의 issue code는 고정 allowlist로 제한하며, 예상하지 않은 예외나 잘못된 boundary code는 public detail을 노출하지 않는 typed `FAILED`로 닫힙니다. typed operational exception을 분류하기 전에도 deadline을 다시 확인해 만료는 `TIMED_OUT`, clock rollback은 `FAILED/DEADLINE_INVARIANT`가 우선합니다. `TIMED_OUT` item은 supplemental issue가 있더라도 `ARTICLE_TIMEOUT` 또는 `PROVIDER_TIMEOUT`을 최소 하나 포함해야 합니다. deadline에 남은 시간이 없으면 queued/in-flight async work를 cancel하고 drain합니다. article verification 중 deadline이 만료되면 이미 완료된 peer와 같은 종목의 기존 artifact는 보존하고, 현재 및 이후 schedule attribution에만 `ARTICLE_TIMEOUT`을 붙여 새 verify를 중단합니다. 따라서 artifact가 있는 item은 timeout issue를 포함한 `SUCCEEDED`, artifact가 없는 영향 item은 `TIMED_OUT`으로 finalization됩니다. result status는 frozen sum-type variant에서 init 불가능한 literal로 고정합니다.
 
-이 owner에는 production provider 선택과 OpenAI/Toss/order call이 없습니다. public
-research, claim validation, compiler, runner consumer 경계는 injectable seam으로 구현됐습니다.
-production component bundle은 sealed request loader, preparer, public-only item enricher,
-optional uploader를 기존 CLI executor에 명시적으로 조립합니다. 외부 request source는 local
-report path를 볼 수 없고, 외부 evidence source는 공개 `run_kind/item_id/InstrumentRefV0`만
-받습니다. bundle은 이 세 wrapper의 exact type과 내부 source capability를 먼저 검증하므로 raw
-collaborator가 전체 CLI config나 compiler item을 직접 받는 우회 경로가 없습니다.
-deterministic ENTRY/HOLDING facts는 composition 내부에서 보존됩니다.
+이 owner에는 production provider 선택과 OpenAI/Toss/order call이 없습니다. public research, claim validation, compiler, runner consumer 경계는 injectable seam으로 구현됐습니다. production component bundle은 sealed request loader, preparer, public-only item enricher, optional uploader를 기존 CLI executor에 명시적으로 조립합니다. 외부 request source는 local report path를 볼 수 없고, 외부 evidence source는 공개 `run_kind/item_id/InstrumentRefV0`만 받습니다. bundle은 이 세 wrapper의 exact type과 내부 source capability를 먼저 검증하므로 raw collaborator가 전체 CLI config나 compiler item을 직접 받는 우회 경로가 없습니다. deterministic ENTRY/HOLDING facts는 composition 내부에서 보존됩니다.
 
-기본 `decision-board` CLI executor에는 component bundle이 연결되지 않아 계속
-`CONFIG_UNAVAILABLE`로 닫힙니다. explicit `decision-board-shadow-live` composition root만
-Supabase content-addressed public input snapshot, Finnhub/Polygon/Benzinga search,
-public-DNS/pinned-address article fetch, OpenAI Responses claim transport와 optional report
-uploader를 조립합니다. 이 composition은 credentialed adapter를 만들기 전에 exact
-`approved_by=user` approval contract, manifest hash, slot/runtime digest, 실제 private ledger
-hash/count와 sealed input/item membership을 결속합니다. `BatchDecisionEvidenceBuilderV0`가 기존 `EvidenceResearcherV0`의
-invocation-wide deadline, concurrency, URL dedupe와 article cap을 보존한 채 claim validation까지
-같은 deadline을 전달하고, blocking DNS/HTTP/Responses 작업은 deadline에 포함된 killable child
-process에서 실행합니다. child environment는 비우고 provider loader에는 해당 provider
-credential 하나만 전달합니다. 결과는 exact public item identity mapping으로 runner에 제공하고,
-provider별 attempts/failures/timeouts만 public report metadata에 남깁니다.
-snapshot은 hash-derived Storage key로만 읽고 compiler public deterministic fact 외 unknown/private
-field를 거부합니다. rollout은 recorded/live provider-verifier 비교와 manifest 재승인 뒤에만
-시작하며, 롤백은 이 explicit adapter/consumer 연결만 제거합니다.
+기본 `decision-board` CLI executor에는 component bundle이 연결되지 않아 계속 `CONFIG_UNAVAILABLE`로 닫힙니다. explicit `decision-board-shadow-live` composition root만 Supabase content-addressed public input snapshot, Finnhub/Polygon/Benzinga search, public-DNS/pinned-address article fetch, OpenAI Responses claim transport와 optional report uploader를 조립합니다. 이 composition은 credentialed adapter를 만들기 전에 exact `approved_by=user` approval contract, manifest hash, slot/runtime digest, 실제 private ledger hash/count와 sealed input/item membership을 결속합니다. `BatchDecisionEvidenceBuilderV0`가 기존 `EvidenceResearcherV0`의 invocation-wide deadline, concurrency, URL dedupe와 article cap을 보존한 채 claim validation까지 같은 deadline을 전달하고, blocking DNS/HTTP/Responses 작업은 deadline에 포함된 killable child process에서 실행합니다. child environment는 비우고 provider loader에는 해당 provider credential 하나만 전달합니다. 결과는 exact public item identity mapping으로 runner에 제공하고, provider별 attempts/failures/timeouts만 public report metadata에 남깁니다. snapshot은 hash-derived Storage key로만 읽고 compiler public deterministic fact 외 unknown/private field를 거부합니다. rollout은 recorded/live provider-verifier 비교와 manifest 재승인 뒤에만 시작하며, 롤백은 이 explicit adapter/consumer 연결만 제거합니다.
 
 ### 3.4 ClaimValidationV0 exact-span boundary
 
-claim validation 전파 경로는 `ClaimRequestV0 + T4 ArticleArtifactV0 + T3
-InstrumentRefV0 -> ClaimVerifierV0 -> ClaimValidationV0 -> action eligibility gate`입니다.
-요청은 한 종목의 한 공개 claim과 `action_changing` boolean만 허용합니다. factory가 만든
-request는 생성 시점 public field baseline과 대조하며, 호출 시작에는 request, source,
-source policy, article을 각각 재검증해 독립된 copy를 보관합니다. verifier에는 claim
-ID/text, 여섯 instrument field, 로컬 article hash/text만 전달합니다. source URL,
-publisher, publication time, hash, instrument는 verifier 응답 필드가 아니며, 최종
-validation에서는 재검증된 article/source baseline으로만 채웁니다.
+claim validation 전파 경로는 `ClaimRequestV0 + T4 ArticleArtifactV0 + T3 InstrumentRefV0 -> ClaimVerifierV0 -> ClaimValidationV0 -> action eligibility gate`입니다. 요청은 한 종목의 한 공개 claim과 `action_changing` boolean만 허용합니다. factory가 만든 request는 생성 시점 public field baseline과 대조하며, 호출 시작에는 request, source, source policy, article을 각각 재검증해 독립된 copy를 보관합니다. verifier에는 claim ID/text, 여섯 instrument field, 로컬 article hash/text만 전달합니다. source URL, publisher, publication time, hash, instrument는 verifier 응답 필드가 아니며, 최종 validation에서는 재검증된 article/source baseline으로만 채웁니다.
 
-verifier 응답은 `entailment`, `supporting_span`, `supporting_location`,
-`verifier_version` exact allowlist만 받습니다. location은 Python Unicode code-point
-index의 `TEXT_OFFSETS` 반개구간 `[start, end)`이고 `0 <= start < end <= len(text)`를
-만족해야 합니다. span은 normalized article text의 그 slice와 exact match해야 하므로
-반복 문자열도 반환 offset으로만 식별하며 byte offset, trim, case folding, Unicode
-재정규화, approximate search는 허용하지 않습니다. `SUPPORTED`, `CONTRADICTED`,
-`UNCLEAR` 모두 exact nonempty span을 요구합니다.
+verifier 응답은 `entailment`, `supporting_span`, `supporting_location`, `verifier_version` exact allowlist만 받습니다. location은 Python Unicode code-point index의 `TEXT_OFFSETS` 반개구간 `[start, end)`이고 `0 <= start < end <= len(text)`를 만족해야 합니다. span은 normalized article text의 그 slice와 exact match해야 하므로 반복 문자열도 반환 offset으로만 식별하며 byte offset, trim, case folding, Unicode 재정규화, approximate search는 허용하지 않습니다. `SUPPORTED`, `CONTRADICTED`, `UNCLEAR` 모두 exact nonempty span을 요구합니다.
 
-verifier 호출에는 T4에서 시작된 같은 `Deadline` 객체를 전달하고 operation timeout은
-남은 시간과 source policy limit 중 작은 값으로 줄입니다. operational verifier timeout은
-claim 단위 `TIMED_OUT` review outcome이 되고, malformed output과 예상하지 못한 verifier
-또는 내부 오류는 `FAILED`가 됩니다. 오류를 분류하기 직전에 deadline을 다시 확인하므로
-전체 만료와 monotonic clock rollback이 각각 `DEADLINE_EXPIRED`와
-`DEADLINE_INVARIANT`로 우선합니다. 반환 뒤에도 invocation input과 article hash를 원래
-baseline에 재검증하며 alias mutation은 fail closed입니다.
+verifier 호출에는 T4에서 시작된 같은 `Deadline` 객체를 전달하고 operation timeout은 남은 시간과 source policy limit 중 작은 값으로 줄입니다. operational verifier timeout은 claim 단위 `TIMED_OUT` review outcome이 되고, malformed output과 예상하지 못한 verifier 또는 내부 오류는 `FAILED`가 됩니다. 오류를 분류하기 직전에 deadline을 다시 확인하므로 전체 만료와 monotonic clock rollback이 각각 `DEADLINE_EXPIRED`와 `DEADLINE_INVARIANT`로 우선합니다. 반환 뒤에도 invocation input과 article hash를 원래 baseline에 재검증하며 alias mutation은 fail closed입니다.
 
-claim issuance 시 registry는 exact validation object를 가리키는 weak reference와 함께
-validation canonical bytes/fields, 원래 claim text/action flag/full instrument, T4
-source/article text/hash/seal, source policy, verifier output/version/span/location의 immutable
-tuple/bytes snapshot을 저장합니다. snapshot에는 request/source/article/policy object alias가
-없습니다. 또한 issuance 과정에서 caller와 독립적으로 복사한 validation instrument와
-factory가 생성한 supporting location exact object를 record가 소유합니다. 현재 validation의
-중첩 identity가 이 발급 객체와 다르면 필드값이 같아도 실패합니다. validation이 수거되면
-identity-safe weakref callback이 같은 record와 그 중첩 소유권을 함께 제거합니다.
-process가 바뀌거나 registry에 없는 값은 구조가 같아도 발급된 action authority가 아닙니다.
+claim issuance 시 registry는 exact validation object를 가리키는 weak reference와 함께 validation canonical bytes/fields, 원래 claim text/action flag/full instrument, T4 source/article text/hash/seal, source policy, verifier output/version/span/location의 immutable tuple/bytes snapshot을 저장합니다. snapshot에는 request/source/article/policy object alias가 없습니다. 또한 issuance 과정에서 caller와 독립적으로 복사한 validation instrument와 factory가 생성한 supporting location exact object를 record가 소유합니다. 현재 validation의 중첩 identity가 이 발급 객체와 다르면 필드값이 같아도 실패합니다. validation이 수거되면 identity-safe weakref callback이 같은 record와 그 중첩 소유권을 함께 제거합니다. process가 바뀌거나 registry에 없는 값은 구조가 같아도 발급된 action authority가 아닙니다.
 
-action eligibility는 exact registered identity와 현재 validation serialization을 issuance
-snapshot에 먼저 대조하고, caller가 전달한 request/article/source/policy도 deep-copy한 뒤
-원래 issuance snapshot과 exact equality를 확인합니다. 원래 `action_changing=true`이고 발급
-당시와 현재 entailment가 모두 unchanged `SUPPORTED`일 때만 true입니다. context-only
-claim에 새 action request를 대입하거나 claim text, action flag, source/article, hash,
-span/location, entailment를 일관되게 바꾸거나 instrument/location을 동일 값의 새 객체로
-교체해도 권위가 이동하지 않습니다.
-`CONTRADICTED`, `UNCLEAR`, non-action-changing support는 compiler에 보고할 수 있지만
-BUY/AVOID/HOLD/SELL 변경 권한은 없습니다. claims module 자체는 compiler, runner,
-production model adapter, persistence/UI, Toss/order 기능을 포함하지 않습니다. compiler와
-runner는 이 issuance API를 consumer로 사용하며 production verifier adapter는 여전히 별도
-검증·주입 대상입니다. rollback은 claim adapter/consumer 연결만 제거하고 T3/T4 producer와
-shared schema를 유지합니다.
+action eligibility는 exact registered identity와 현재 validation serialization을 issuance snapshot에 먼저 대조하고, caller가 전달한 request/article/source/policy도 deep-copy한 뒤 원래 issuance snapshot과 exact equality를 확인합니다. 원래 `action_changing=true`이고 발급 당시와 현재 entailment가 모두 unchanged `SUPPORTED`일 때만 true입니다. context-only claim에 새 action request를 대입하거나 claim text, action flag, source/article, hash, span/location, entailment를 일관되게 바꾸거나 instrument/location을 동일 값의 새 객체로 교체해도 권위가 이동하지 않습니다. `CONTRADICTED`, `UNCLEAR`, non-action-changing support는 compiler에 보고할 수 있지만 BUY/AVOID/HOLD/SELL 변경 권한은 없습니다. claims module 자체는 compiler, runner, production model adapter, persistence/UI, Toss/order 기능을 포함하지 않습니다. compiler와 runner는 이 issuance API를 consumer로 사용하며 production verifier adapter는 여전히 별도 검증·주입 대상입니다. rollback은 claim adapter/consumer 연결만 제거하고 T3/T4 producer와 shared schema를 유지합니다.
 
-claims module의 serializer는 registered identity와 unchanged issuance snapshot을 통과한
-값만 fresh Task 1 allowlist dict로 내보냅니다. `validate_claim_validation()`과 JSON Schema는
-일반 dict의 구조 호환성을 확인하는 generic consumer contract일 뿐 issuance나 action
-authority를 부여하지 않습니다. compiler는 generic schema 통과 결과를 action gate 대신
-사용해서는 안 됩니다.
+claims module의 serializer는 registered identity와 unchanged issuance snapshot을 통과한 값만 fresh Task 1 allowlist dict로 내보냅니다. `validate_claim_validation()`과 JSON Schema는 일반 dict의 구조 호환성을 확인하는 generic consumer contract일 뿐 issuance나 action authority를 부여하지 않습니다. compiler는 generic schema 통과 결과를 action gate 대신 사용해서는 안 됩니다.
 
 ### 3.5 DecisionCompilerV0 pure precedence boundary
 
-compiler 전파 경로는 `T3 InstrumentRefV0 + sealed policy facts + T5 issuance inputs ->
-DecisionCompilerV0 -> Task 1 DecisionPayloadV0`입니다. ENTRY와 HOLDING input은 lane prefix와
-canonical ticker가 exact 결속된 conservative ASCII item identity, exact public instrument, finite approval/dependency/
-signal/exposure/hard-exit/research enum, compiler-issued evidence binding만 포함합니다. factory는
-instrument를 trusted copy로 소유하고 process-local weakref registry에 전체 scalar snapshot과
-nested evidence identity를 기록합니다. compile 시 exact type/identity/snapshot을 다시
-검사하므로 post-factory mutation, alias 교체, subclass, `object.__new__` raw allocation은
-authority가 아닙니다. account ID, quantity, entry price, P/L, notes, tags, raw broker row,
-arbitrary metadata나 rationale text는 이 projection에 없습니다.
-모든 compiler-owned `StrEnum` field는 문자열 equality가 아니라 exact concrete enum
-type과 canonical member singleton identity를 함께 확인합니다. 따라서 같은 문자열인 raw
-`str`, `str` subclass, `str.__new__`로 만든 fresh-equal enum, `object.__setattr__` mutation은
-issuance snapshot과 값이 같아 보여도 precedence 입력이 될 수 없습니다.
-`item_id`, `research_order`, `research_priority`도 factory와 매 invocation에서 exact
-`str`/`int`, lane-prefix/canonical-ticker binding, ASCII grammar/range를 같은 validator로
-재검증합니다. 정렬·중복 검사는 이 validated snapshot만 사용하므로 caller가 넣은
-`str`/`int` subclass의 comparison이나 `encode()`를 호출하지 않습니다.
+compiler 전파 경로는 `T3 InstrumentRefV0 + sealed policy facts + T5 issuance inputs -> DecisionCompilerV0 -> Task 1 DecisionPayloadV0`입니다. ENTRY와 HOLDING input은 lane prefix와 canonical ticker가 exact 결속된 conservative ASCII item identity, exact public instrument, finite approval/dependency/ signal/exposure/hard-exit/research enum, compiler-issued evidence binding만 포함합니다. factory는 instrument를 trusted copy로 소유하고 process-local weakref registry에 전체 scalar snapshot과 nested evidence identity를 기록합니다. compile 시 exact type/identity/snapshot을 다시 검사하므로 post-factory mutation, alias 교체, subclass, `object.__new__` raw allocation은 authority가 아닙니다. account ID, quantity, entry price, P/L, notes, tags, raw broker row, arbitrary metadata나 rationale text는 이 projection에 없습니다. 모든 compiler-owned `StrEnum` field는 문자열 equality가 아니라 exact concrete enum type과 canonical member singleton identity를 함께 확인합니다. 따라서 같은 문자열인 raw `str`, `str` subclass, `str.__new__`로 만든 fresh-equal enum, `object.__setattr__` mutation은 issuance snapshot과 값이 같아 보여도 precedence 입력이 될 수 없습니다. `item_id`, `research_order`, `research_priority`도 factory와 매 invocation에서 exact `str`/`int`, lane-prefix/canonical-ticker binding, ASCII grammar/range를 같은 validator로 재검증합니다. 정렬·중복 검사는 이 validated snapshot만 사용하므로 caller가 넣은 `str`/`int` subclass의 comparison이나 `encode()`를 호출하지 않습니다.
 
-ENTRY는 미승인 item/identity를 먼저 REVIEW하고, READY/ENTER가 아닌 확정 non-candidate는
-omit합니다. 필수 deterministic state gap은 REVIEW, 독립 exposure fail은 AVOID입니다.
-research conflict/gap은 evidence veto를 추측하지 않고 REVIEW하며, 나머지 candidate만
-unchanged T5 action gate를 통과한 MATERIAL_ADVERSE로 AVOID하거나 BUY합니다. HOLDING은
-current broker/candle/rule이 뒷받침한 hard stop/confirmed exit SELL을 lattice 최상단에 둡니다.
-그 뒤 identity/deterministic gap, supported material adverse, research gap 순으로 REVIEW하고
-나머지만 HOLD합니다. hard SELL은 evidence timeout/conflict/absence/`NOT_SELECTED_CAP`으로
-낮아지지 않습니다.
+ENTRY는 미승인 item/identity를 먼저 REVIEW하고, READY/ENTER가 아닌 확정 non-candidate는 omit합니다. 필수 deterministic state gap은 REVIEW, 독립 exposure fail은 AVOID입니다. research conflict/gap은 evidence veto를 추측하지 않고 REVIEW하며, 나머지 candidate만 unchanged T5 action gate를 통과한 MATERIAL_ADVERSE로 AVOID하거나 BUY합니다. HOLDING은 current broker/candle/rule이 뒷받침한 hard stop/confirmed exit SELL을 lattice 최상단에 둡니다. 그 뒤 identity/deterministic gap, supported material adverse, research gap 순으로 REVIEW하고 나머지만 HOLD합니다. hard SELL은 evidence timeout/conflict/absence/`NOT_SELECTED_CAP`으로 낮아지지 않습니다.
 
-`select_holding_research_v0`는 caller의 bounded priority/order를 UTF-8 byte ordering으로
-정렬해 0..5개만 선택하고 나머지를 typed `NOT_SELECTED_CAP`으로 표시합니다. 반환 결과는
-factory-owned process-local issuance이며 selection 당시 전체 holding universe의 item ID,
-instrument, approval, hard-exit, broker/candle/rule, priority/order snapshot에 결속됩니다.
-`compile_holding`은 이 exact unchanged selection을 필수로 받고 현재 전체 universe를 같은
-snapshot에 대조하므로 selected 5개 subset, 누락, 중복, 다른 universe는 publish할 수
-없습니다. input permutation은 canonical item identity 정렬 뒤 같은 universe로 인정합니다.
-selected item은 research/evidence outcome만 갱신할 수 있고, unselected item의 effective
-research state는 compiler가 `NOT_SELECTED_CAP`으로 강제합니다. compiler도 item identity와
-full instrument identity 중복을 fail closed하고, item/issue/evidence를 명시적 UTF-8 rule로
-정렬·dedupe합니다. T5 validation dict나 generic
-schema 통과 여부는 action authority가 아니며, 원래 request/article/source/policy와 exact
-issued validation을 `is_action_change_eligible_v0`로 매 invocation 다시 검증한 unchanged
-action-changing `SUPPORTED`만 compiler에서 source/claim을 다시 검증한 뒤
-`claim_id`, `SUPPORTING|OPPOSING` role, HTTPS source URL, publisher, published time,
-`WITHIN_POLICY` freshness, citation label과 issued `SUPPORTED` entailment,
-article content hash, bounded exact supporting span/location을 가진 public EvidenceRef가 됩니다.
-public URL은 query를 제거하고 shared research URL canonicalizer를 거친 뒤 userinfo, port,
-fragment, local/internal/LAN/home/IP/punycode host를 허용하지 않는 2048-byte 이하 canonical
-ASCII public-DNS HTTPS URL로 다시 검증합니다. path는 `/`, RFC3986 unreserved/sub-delims,
-colon/at과 정확한 `%HH` escape만 허용해 Python/JSON Schema/Zod가 같은 corpus를 따릅니다.
+`select_holding_research_v0`는 caller의 bounded priority/order를 UTF-8 byte ordering으로 정렬해 0..5개만 선택하고 나머지를 typed `NOT_SELECTED_CAP`으로 표시합니다. 반환 결과는 factory-owned process-local issuance이며 selection 당시 전체 holding universe의 item ID, instrument, approval, hard-exit, broker/candle/rule, priority/order snapshot에 결속됩니다. `compile_holding`은 이 exact unchanged selection을 필수로 받고 현재 전체 universe를 같은 snapshot에 대조하므로 selected 5개 subset, 누락, 중복, 다른 universe는 publish할 수 없습니다. input permutation은 canonical item identity 정렬 뒤 같은 universe로 인정합니다. selected item은 research/evidence outcome만 갱신할 수 있고, unselected item의 effective research state는 compiler가 `NOT_SELECTED_CAP`으로 강제합니다. compiler도 item identity와 full instrument identity 중복을 fail closed하고, item/issue/evidence를 명시적 UTF-8 rule로 정렬·dedupe합니다. T5 validation dict나 generic schema 통과 여부는 action authority가 아니며, 원래 request/article/source/policy와 exact issued validation을 `is_action_change_eligible_v0`로 매 invocation 다시 검증한 unchanged action-changing `SUPPORTED`만 compiler에서 source/claim을 다시 검증한 뒤 `claim_id`, `SUPPORTING|OPPOSING` role, HTTPS source URL, publisher, published time, `WITHIN_POLICY` freshness, citation label과 issued `SUPPORTED` entailment, article content hash, bounded exact supporting span/location을 가진 public EvidenceRef가 됩니다. public URL은 query를 제거하고 shared research URL canonicalizer를 거친 뒤 userinfo, port, fragment, local/internal/LAN/home/IP/punycode host를 허용하지 않는 2048-byte 이하 canonical ASCII public-DNS HTTPS URL로 다시 검증합니다. path는 `/`, RFC3986 unreserved/sub-delims, colon/at과 정확한 `%HH` escape만 허용해 Python/JSON Schema/Zod가 같은 corpus를 따릅니다.
 
-완성 payload는 Task 1 `validate_decision_payload()`를 통과한 뒤 반환하고 canonical bytes/hash는
-기존 `canonical_json_bytes()`와 `decision_payload_hash()`만 사용합니다. local-only
-`DecisionBoardRunnerV0`는 exact trigger request -> shared preparation -> selected item enrichment ->
-pure compile -> validated envelope -> T7 local atomic write -> optional upload 순서를 소유합니다.
-shared prerequisite만 `BLOCKED`, item operational failure는 `REVIEW`, authority/internal/persistence
-invariant failure는 `FAILED`로 분류합니다. local write는 upload보다 먼저이며 optional upload
-실패는 degraded terminal result, required upload 실패는 retained local artifact가 있는 `FAILED`입니다.
-production provider/model adapter, RunJournal/launchd, Web detail UI, Toss/order capability는 이 owner에
-없습니다. rollback은 `sab decision-board`와 scheduler shadow consumer를 제거하고 T1-T7 producer,
-schema, local artifact를 유지합니다.
+완성 payload는 Task 1 `validate_decision_payload()`를 통과한 뒤 반환하고 canonical bytes/hash는 기존 `canonical_json_bytes()`와 `decision_payload_hash()`만 사용합니다. local-only `DecisionBoardRunnerV0`는 exact trigger request -> shared preparation -> selected item enrichment -> pure compile -> validated envelope -> T7 local atomic write -> optional upload 순서를 소유합니다. shared prerequisite만 `BLOCKED`, item operational failure는 `REVIEW`, authority/internal/persistence invariant failure는 `FAILED`로 분류합니다. local write는 upload보다 먼저이며 optional upload 실패는 degraded terminal result, required upload 실패는 retained local artifact가 있는 `FAILED`입니다. production provider/model adapter, RunJournal/launchd, Web detail UI, Toss/order capability는 이 owner에 없습니다. rollback은 `sab decision-board`와 scheduler shadow consumer를 제거하고 T1-T7 producer, schema, local artifact를 유지합니다.
 
-T9 local operations owner는 `sab/decision_board/run_journal.py`의 local-only
-`RunJournalV0`와 `scripts/launchd/sab-decision-board-shadow-wrapper.sh`만 추가로 소유합니다.
-명시적으로 주입된 `run_kind + expected_at(UTC) + run_id`가 journal identity이고, cross-process
-filesystem-root anchor coordination과 절대 경로 전체 component/root/lock inode 재검증 아래
-canonical JSON compare-and-set과 atomic replace로 `STARTED` 및 terminal observation을 기록합니다.
-전역 anchor는 runner 밖의 짧은 local journal critical section만 직렬화하며, directory fsync와
-마지막 full-path 검증 이후에만 durable commit으로 인정합니다. 그 전까지 pinned-root rollback
-권한을 유지합니다. 중간 ancestor는 search-only FD로 순회하고 anchor/final root만 read FD로
-열며, path-like 입력을 exact `str`로 먼저 resolve한 뒤 모든 blockable signal을 잠시 mask하고
-그 안에서 단일 Python thread local CLI 경계를 재검사해 정확한 반환 FD만 소유합니다. mask
-복원은 이전 값을 재적용·검증하며, missing component의 mkdir은 callback-free fresh admission을
-다시 획득합니다. stable anchor/root/journal flock이 모두 잡힌 뒤에는
-별도의 transaction-wide admission이 temp create/write/link/replace/fsync부터 모든 postcondition,
-rollback, temp cleanup까지 하나의 mask로 감쌉니다. durable commit 또는 완전한 rollback 뒤 mask를
-복원하고, unlock/FD cleanup만 transaction 밖에서 committed-cleanup 계약을 유지합니다.
-이는 일반 multi-thread process 전체 보장이 아닙니다. FD 목록 scan과 닫힌 번호 재시도는 하지
-않고 close 예외는 non-mutating FD 상태 조회로 완료 여부만 판정하며, commit 뒤 cleanup이
-불확실하면 safe identity/status의 typed error로 중단합니다. claim 시의
-grace/stale 정책도 record에 고정합니다. stdlib-only `run_journal_public.py` reader는 같은
-descriptor-relative root/record identity를 사용해 early scan cap, pre-sized record read와
-1-byte lookahead, fatal UTF-8/duplicate-key/canonical validation을 수행하고 bounded sanitized
-status envelope만 반환합니다. Web은 shell 없는 fixed-argv subprocess로 이 T9 seam을 짧은
-timeout/stdout bound 아래 호출한 뒤 Zod로 다시 검증합니다.
-Web Docker image는 repository-pinned Python 3.14.5 Alpine runtime을 digest로 고정해 helper
-syntax/`--help`를 build 중 검사합니다. root build context는 Web build inputs, 단일 synthetic QA
-fixture와 `run_journal_public.py`만 허용하는 deny-by-default `.dockerignore`를 사용합니다.
-launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설치나 활성화가 자동으로 일어나지
-않습니다. 이 owner는 기존 GitHub Actions, Supabase report upload, 외부 알림, Toss/order 경계를
-호출하거나 변경하지 않습니다.
+T9 local operations owner는 `sab/decision_board/run_journal.py`의 local-only `RunJournalV0`와 `scripts/launchd/sab-decision-board-shadow-wrapper.sh`만 추가로 소유합니다. 명시적으로 주입된 `run_kind + expected_at(UTC) + run_id`가 journal identity이고, cross-process filesystem-root anchor coordination과 절대 경로 전체 component/root/lock inode 재검증 아래 canonical JSON compare-and-set과 atomic replace로 `STARTED` 및 terminal observation을 기록합니다. 전역 anchor는 runner 밖의 짧은 local journal critical section만 직렬화하며, directory fsync와 마지막 full-path 검증 이후에만 durable commit으로 인정합니다. 그 전까지 pinned-root rollback 권한을 유지합니다. 중간 ancestor는 search-only FD로 순회하고 anchor/final root만 read FD로 열며, path-like 입력을 exact `str`로 먼저 resolve한 뒤 모든 blockable signal을 잠시 mask하고 그 안에서 단일 Python thread local CLI 경계를 재검사해 정확한 반환 FD만 소유합니다. mask 복원은 이전 값을 재적용·검증하며, missing component의 mkdir은 callback-free fresh admission을 다시 획득합니다. stable anchor/root/journal flock이 모두 잡힌 뒤에는 별도의 transaction-wide admission이 temp create/write/link/replace/fsync부터 모든 postcondition, rollback, temp cleanup까지 하나의 mask로 감쌉니다. durable commit 또는 완전한 rollback 뒤 mask를 복원하고, unlock/FD cleanup만 transaction 밖에서 committed-cleanup 계약을 유지합니다. 이는 일반 multi-thread process 전체 보장이 아닙니다. FD 목록 scan과 닫힌 번호 재시도는 하지 않고 close 예외는 non-mutating FD 상태 조회로 완료 여부만 판정하며, commit 뒤 cleanup이 불확실하면 safe identity/status의 typed error로 중단합니다. claim 시의 grace/stale 정책도 record에 고정합니다. stdlib-only `run_journal_public.py` reader는 같은 descriptor-relative root/record identity를 사용해 early scan cap, pre-sized record read와 1-byte lookahead, fatal UTF-8/duplicate-key/canonical validation을 수행하고 bounded sanitized status envelope만 반환합니다. Web은 shell 없는 fixed-argv subprocess로 이 T9 seam을 짧은 timeout/stdout bound 아래 호출한 뒤 Zod로 다시 검증합니다. Web Docker image는 repository-pinned Python 3.14.5 Alpine runtime을 digest로 고정해 helper syntax/`--help`를 build 중 검사합니다. root build context는 Web build inputs, 단일 synthetic QA fixture와 `run_journal_public.py`만 허용하는 deny-by-default `.dockerignore`를 사용합니다. launchd 파일은 `Disabled=true`이고 schedule이 없는 템플릿이라 설치나 활성화가 자동으로 일어나지 않습니다. 이 owner는 기존 GitHub Actions, Supabase report upload, 외부 알림, Toss/order 경계를 호출하거나 변경하지 않습니다.
 
 ### 3.6 현재 통합 상태와 shadow 졸업 경계
 
-T1–T12는 schema, broker snapshot, public identity, bounded research, exact-span claims,
-compiler, report storage, runner, RunJournal, Reports UI, privacy/no-order/workflow isolation을
-구현하고 fixture/recorded 경계에서 검증합니다. production composition은 sealed request의
-CLI identity를 검증하고 runner collaborator를 결속하지만, approved request loader와 provider,
-credential, schedule이 연결됐다는 뜻은 아닙니다. 기본 CLI executor, schedule 없는 disabled
-launchd template, GitHub Actions production sidecar 금지가 이 차이를 fail closed로 유지합니다.
+T1–T12는 schema, broker snapshot, public identity, bounded research, exact-span claims, compiler, report storage, runner, RunJournal, Reports UI, privacy/no-order/workflow isolation을 구현하고 fixture/recorded 경계에서 검증합니다. production composition은 sealed request의 CLI identity를 검증하고 runner collaborator를 결속하지만, approved request loader와 provider, credential, schedule이 연결됐다는 뜻은 아닙니다. 기본 CLI executor, schedule 없는 disabled launchd template, GitHub Actions production sidecar 금지가 이 차이를 fail closed로 유지합니다.
 
-실제 shadow 운영을 시작하려면 production preparation/research/claim-verifier adapter를
-먼저 별도 승인·연결하고, 사전 승인 gate manifest 아래 최소 20 US 거래 session의 ENTRY와
-HOLDING slot을 기록해야 합니다. 모든 diff는
-`EXPECTED_POLICY_CHANGE|INPUT_GAP|SOURCE_GAP|BUG|UNEXPLAINED` 중 하나와 input/source diff를
-가져야 하며 `UNEXPLAINED`, privacy leak, order/notification access, replay mismatch,
-eligible holding 누락은 0이어야 합니다. 통과는 다음 cutover 검토 자격일 뿐 launchd,
-알림, workflow 또는 credential scope를 자동 변경하지 않습니다. 상세 산식은
-[Decision Board shadow evaluation](decision-board-shadow-evaluation.md)을 기준으로 합니다.
+실제 shadow 운영을 시작하려면 production preparation/research/claim-verifier adapter를 먼저 별도 승인·연결하고, 사전 승인 gate manifest 아래 최소 20 US 거래 session의 ENTRY와 HOLDING slot을 기록해야 합니다. 모든 diff는 `EXPECTED_POLICY_CHANGE|INPUT_GAP|SOURCE_GAP|BUG|UNEXPLAINED` 중 하나와 input/source diff를 가져야 하며 `UNEXPLAINED`, privacy leak, order/notification access, replay mismatch, eligible holding 누락은 0이어야 합니다. 통과는 다음 cutover 검토 자격일 뿐 launchd, 알림, workflow 또는 credential scope를 자동 변경하지 않습니다. 상세 산식은 [Decision Board shadow evaluation](decision-board-shadow-evaluation.md)을 기준으로 합니다.
 
 ## 4. 핵심 플로우
 
@@ -529,8 +281,7 @@ eligible holding 누락은 0이어야 합니다. 통과는 다음 cutover 검토
 
 1. `/metrics`는 `report_index`에서 `buy`, `sell`, `entry` 최근 30개 row를 타입별로 각각 조회합니다.
 2. 집계는 Storage 원본을 다시 읽지 않고 `report_index.summary`만 사용합니다.
-3. `buy.summary`는 후보 수 외에 `data_coverage_ratio`, `provider_fallback_ratio`, `rs_benchmark_unavailable_ratio`를 함께 기록합니다.
-   각 ratio는 요청 티커 수를 분모로 쓰며, 분모가 0이면 `null`입니다.
+3. `buy.summary`는 후보 수 외에 `data_coverage_ratio`, `provider_fallback_ratio`, `rs_benchmark_unavailable_ratio`를 함께 기록합니다. 각 ratio는 요청 티커 수를 분모로 쓰며, 분모가 0이면 `null`입니다.
 4. `sell.summary`는 `data_coverage_ratio`, `provider_fallback_ratio`를 함께 기록합니다.
 5. `entry.summary`는 기존 `missing_entry_price_ratio`, `system_issue_count`를 그대로 사용합니다.
 6. 오래된 리포트처럼 새 summary 키가 없는 경우 UI는 이를 `0`이 아니라 `N/A`로 표시합니다.

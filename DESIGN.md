@@ -2,40 +2,31 @@
 
 상태: Accepted (V1 implementation)  
 Scope: Authenticated local app-console UI for `swing-trading-report`  
-Source design: local gstack artifact
-`~/.gstack/projects/mochafreddo-swing-trading-report/mochafreddo-main-design-20260707-232702.md`
-(provenance only; not required to consume this repo document)
+Source design: local gstack artifact `~/.gstack/projects/mochafreddo-swing-trading-report/mochafreddo-main-design-20260707-232702.md` (provenance only; not required to consume this repo document)
 
 ## 문서 상태
 
 ### 현재 제공
 
-- Evidence Ledger V1 app-console UI, interaction, hierarchy, state, and
-  responsive rules are accepted as the current design source of truth.
-- The static Reports proof documents the first implementation target before
-  React/CSS changes land in `web/src/**`.
+- Evidence Ledger V1 app-console UI, interaction, hierarchy, state, and responsive rules are accepted as the current design source of truth.
+- The static Reports proof documents the first implementation target before React/CSS changes land in `web/src/**`.
 
 ### 실험
 
 - No separate experimental design-system tree is active.
-- Future visual variants should be promoted here only after they preserve the
-  Evidence Ledger task order and state contracts.
+- Future visual variants should be promoted here only after they preserve the Evidence Ledger task order and state contracts.
 
 ### 백로그
 
-- App shell/token retargeting, Reports React implementation, Holdings, Metrics,
-  and Run applications are tracked as phased V1 follow-up work below.
+- App shell/token retargeting, Reports React implementation, Holdings, Metrics, and Run applications are tracked as phased V1 follow-up work below.
 
 ### 폐기 후보
 
-- Dark/glass/hero-style authenticated console treatments are deprecated for V1
-  app-console surfaces and should be removed as implementation phases land.
+- Dark/glass/hero-style authenticated console treatments are deprecated for V1 app-console surfaces and should be removed as implementation phases land.
 
 ## Source Of Truth
 
-This document owns UI, interaction, visual hierarchy, state presentation, and
-responsive behavior for the local web console. It does not own trading strategy,
-report schema, runtime topology, or API behavior.
+This document owns UI, interaction, visual hierarchy, state presentation, and responsive behavior for the local web console. It does not own trading strategy, report schema, runtime topology, or API behavior.
 
 | Concern | Source of truth |
 | --- | --- |
@@ -47,49 +38,30 @@ report schema, runtime topology, or API behavior.
 
 First implementation PR boundary:
 
-- In scope: this document, `docs/README.md`, and
-  `docs/design/reports-evidence-ledger-proof.html`.
-- Out of scope: `web/src/**`, CSS token retargeting, app shell changes, Reports
-  React changes, Holdings/Metrics/Run refactors, new dependencies, and report
-  schema changes.
+- In scope: this document, `docs/README.md`, and `docs/design/reports-evidence-ledger-proof.html`.
+- Out of scope: `web/src/**`, CSS token retargeting, app shell changes, Reports React changes, Holdings/Metrics/Run refactors, new dependencies, and report schema changes.
 
-This document intentionally excludes session coaching notes, gstack review
-reports, implementation metadata, and personal observations from the source
-design conversation.
+This document intentionally excludes session coaching notes, gstack review reports, implementation metadata, and personal observations from the source design conversation.
 
 ## Design Thesis
 
 > A calm evidence ledger for morning trading decisions.
 
-The console does not make the user's trading decision. It makes each judgment
-auditable: what was recommended, what rule or AI layer produced it, whether the
-evidence is fresh, what source coverage is missing, what is blocked, and what the
-next safe action is.
+The console does not make the user's trading decision. It makes each judgment auditable: what was recommended, what rule or AI layer produced it, whether the evidence is fresh, what source coverage is missing, what is blocked, and what the next safe action is.
 
 ## Core Principles
 
-1. **Evidence adjacent to judgment**: confidence, score, recommendation, and
-   status labels are incomplete without nearby basis and freshness.
-2. **Quiet until it matters**: normal data is neutral. `BLOCKED`, `STALE`,
-   weak source coverage, manual review, destructive actions, and quality-gate
-   failures get stronger treatment.
-3. **Rule and AI separation**: deterministic `sab` results and AI Brief
-   interpretation stay visually distinct. AI is an explanation/review layer, not
-   the source of deterministic readiness.
-4. **Ledger density**: prefer tables, compact rows, metadata strips,
-   disclosure, and sticky structure over decorative card grids.
-5. **Freshness is first-class**: report date, `generated_at`, source coverage,
-   Toss sync state, and runtime marker state must not be hidden in footers.
-6. **Risk controls earn friction**: destructive apply/delete, workflow runs, and
-   notification sends require clear confirmation and post-action proof.
-7. **Copy is operational**: text states what happened, what is blocked, what is
-   missing, and what the user can do next. No marketing language inside normal
-   workflows.
+1. **Evidence adjacent to judgment**: confidence, score, recommendation, and status labels are incomplete without nearby basis and freshness.
+2. **Quiet until it matters**: normal data is neutral. `BLOCKED`, `STALE`, weak source coverage, manual review, destructive actions, and quality-gate failures get stronger treatment.
+3. **Rule and AI separation**: deterministic `sab` results and AI Brief interpretation stay visually distinct. AI is an explanation/review layer, not the source of deterministic readiness.
+4. **Ledger density**: prefer tables, compact rows, metadata strips, disclosure, and sticky structure over decorative card grids.
+5. **Freshness is first-class**: report date, `generated_at`, source coverage, Toss sync state, and runtime marker state must not be hidden in footers.
+6. **Risk controls earn friction**: destructive apply/delete, workflow runs, and notification sends require clear confirmation and post-action proof.
+7. **Copy is operational**: text states what happened, what is blocked, what is missing, and what the user can do next. No marketing language inside normal workflows.
 
 ## Visual Direction
 
-V1 is light-first and evidence-first. The desired feel is closer to a
-Linear/Stripe-style operational console than to a neon trading dashboard.
+V1 is light-first and evidence-first. The desired feel is closer to a Linear/Stripe-style operational console than to a neon trading dashboard.
 
 Foundation token target for later implementation:
 
@@ -119,27 +91,19 @@ Foundation token target for later implementation:
 
 Hard rules:
 
-- Use calm surface hierarchy, restrained color, crisp typography, and minimal
-  chrome.
+- Use calm surface hierarchy, restrained color, crisp typography, and minimal chrome.
 - Use cards only when the card is the interaction or a bounded repeated item.
-- Prefer tables, compact rows, sticky headers, disclosure, and status columns
-  over decorative dashboard widgets.
-- Keep raw JSON as an audit/debug escape hatch, not the primary reading
-  experience.
+- Prefer tables, compact rows, sticky headers, disclosure, and status columns over decorative dashboard widgets.
+- Keep raw JSON as an audit/debug escape hatch, not the primary reading experience.
 - Do not communicate status by color alone.
-- Do not use gradient orbs, bokeh, decorative glassmorphism, large centered hero
-  copy, card-inside-card layouts, or purple/blue gradients as the dominant app
-  identity.
+- Do not use gradient orbs, bokeh, decorative glassmorphism, large centered hero copy, card-inside-card layouts, or purple/blue gradients as the dominant app identity.
 
 ## Typography
 
-- Keep `Inter` as the V1 console font because the existing font variable
-  contract already depends on it.
-- Keep `--font-display` for compatibility, but app-console surfaces should alias
-  display treatment toward body typography during V1.
+- Keep `Inter` as the V1 console font because the existing font variable contract already depends on it.
+- Keep `--font-display` for compatibility, but app-console surfaces should alias display treatment toward body typography during V1.
 - Console page headings target 24-28px desktop and 20-22px mobile.
-- Labels use 12-13px only for short metadata; do not use all-caps for long
-  Korean text.
+- Labels use 12-13px only for short metadata; do not use all-caps for long Korean text.
 - Use tabular numbers for prices, counts, dates, ratios, coverage, and P/L.
 
 ## Token Alignment
@@ -171,8 +135,7 @@ Desktop content:
 
 - Max content width: 1280px.
 - Outer page padding: 24px desktop, 16px tablet/mobile.
-- Common two-column operational layout: 300-340px task rail plus
-  `minmax(0, 1fr)` main workspace with a 16-20px gap.
+- Common two-column operational layout: 300-340px task rail plus `minmax(0, 1fr)` main workspace with a 16-20px gap.
 - Panels are for bounded tools, repeated items, and detail surfaces.
 
 Mobile content:
@@ -186,8 +149,7 @@ Mobile content:
 
 ## Responsive and Accessibility
 
-Responsive behavior must preserve the morning task order: orientation, trust
-state, evidence, blocker, action.
+Responsive behavior must preserve the morning task order: orientation, trust state, evidence, blocker, action.
 
 | Viewport | App shell | Reports | Holdings | Metrics | Run |
 | --- | --- | --- | --- | --- | --- |
@@ -202,17 +164,13 @@ Accessibility rules:
 - Each page has one `h1`; panel headings do not skip levels.
 - Focus indicators remain visible on light surfaces.
 - Disclosure controls expose synchronized `aria-expanded` and `aria-controls`.
-- Loading/result updates use polite live regions when content changes without
-  navigation.
-- Status badges include text labels in the DOM; color and icon are supporting
-  signals only.
-- Muted text must not carry blockers, stale states, weak sources, validation
-  failures, or next actions.
+- Loading/result updates use polite live regions when content changes without navigation.
+- Status badges include text labels in the DOM; color and icon are supporting signals only.
+- Muted text must not carry blockers, stale states, weak sources, validation failures, or next actions.
 
 ## Information Architecture
 
-V1 keeps the existing route set and changes the hierarchy from decorated
-dashboard pages to a morning evidence workspace.
+V1 keeps the existing route set and changes the hierarchy from decorated dashboard pages to a morning evidence workspace.
 
 ```text
 App
@@ -286,13 +244,11 @@ Reports Workspace
 Static proof artifact:
 
 - Canonical file: `docs/design/reports-evidence-ledger-proof.html`.
-- `/private/tmp/reports-evidence-ledger-proof.html` may be used only as a local
-  preview copy.
+- `/private/tmp/reports-evidence-ledger-proof.html` may be used only as a local preview copy.
 - Use synthetic or redacted data only.
 - Do not depend on external fonts, CDNs, scripts, images, or network resources.
 - Include `READY`, `REVIEW`, `STALE`, `WEAK_SOURCE`, and `BLOCKED`.
-- Include field-specific fallback copy for missing rule basis, AI evidence,
-  freshness, and source coverage.
+- Include field-specific fallback copy for missing rule basis, AI evidence, freshness, and source coverage.
 - Review around 1280px desktop and 390px mobile before Reports CSS refactor.
 
 ## Component Anatomy
@@ -324,8 +280,7 @@ Rules:
 
 - A row without basis or freshness is incomplete.
 - AI interpretation never overwrites rule basis.
-- Missing source coverage renders as `Weak sources`, `Stale`, or `Unavailable`,
-  not as blank muted text.
+- Missing source coverage renders as `Weak sources`, `Stale`, or `Unavailable`, not as blank muted text.
 - Manual review rows show why review is required before any action.
 
 Display contract by report type:
@@ -344,8 +299,7 @@ This matrix is a display contract, not a new report schema.
 
 ### Status Badge
 
-Badges combine semantic label, tone, shape/border, and optional short reason.
-They never rely on color alone.
+Badges combine semantic label, tone, shape/border, and optional short reason. They never rely on color alone.
 
 | Status | Tone | Meaning |
 | --- | --- | --- |
@@ -361,14 +315,10 @@ They never rely on color alone.
 Status derivation rules:
 
 - Prefer backend/report-provided statuses over frontend inference.
-- `STALE` uses explicit artifact freshness when present; otherwise show
-  freshness unknown/stale instead of assuming normal freshness.
-- `WEAK_SOURCE` uses source/eval status when present. If only coverage counts
-  are available, show weak source when covered count is below total count.
-- `BLOCKED` covers validation failure, missing/stale Toss freshness,
-  quality-gate failure, or impossible apply state.
-- `READY` is only shown when the artifact or view model indicates readiness.
-  Do not infer readiness from absence of errors.
+- `STALE` uses explicit artifact freshness when present; otherwise show freshness unknown/stale instead of assuming normal freshness.
+- `WEAK_SOURCE` uses source/eval status when present. If only coverage counts are available, show weak source when covered count is below total count.
+- `BLOCKED` covers validation failure, missing/stale Toss freshness, quality-gate failure, or impossible apply state.
+- `READY` is only shown when the artifact or view model indicates readiness. Do not infer readiness from absence of errors.
 
 ### Buttons, Forms, Tables
 
@@ -376,19 +326,13 @@ Status derivation rules:
 - Secondary button: non-destructive support.
 - Destructive button: red tone plus exact confirmation for broad mutation.
 - Ghost button: row action or low-emphasis navigation.
-- Buttons keep width stable during loading and explain disabled state when the
-  reason is not obvious.
-- Forms use labels above controls, helper text near the field, field-level error
-  copy, and panel-level error summaries for submit failures.
-- Tables are first-class. Use compact headers, tabular right-aligned numeric
-  columns, status/source columns, controlled wrapping, and disclosure for
-  secondary evidence.
+- Buttons keep width stable during loading and explain disabled state when the reason is not obvious.
+- Forms use labels above controls, helper text near the field, field-level error copy, and panel-level error summaries for submit failures.
+- Tables are first-class. Use compact headers, tabular right-aligned numeric columns, status/source columns, controlled wrapping, and disclosure for secondary evidence.
 
 ## Interaction State Coverage
 
-State UI describes what the user sees, not only what the backend is doing.
-Preserve trustworthy prior data, label freshness, and make the next safe action
-obvious.
+State UI describes what the user sees, not only what the backend is doing. Preserve trustworthy prior data, label freshness, and make the next safe action obvious.
 
 | Feature | Loading | Empty | Error | Success | Partial |
 | --- | --- | --- | --- | --- | --- |
@@ -414,32 +358,24 @@ Rules:
 
 ### Reports
 
-- List items show report type, session date, `generated_at`, candidate counts,
-  weak source/stale markers, and notification/runtime state.
+- List items show report type, session date, `generated_at`, candidate counts, weak source/stale markers, and notification/runtime state.
 - Detail header shows report identity, source coverage, and rule/AI boundary.
-- Candidate rows show ticker, judgment, rule basis, AI interpretation,
-  freshness, source coverage, risk caveat, and next action.
+- Candidate rows show ticker, judgment, rule basis, AI interpretation, freshness, source coverage, risk caveat, and next action.
 - Raw JSON remains available from the utility footer, not as a primary action.
-- Before visual refactor, define report view-model helpers that expose
-  `judgment`, `ruleBasis`, `aiInterpretation`, `freshness`, `sourceCoverage`,
-  `riskBlocker`, and `nextAction` with fallback copy.
+- Before visual refactor, define report view-model helpers that expose `judgment`, `ruleBasis`, `aiInterpretation`, `freshness`, `sourceCoverage`, `riskBlocker`, and `nextAction` with fallback copy.
 
 ### Holdings
 
 - Holdings is the guarded state mutation workspace.
-- Toss Sync and YAML import share dry-run, diff, confirm, apply, verify visual
-  states where behavior exists.
+- Toss Sync and YAML import share dry-run, diff, confirm, apply, verify visual states where behavior exists.
 - Delete/inactive states use destructive/status vocabulary consistently.
-- The table prioritizes active holdings, entry pattern, risk override, latest
-  update, and broker sync evidence.
+- The table prioritizes active holdings, entry pattern, risk override, latest update, and broker sync evidence.
 
 ### Metrics
 
 - Metrics are health evidence, not decorative chart cards.
-- Group by named health questions: generation, evidence completeness, delivery,
-  blockers.
-- Each metric needs latest value, average/trend where relevant, sample size, and
-  generated/source note.
+- Group by named health questions: generation, evidence completeness, delivery, blockers.
+- Each metric needs latest value, average/trend where relevant, sample size, and generated/source note.
 
 ### Run
 
@@ -457,8 +393,7 @@ Rules:
 | V1.3 Holdings | Bulk mutation panels and table visual vocabulary | Toss/YAML panels share visual states; destructive actions remain guarded |
 | V1.4 Metrics/Run | Health evidence groups and controlled action states | Mobile metrics grouped; Run shows preflight/result/failure recovery |
 
-V1.2 may require report view-model normalization. Treat that as an
-implementation prerequisite, not a CSS task.
+V1.2 may require report view-model normalization. Treat that as an implementation prerequisite, not a CSS task.
 
 ## Not In Scope
 
@@ -483,9 +418,6 @@ rg -n "Evidence Ledger|Information Architecture|Interaction State Coverage|Respo
 rg -n "READY|REVIEW|STALE|WEAK_SOURCE|BLOCKED|Rule reason missing|AI evidence incomplete|freshness|source coverage" docs/design/reports-evidence-ledger-proof.html
 ```
 
-Also review `docs/design/reports-evidence-ledger-proof.html` around 1280px
-desktop and 390px mobile before V1.2 CSS implementation starts.
+Also review `docs/design/reports-evidence-ledger-proof.html` around 1280px desktop and 390px mobile before V1.2 CSS implementation starts.
 
-Future web implementation PRs use `just ci-web`, component tests for changed
-behavior/state rendering, visual smoke on affected routes, keyboard/focus checks,
-and mobile/desktop layout checks.
+Future web implementation PRs use `just ci-web`, component tests for changed behavior/state rendering, visual smoke on affected routes, keyboard/focus checks, and mobile/desktop layout checks.

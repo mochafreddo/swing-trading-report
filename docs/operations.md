@@ -48,11 +48,7 @@
 | Toss daily auto-sync log | `tail -n 20 logs/launchd/toss-daily-auto-sync.out.log` | when enabled, latest run ends with `status=applied` or `status=unchanged` |
 | Local env files | `git diff --cached --name-only -- .env '.env.*'` and `git ls-files --others --ignored --exclude-standard -- .env '.env.*'` | first command prints nothing; second may list local ignored env files that must stay untracked |
 
-When checking local env files or logs for accidental secrets, use path/line-only
-or redacted scanner output. Do not paste raw `.env`, GitHub token, Supabase key,
-Slack webhook, Telegram token, KIS secret, Toss secret, or OpenAI key values into
-docs, tickets, chat, or CI logs. If scanner output includes a value, replace the
-value with `[REDACTED]` before sharing it.
+When checking local env files or logs for accidental secrets, use path/line-only or redacted scanner output. Do not paste raw `.env`, GitHub token, Supabase key, Slack webhook, Telegram token, KIS secret, Toss secret, or OpenAI key values into docs, tickets, chat, or CI logs. If scanner output includes a value, replace the value with `[REDACTED]` before sharing it.
 
 ## Weekly Checklist
 
@@ -67,12 +63,7 @@ value with `[REDACTED]` before sharing it.
 
 ## Decision Board shadow operations
 
-Decision Board explicit live-shadow composition은 구현되어 있지만 기본 `decision-board`는
-계속 `CONFIG_UNAVAILABLE`로 닫히며 schedule과 승인 manifest는 비활성입니다. live command도
-content-addressed public snapshot과 모든 provider credential이 없으면 시작하지 않습니다.
-이를 운영 성공이나 20-session 표본으로 세지 않습니다. recorded/live 비교와 별도 승인 뒤
-실제 평가를 시작하면 ENTRY/HOLDING planned slot을 모두 RunJournal에 결속하고 missed/stale를
-삭제하지 않습니다.
+Decision Board explicit live-shadow composition은 구현되어 있지만 기본 `decision-board`는 계속 `CONFIG_UNAVAILABLE`로 닫히며 schedule과 승인 manifest는 비활성입니다. live command도 content-addressed public snapshot과 모든 provider credential이 없으면 시작하지 않습니다. 이를 운영 성공이나 20-session 표본으로 세지 않습니다. recorded/live 비교와 별도 승인 뒤 실제 평가를 시작하면 ENTRY/HOLDING planned slot을 모두 RunJournal에 결속하고 missed/stale를 삭제하지 않습니다.
 
 운영자는 매 session 다음을 확인합니다.
 
@@ -82,8 +73,7 @@ content-addressed public snapshot과 모든 provider credential이 없으면 시
 - 기존 후보/action 차이에 reason과 input/source diff가 있는가
 - privacy, order, notification, existing-pipeline 영향이 0인가
 
-최소 20 US 거래 session 뒤의 산식과 수동 졸업 검토는
-[Decision Board shadow evaluation](decision-board-shadow-evaluation.md)을 기준으로 합니다.
+최소 20 US 거래 session 뒤의 산식과 수동 졸업 검토는 [Decision Board shadow evaluation](decision-board-shadow-evaluation.md)을 기준으로 합니다.
 
 ## Logs And Health Checks
 
@@ -110,9 +100,7 @@ Scheduled AI Brief has two cooperating paths:
 - Local primary: macOS `launchd` wrapper runs the Docker scheduler.
 - GitHub fallback/monitor: `.github/workflows/ai-brief.yml` runs monitor, fallback, and cutoff alert roles.
 
-The scheduled 기본값 for source providers is market-specific where possible.
-Prefer a chain when multiple provider credentials are configured; keep the
-single-provider variables as fallback/rollback controls.
+The scheduled 기본값 for source providers is market-specific where possible. Prefer a chain when multiple provider credentials are configured; keep the single-provider variables as fallback/rollback controls.
 
 | Market | Preferred Variable | Current Documented Default Candidate | Fallback Variable | Notes |
 | --- | --- | --- | --- | --- |
@@ -120,12 +108,7 @@ single-provider variables as fallback/rollback controls.
 | US | `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` | `finnhub,benzinga-news,polygon-news` | `AI_BRIEF_SOURCE_PROVIDER_US=finnhub` | Finnhub remains first because live evidence was strongest; Benzinga/Polygon are fallback/diagnostic coverage attempts. |
 | fallback | `AI_BRIEF_SOURCE_PROVIDER_CHAIN` | provider-specific | `AI_BRIEF_SOURCE_PROVIDER` | Used when market-specific value is absent. |
 
-Optional article reading is controlled by `AI_BRIEF_ARTICLE_READER`. Keep the
-default `none` for metadata-only source-backed operation. Set `lightpanda` only
-when the runner image/host has `lightpanda` on `PATH` and the operator wants
-public source URL body checks. The reader does not bypass paywalls, CAPTCHA,
-login, robots/bot blocks, or access controls; blocked/failed reads are preserved
-as `source_issues[]` and may downgrade the brief to `NEEDS_REVIEW_WEAK_NEWS`.
+Optional article reading is controlled by `AI_BRIEF_ARTICLE_READER`. Keep the default `none` for metadata-only source-backed operation. Set `lightpanda` only when the runner image/host has `lightpanda` on `PATH` and the operator wants public source URL body checks. The reader does not bypass paywalls, CAPTCHA, login, robots/bot blocks, or access controls; blocked/failed reads are preserved as `source_issues[]` and may downgrade the brief to `NEEDS_REVIEW_WEAK_NEWS`.
 
 Operational checks:
 
@@ -220,12 +203,7 @@ Reconciliation rules:
 
 ## Local Toss Daily Auto Sync
 
-The Toss auto-sync launchd job calls the local web route
-`/api/holdings/toss-sync/scheduled` before scheduled scan/sell judgment and
-US AI Brief feedback paths. Current KST launch times are Tue-Sat `06:55`,
-Tue-Sat `07:15`, and Mon-Fri `21:05`, `21:40`, `22:05`, `22:40`.
-Keep the web container on the same root `.env` values as the runner for
-`TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED`.
+The Toss auto-sync launchd job calls the local web route `/api/holdings/toss-sync/scheduled` before scheduled scan/sell judgment and US AI Brief feedback paths. Current KST launch times are Tue-Sat `06:55`, Tue-Sat `07:15`, and Mon-Fri `21:05`, `21:40`, `22:05`, `22:40`. Keep the web container on the same root `.env` values as the runner for `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED`.
 
 Operational checks:
 
@@ -234,17 +212,7 @@ tail -n 20 logs/launchd/toss-daily-auto-sync.out.log
 tail -n 20 logs/launchd/toss-daily-auto-sync.err.log
 ```
 
-Only `status=applied` and `status=unchanged` are successful runner outcomes;
-those statuses also write `toss-sync:success:MIXED:<session_date>` for the
-scheduled sell generation freshness gate. `applied` with quarantine evidence
-is fresh enough for generation because preserved holdings become Sell `REVIEW`
-rows through the Supabase-exported holdings snapshot passed into `sab sell`.
-If those rows reappear in a later Toss snapshot, scheduled sync restores
-them to `confirmed` and clears the missing-broker evidence. `disabled`,
-`blocked`, `wipe_guard_blocked`, `marker_failed`, and `error` are fail-closed
-outcomes; inspect the web container logs and the current Holdings page before
-rerunning. Full setup and QA steps live in
-[deployment.md](deployment.md#local-toss-holdings-auto-sync).
+Only `status=applied` and `status=unchanged` are successful runner outcomes; those statuses also write `toss-sync:success:MIXED:<session_date>` for the scheduled sell generation freshness gate. `applied` with quarantine evidence is fresh enough for generation because preserved holdings become Sell `REVIEW` rows through the Supabase-exported holdings snapshot passed into `sab sell`. If those rows reappear in a later Toss snapshot, scheduled sync restores them to `confirmed` and clears the missing-broker evidence. `disabled`, `blocked`, `wipe_guard_blocked`, `marker_failed`, and `error` are fail-closed outcomes; inspect the web container logs and the current Holdings page before rerunning. Full setup and QA steps live in [deployment.md](deployment.md#local-toss-holdings-auto-sync).
 
 ## GitHub Actions
 

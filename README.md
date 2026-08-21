@@ -47,10 +47,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY
 docker compose up -d --build web
 ```
 
-AI Brief가 source URL 본문 확인까지 수행해야 하면 `lightpanda`가 실행 환경의
-`PATH`에 있는 상태에서 `--article-reader lightpanda`를 추가합니다. 이 reader는
-공개 URL을 보수적으로 읽어 `article_read` 메타데이터만 붙이며, paywall/CAPTCHA/
-로그인/robots/bot block/접근 제어를 우회하지 않습니다.
+AI Brief가 source URL 본문 확인까지 수행해야 하면 `lightpanda`가 실행 환경의 `PATH`에 있는 상태에서 `--article-reader lightpanda`를 추가합니다. 이 reader는 공개 URL을 보수적으로 읽어 `article_read` 메타데이터만 붙이며, paywall/CAPTCHA/ 로그인/robots/bot block/접근 제어를 우회하지 않습니다.
 
 웹 UI 기본 주소는 `http://localhost:${WEB_HOST_PORT}`이며 기본 포트는 `55300`입니다.
 
@@ -62,8 +59,7 @@ just ci-web
 UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_docs_state_contract.py -q
 ```
 
-Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조 변경은 `tests/test_docs_state_contract.py`를 우선 실행합니다.
-웹 UI나 인증/라우팅에 영향을 줄 수 있는 변경은 로컬 `sab-web`에서 브라우저 smoke도 남깁니다. QA 리포트와 스크린샷 같은 로컬 검증 산출물은 `.gstack/qa-reports/`에 두며 git에는 커밋하지 않습니다.
+Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조 변경은 `tests/test_docs_state_contract.py`를 우선 실행합니다. 웹 UI나 인증/라우팅에 영향을 줄 수 있는 변경은 로컬 `sab-web`에서 브라우저 smoke도 남깁니다. QA 리포트와 스크린샷 같은 로컬 검증 산출물은 `.gstack/qa-reports/`에 두며 git에는 커밋하지 않습니다.
 
 ## 기술 스택
 

@@ -2,11 +2,7 @@
 
 상태: Accepted (US canary code paths implemented)  •  작성일: 2026-05-28  •  구현 업데이트: 2026-05-29
 
-2026-05-28 engineering review 결정: 이 문서는 우선 **문서/설계 보강만**
-수행했습니다. 2026-05-29 `local-docker-scheduler` branch에서 US canary 기준
-runtime_state 기반 scheduled runner, launchd wrapper, Docker one-shot runner,
-GitHub monitor/fallback, 운영 문서를 구현했습니다. KR 활성화는 rollout decision에
-따라 US canary 이후 별도 운영 전환으로 남깁니다.
+2026-05-28 engineering review 결정: 이 문서는 우선 **문서/설계 보강만** 수행했습니다. 2026-05-29 `local-docker-scheduler` branch에서 US canary 기준 runtime_state 기반 scheduled runner, launchd wrapper, Docker one-shot runner, GitHub monitor/fallback, 운영 문서를 구현했습니다. KR 활성화는 rollout decision에 따라 US canary 이후 별도 운영 전환으로 남깁니다.
 
 이 문서는 시간 민감한 scheduled AI Brief를 GitHub Actions primary에서 로컬 Docker primary로 전환하기 위한 구현 계획입니다. 결정의 근거와 tradeoff는 [ADR-0012](adr/ADR-0012-local-docker-scheduled-runs.md)를 우선합니다.
 
@@ -95,24 +91,18 @@ flowchart LR
 - Primary는 데이터 신선도와 처리 시간을 같이 고려한 기본 실행입니다.
 - Retry는 success marker가 없을 때만 실행합니다.
 - Hard cutoff 이후에는 `PRE_OPEN` AI Brief를 생성하지 않고 missing/late 알림만 보냅니다. 단, GitHub `github-fallback`은 queue delay 보정용 4분 role-window grace 안에서만 hard cutoff 예외로 runner 진입을 허용하며, PRE_OPEN guard는 그대로 적용합니다.
-- host timezone은 KST로 고정합니다. US `launchd` plist는 ET 시각을 직접
-  표현하지 않고 KST 기준 candidate tick만 실행합니다.
+- host timezone은 KST로 고정합니다. US `launchd` plist는 ET 시각을 직접 표현하지 않고 KST 기준 candidate tick만 실행합니다.
   - EDT candidate tick: 21:10, 21:45, 22:25 KST.
   - EST candidate tick: 22:10, 22:45, 23:25 KST.
   - 각 `launchd` job은 하나의 `schedule_role`만 인자로 전달합니다.
   - 같은 role의 EDT/EST 보정 tick은 한 plist에 함께 둘 수 있지만, primary/retry/cutoff처럼 role이 다른 tick은 별도 plist/job으로 분리합니다.
-  - wrapper/runner는 전달받은 `schedule_role`과 `America/New_York`
-    기준 현재 시각을 함께 검증해 primary/retry/cutoff 역할을 최종 판정합니다.
+  - wrapper/runner는 전달받은 `schedule_role`과 `America/New_York` 기준 현재 시각을 함께 검증해 primary/retry/cutoff 역할을 최종 판정합니다.
   - target window 밖 candidate tick은 조용히 종료합니다.
 - 실제 PRE_OPEN 여부는 runner guard가 최종 판단합니다. plist 시각은 trigger 힌트이고, 거래 세션 판단의 source of truth가 아닙니다.
 
 ### 3.1.1 Candidate role guard
 
-`launchd` wrapper와 GitHub `resolve_context`는 container 실행, Docker daemon
-preflight, secret preflight, 실패 알림보다 먼저 candidate role guard를 수행합니다.
-이 순서가 중요합니다. 예를 들어 EDT 기간의 EST 보정 tick은 실제로는 US 09:10
-ET에 실행될 수 있는데, 이를 먼저 조용히 종료하지 않으면 Docker daemon down 같은
-거짓 장애 알림을 보낼 수 있습니다.
+`launchd` wrapper와 GitHub `resolve_context`는 container 실행, Docker daemon preflight, secret preflight, 실패 알림보다 먼저 candidate role guard를 수행합니다. 이 순서가 중요합니다. 예를 들어 EDT 기간의 EST 보정 tick은 실제로는 US 09:10 ET에 실행될 수 있는데, 이를 먼저 조용히 종료하지 않으면 Docker daemon down 같은 거짓 장애 알림을 보낼 수 있습니다.
 
 | 시장 | Role | 허용 market-local window | 비고 |
 | --- | --- | --- | --- |

@@ -13,9 +13,7 @@
 
 ### 실험
 
-- US SWING Decision Board V0는 explicit live-shadow adapter가 구현됐지만 schedule은 비활성인 advice-only shadow입니다.
-  [reference](decision-board.md)와 [20-session 평가 절차](decision-board-shadow-evaluation.md)를
-  통과하기 전 production owner가 아닙니다.
+- US SWING Decision Board V0는 explicit live-shadow adapter가 구현됐지만 schedule은 비활성인 advice-only shadow입니다. [reference](decision-board.md)와 [20-session 평가 절차](decision-board-shadow-evaluation.md)를 통과하기 전 production owner가 아닙니다.
 
 ### 백로그
 
@@ -43,9 +41,7 @@
 5. `sab ai-brief`가 `entry` 리포트의 recommendable/watch 후보를 source/news/model provider로 요약해 `ai-brief` 리포트를 생성합니다.
 6. Next.js 웹 UI가 Supabase `report_index`, Storage, `holdings`, `runtime_state`를 조회/수정합니다.
 7. GitHub Actions와 로컬 Docker scheduler가 정기 실행, 업로드, 알림, cleanup을 담당하고, macOS `launchd` Toss runner가 local scheduled holdings sync를 호출합니다.
-8. Decision Board V0는 US SWING ENTRY/HOLDING public fact를 별도 local shadow report로
-   compile하고 Reports UI에서 보여줍니다. 기본 executor는 production adapter 미연결로
-   fail closed하며 기존 실행·알림을 바꾸지 않습니다.
+8. Decision Board V0는 US SWING ENTRY/HOLDING public fact를 별도 local shadow report로 compile하고 Reports UI에서 보여줍니다. 기본 executor는 production adapter 미연결로 fail closed하며 기존 실행·알림을 바꾸지 않습니다.
 
 ## 핵심 용어
 

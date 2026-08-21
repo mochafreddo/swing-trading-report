@@ -137,8 +137,7 @@ curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${W
 pnpm --dir web run build
 ```
 
-Expected: unauthenticated `/reports` returns `307` to `/login?next=%2Freports`,
-and the Next build output includes `ƒ Proxy (Middleware)`.
+Expected: unauthenticated `/reports` returns `307` to `/login?next=%2Freports`, and the Next build output includes `ƒ Proxy (Middleware)`.
 
 ### Resolution
 
@@ -148,9 +147,7 @@ and the Next build output includes `ƒ Proxy (Middleware)`.
 
 ### Escalation
 
-NEEDS_CONFIRMATION: if build output includes Proxy and redirect smoke still
-fails, inspect the effective container image and runtime source tree before
-changing auth policy.
+NEEDS_CONFIRMATION: if build output includes Proxy and redirect smoke still fails, inspect the effective container image and runtime source tree before changing auth policy.
 
 ## Symptom: `sab scan` or `sab sell` fails on KIS authentication or rate limits
 
@@ -265,18 +262,10 @@ NEEDS_CONFIRMATION: report_index backfill ownership and accepted recovery path.
 - `runtime_state` lock or marker already exists.
 - Local primary and GitHub fallback raced, but dedupe prevented duplicate output.
 - Source/model provider env is missing.
-- Source provider env is unsupported, or `http-json` source API URL is missing,
-  non-HTTPS, includes userinfo, targets a local/private literal host, has an
-  invalid port, or contains whitespace/control chars. Scheduler returns
-  `source_config_invalid` before scan/entry.
-- Article reader is enabled but `lightpanda` is missing from the runner `PATH`,
-  timed out, hit publisher blocking, or returned navigation-failure markdown.
-  These are recorded as `article_read.issue_code` and `source_issues[]`; they
-  should not be interpreted as successful article access.
+- Source provider env is unsupported, or `http-json` source API URL is missing, non-HTTPS, includes userinfo, targets a local/private literal host, has an invalid port, or contains whitespace/control chars. Scheduler returns `source_config_invalid` before scan/entry.
+- Article reader is enabled but `lightpanda` is missing from the runner `PATH`, timed out, hit publisher blocking, or returned navigation-failure markdown. These are recorded as `article_read.issue_code` and `source_issues[]`; they should not be interpreted as successful article access.
 - Notification token/webhook is missing.
-- Telegram accepted skipped/plain text paths but rejected the AI Brief report
-  HTML body. The report body is sent with `parse_mode=HTML`, while skipped
-  notifications and late alerts are plain text.
+- Telegram accepted skipped/plain text paths but rejected the AI Brief report HTML body. The report body is sent with `parse_mode=HTML`, while skipped notifications and late alerts are plain text.
 
 ### Checks
 
@@ -299,9 +288,7 @@ gh run list --workflow ai-brief.yml --limit 10
 docker compose -f docker-compose.yml -f docker-compose.scheduler.yml run --rm scheduler uv run python -m sab ai-brief-scheduled --market US --schedule-role github-fallback --runner-role github-fallback --scheduled-tick manual --guard-only
 ```
 
-For a manual GitHub run, inspect the uploaded `ai-brief.telegram.txt` artifact
-when the `Send Telegram notification` step fails. The workflow sends that file
-in chunks with `split_telegram_message_text()` and `parse_mode=HTML`.
+For a manual GitHub run, inspect the uploaded `ai-brief.telegram.txt` artifact when the `Send Telegram notification` step fails. The workflow sends that file in chunks with `split_telegram_message_text()` and `parse_mode=HTML`.
 
 For article reader diagnostics, inspect the AI Brief artifact:
 
@@ -319,8 +306,7 @@ for issue in payload.get("source_issues", []):
 PY
 ```
 
-For model-output/source-ref triage or feedback on a past AI review, inspect the
-model trace fields that tie the final artifact back to model-attempt logs:
+For model-output/source-ref triage or feedback on a past AI review, inspect the model trace fields that tie the final artifact back to model-attempt logs:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
@@ -348,30 +334,16 @@ for attempt in payload.get("model_attempts", []):
 PY
 ```
 
-Match those hashes with structured log events
-`ai_brief_model_attempt_started`, `ai_brief_model_attempt_failed`,
-`ai_brief_model_attempt_completed`, `ai_brief_model_fallback_selected`, and
-fallback skip events. `model_trace.candidate_summaries[]` maps final
-`candidate_id`/`candidate_ids` rows back to the model-output status, candidate
-role, and request-local source refs that were available to the model.
+Match those hashes with structured log events `ai_brief_model_attempt_started`, `ai_brief_model_attempt_failed`, `ai_brief_model_attempt_completed`, `ai_brief_model_fallback_selected`, and fallback skip events. `model_trace.candidate_summaries[]` maps final `candidate_id`/`candidate_ids` rows back to the model-output status, candidate role, and request-local source refs that were available to the model.
 
 ### Resolution
 
 - Treat `ai-brief-skip` as an artifact, not a silent failure.
 - Do not delete `success`, `artifact`, `skip-artifact`, or `notification:sent` markers unless intentionally rerunning.
 - Confirm `OPENAI_API_KEY` and market source provider env exist in the scheduler/GitHub environment.
-- If article body checks are not required for a run, set
-  `AI_BRIEF_ARTICLE_READER=none` or `AI_BRIEF_ARTICLE_READER_MAX_URLS=0`.
-  Do not add browser flags, cookies, login state, proxying, or challenge bypass
-  behavior to make publisher pages readable.
-- For `source_config_invalid`, inspect scheduler logs for
-  `scheduled_ai_brief_source_config_invalid`; it includes provider/API URL
-  origin metadata but does not log the source API URL value.
-- For Telegram `Bad Request` parse errors on AI Brief report notifications,
-  inspect the generated `ai-brief.telegram.txt` rather than the plain skipped
-  message. Report-derived values should be escaped and long/malformed run URLs
-  should fall back to plain text; if that invariant is broken, treat it as a
-  notification renderer bug.
+- If article body checks are not required for a run, set `AI_BRIEF_ARTICLE_READER=none` or `AI_BRIEF_ARTICLE_READER_MAX_URLS=0`. Do not add browser flags, cookies, login state, proxying, or challenge bypass behavior to make publisher pages readable.
+- For `source_config_invalid`, inspect scheduler logs for `scheduled_ai_brief_source_config_invalid`; it includes provider/API URL origin metadata but does not log the source API URL value.
+- For Telegram `Bad Request` parse errors on AI Brief report notifications, inspect the generated `ai-brief.telegram.txt` rather than the plain skipped message. Report-derived values should be escaped and long/malformed run URLs should fall back to plain text; if that invariant is broken, treat it as a notification renderer bug.
 
 ### Escalation
 
@@ -385,8 +357,7 @@ NEEDS_CONFIRMATION: notification owner, late-alert policy, and rerun approval.
 - `TOSS_SYNC_AUTO_APPLY_ENABLED` is unset, so the scheduled route returns `disabled`.
 - The host timezone is not `Asia/Seoul` or `KST`.
 - The web container is down or using stale env after `.env` changed.
-- The scheduled diff is blocked, would wipe holdings, or failed to write its
-  freshness marker.
+- The scheduled diff is blocked, would wipe holdings, or failed to write its freshness marker.
 
 ### Checks
 
@@ -397,26 +368,18 @@ docker compose ps
 docker compose logs web
 ```
 
-Expected successful runner statuses are `status=applied` or `status=unchanged`.
-`status=applied` may include `quarantined=<count>` when existing holdings were
-not seen in a non-empty Toss snapshot and were preserved for manual review.
-`status=disabled`, `status=blocked`, `status=wipe_guard_blocked`,
-`status=marker_failed`, and `status=error` are fail-closed outcomes.
+Expected successful runner statuses are `status=applied` or `status=unchanged`. `status=applied` may include `quarantined=<count>` when existing holdings were not seen in a non-empty Toss snapshot and were preserved for manual review. `status=disabled`, `status=blocked`, `status=wipe_guard_blocked`, `status=marker_failed`, and `status=error` are fail-closed outcomes.
 
 ### Resolution
 
-- Keep `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED` in the root
-  `.env`, then recreate the web container with `docker compose up -d --build web`.
-- Keep the launchd host timezone aligned with `TOSS_SYNC_EXPECTED_TZ`, default
-  `Asia/Seoul`.
+- Keep `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED` in the root `.env`, then recreate the web container with `docker compose up -d --build web`.
+- Keep the launchd host timezone aligned with `TOSS_SYNC_EXPECTED_TZ`, default `Asia/Seoul`.
 - Use the web Holdings Toss Sync panel for destructive delete diffs.
-- Run `just qa-toss-sync` against local Supabase when you need to verify the
-  valid-token scheduled path without live Toss or remote holdings data.
+- Run `just qa-toss-sync` against local Supabase when you need to verify the valid-token scheduled path without live Toss or remote holdings data.
 
 ### Escalation
 
-NEEDS_CONFIRMATION: actual launchd bootstrap state, host timezone policy, and
-whether a blocked/delete diff should be manually applied are operator decisions.
+NEEDS_CONFIRMATION: actual launchd bootstrap state, host timezone policy, and whether a blocked/delete diff should be manually applied are operator decisions.
 
 ## Symptom: Cleanup workflow wants to delete too much
 

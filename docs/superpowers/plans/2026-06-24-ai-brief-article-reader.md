@@ -624,8 +624,7 @@ def enrich_sources_with_article_reads(
     return enriched, issues
 ```
 
-Adjust typing while implementing: use `Callable[[str, float], tuple[int, str, str]]`
-instead of the sketch's `type LightpandaRunner = callable`.
+Adjust typing while implementing: use `Callable[[str, float], tuple[int, str, str]]` instead of the sketch's `type LightpandaRunner = callable`.
 
 - [ ] **Step 4: Run focused tests**
 
@@ -835,8 +834,7 @@ source_provider_issues = [*source_chain_result.source_issues, *article_issues]
 article_summary = article_read_summary(sources_by_ticker)
 ```
 
-Pass `article_summary` into `_build_summary()` by adding optional fields with default
-zero counts.
+Pass `article_summary` into `_build_summary()` by adding optional fields with default zero counts.
 
 - [ ] **Step 4: Add CLI options**
 
@@ -1160,9 +1158,7 @@ Expected: PASS.
 
 Run: `just test tests/test_ai_brief_eval.py`
 
-Expected: PASS. If existing `test_ai_brief_eval_passes_source_backed_artifact`
-expects `PASS`, update that expectation only if the new policy intentionally returns
-`WARN` for metadata-only artifacts.
+Expected: PASS. If existing `test_ai_brief_eval_passes_source_backed_artifact` expects `PASS`, update that expectation only if the new policy intentionally returns `WARN` for metadata-only artifacts.
 
 - [ ] **Step 6: Commit Task 5**
 

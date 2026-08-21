@@ -224,8 +224,7 @@ In `_build_openai_request_payload`, extend the system prompt sentence:
                     "or published_at fields. "
 ```
 
-In `_openai_result_schema`, replace recommendation `sources` with `source_refs`.
-The recommendation `required` list must become:
+In `_openai_result_schema`, replace recommendation `sources` with `source_refs`. The recommendation `required` list must become:
 
 ```python
                     "required": [
@@ -549,8 +548,7 @@ After the loop and before returning `AiBriefProviderResult`, re-rank kept recomm
         recommendation["rank"] = rank
 ```
 
-Remove the duplicate `source_issues = _as_provider_mapping_rows(...)` assignment that
-currently appears after the recommendations loop so the augmented list is returned.
+Remove the duplicate `source_issues = _as_provider_mapping_rows(...)` assignment that currently appears after the recommendations loop so the augmented list is returned.
 
 - [x] **Step 5: Run targeted provider tests**
 
@@ -800,9 +798,7 @@ to:
 "source_refs": []
 ```
 
-Keep expected final `result.recommendations[].sources` and
-`result.watch_candidates[].sources` assertions as `sources[]`; final provider results
-must still expose canonical source objects.
+Keep expected final `result.recommendations[].sources` and `result.watch_candidates[].sources` assertions as `sources[]`; final provider results must still expose canonical source objects.
 
 Run again:
 
@@ -827,9 +823,7 @@ git commit -m "fix(ai-brief): watch source ref 오류를 fallback 처리" -m "Op
 
 - [x] **Step 1: Update OpenAI integration fake outputs to `source_refs`**
 
-In `tests/test_ai_brief.py`, update fake `_OpenAiSession` output payloads so model
-responses use `source_refs` instead of returned source objects. Apply these exact
-patterns:
+In `tests/test_ai_brief.py`, update fake `_OpenAiSession` output payloads so model responses use `source_refs` instead of returned source objects. Apply these exact patterns:
 
 ```python
 "sources": [],
@@ -859,13 +853,11 @@ becomes:
 "source_refs": ["AAPL.NAS:1"],
 ```
 
-For tests that intentionally assert provider-wide failures unrelated to source refs,
-keep the same expected `system_issues` behavior after replacing the source field.
+For tests that intentionally assert provider-wide failures unrelated to source refs, keep the same expected `system_issues` behavior after replacing the source field.
 
 - [x] **Step 2: Write 2026-06-17 partial watch regression test**
 
-Add this test after `test_run_ai_brief_openai_provider_writes_structured_recommendation`
-in `tests/test_ai_brief.py`:
+Add this test after `test_run_ai_brief_openai_provider_writes_structured_recommendation` in `tests/test_ai_brief.py`:
 
 ```python
 def test_run_ai_brief_openai_invalid_watch_source_ref_uses_partial_publish_artifact(
@@ -974,8 +966,7 @@ Expected before provider implementation is complete: FAIL. After Tasks 1-3 are c
 
 - [x] **Step 4: Add scheduled pipeline WARN-pass regression**
 
-Add this test after the existing quality-gate failure test in
-`tests/test_scheduled_ai_brief_runner.py`:
+Add this test after the existing quality-gate failure test in `tests/test_scheduled_ai_brief_runner.py`:
 
 ```python
 def test_default_pipeline_returns_result_when_ai_brief_quality_warns(
@@ -1075,8 +1066,7 @@ git commit -m "test(ai-brief): source ref partial publish 회귀 보강" -m "Ope
 
 - [x] **Step 1: Update strategy contract**
 
-In `docs/STRATEGY.md`, near the AI Brief state/source contract section around
-`brief_state`, add this text:
+In `docs/STRATEGY.md`, near the AI Brief state/source contract section around `brief_state`, add this text:
 
 ```markdown
 - AI Brief 모델 provider는 source 객체(`title`/`url`/`published_at`)를 신뢰 경계 밖에서 재작성하지 않습니다. Source provider가 만든 canonical source row는 실행 중 request-local `source_id`를 받고, 모델은 `source_refs`만 선택합니다. 최종 artifact에는 로컬 코드가 `source_refs`를 canonical `sources[]` 객체로 복원한 결과만 저장합니다.
@@ -1085,8 +1075,7 @@ In `docs/STRATEGY.md`, near the AI Brief state/source contract section around
 
 - [x] **Step 2: Update architecture flow**
 
-In `docs/ARCHITECTURE.md`, update the scheduled/manual AI Brief flow section around the
-source provider and model provider steps with this text:
+In `docs/ARCHITECTURE.md`, update the scheduled/manual AI Brief flow section around the source provider and model provider steps with this text:
 
 ```markdown
 Source provider 단계는 ticker별 canonical source row를 만든 뒤 모델 요청 직전에 request-local source catalog를 구성합니다. Catalog는 각 후보의 source row에 `source_id`를 붙이고, OpenAI provider는 source 객체가 아니라 `source_refs[]`를 structured output으로 받습니다. Provider normalization은 refs를 catalog의 canonical source row로 복원하고, candidate-local source ref 오류는 `source_issues[]`로 격리한 뒤 최종 `recommendations[].sources[]`/`watch_candidates[].sources[]` artifact 형태를 유지합니다.
@@ -1094,8 +1083,7 @@ Source provider 단계는 ticker별 canonical source row를 만든 뒤 모델 �
 
 - [x] **Step 3: Update operations runbook**
 
-In `docs/operations.md`, extend the `scheduled ai-brief quality gate failed` paragraph
-with this text:
+In `docs/operations.md`, extend the `scheduled ai-brief quality gate failed` paragraph with this text:
 
 ```markdown
 `model_source_ref_invalid`, `model_source_ref_missing`, `model_unbacked_recommendation_dropped`, `model_watch_source_ref_invalid`은 모델이 canonical source catalog의 ref를 제대로 선택하지 못했다는 뜻입니다. 이 진단이 `WARN`이고 최종 추천이 source-backed이면 scheduled run은 partial publish로 정상 업로드될 수 있습니다. 같은 진단 뒤 추천이 모두 제거되거나 source-backed ratio가 부족하면 기존처럼 quality `FAIL`로 처리됩니다.

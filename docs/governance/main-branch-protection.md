@@ -148,8 +148,7 @@ diff -u \
   docs/governance/main-branch-protection.current.normalized.json
 ```
 
-`main-branch-protection.payload.normalized.json`과
-`main-branch-protection.current.normalized.json` diff가 비어 있어야 합니다.
+`main-branch-protection.payload.normalized.json`과 `main-branch-protection.current.normalized.json` diff가 비어 있어야 합니다.
 
 ## 5) 단독 운영 예외와 상향 트리거
 

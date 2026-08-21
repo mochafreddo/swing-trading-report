@@ -536,9 +536,7 @@ Phase B checklist for Step 6, not Step 1: before runtime code can select or writ
 entry_pattern: null,
 ```
 
-In the existing `replaceAllHoldings` test named
-`"calls replace_holdings_v1 RPC with sanitized holdings snapshot"`, add
-`entry_pattern` to the input row:
+In the existing `replaceAllHoldings` test named `"calls replace_holdings_v1 RPC with sanitized holdings snapshot"`, add `entry_pattern` to the input row:
 
 ```ts
         strategy: "swing",
@@ -1721,8 +1719,7 @@ Run:
 # pnpm --dir web run test -- web/src/lib/__tests__/holdings-yaml.test.ts web/src/app/api/holdings/yaml/__tests__/route.test.ts
 ```
 
-Expected: PASS. The Add Buy negative tests may already pass before implementation because the current strict Add Buy schema rejects unknown keys; their purpose is to lock the quantity-only API contract.
-YAML tests are required in Phase B, not conditional, because this runtime release changes the DB/current snapshot shape and replace-all import semantics.
+Expected: PASS. The Add Buy negative tests may already pass before implementation because the current strict Add Buy schema rejects unknown keys; their purpose is to lock the quantity-only API contract. YAML tests are required in Phase B, not conditional, because this runtime release changes the DB/current snapshot shape and replace-all import semantics.
 
 ### Phase B Appendix Step 8: Sweep web fixture fallout and typecheck
 

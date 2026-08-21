@@ -4,38 +4,24 @@
 
 ## Goal
 
-Holdings should automatically match the Toss Securities account once per day,
-without manual `APPLY TOSS HOLDINGS` typing or button clicks. The operator chose
-Toss as the source of truth for automatic `create`, `update`, and `delete`
-changes.
+Holdings should automatically match the Toss Securities account once per day, without manual `APPLY TOSS HOLDINGS` typing or button clicks. The operator chose Toss as the source of truth for automatic `create`, `update`, and `delete` changes.
 
-The first implementation should keep the existing manual Toss Sync panel, but
-add a trusted local scheduled path that runs the same reconciliation and apply
-logic at an appropriate daily time.
+The first implementation should keep the existing manual Toss Sync panel, but add a trusted local scheduled path that runs the same reconciliation and apply logic at an appropriate daily time.
 
 ## Non-Goals
 
 - Do not port the Toss sync implementation to Python in the first release.
-- Do not make GitHub-hosted scheduled workflows the primary path in the first
-  release; that would require copying Toss account credentials to GitHub
-  Secrets.
+- Do not make GitHub-hosted scheduled workflows the primary path in the first release; that would require copying Toss account credentials to GitHub Secrets.
 - Do not apply a partial diff when normalization has blocked rows.
 - Do not bypass the existing local-only boundary for holdings mutation routes.
 
 ## Recommended Approach
 
-Use a local scheduled job that calls a new trusted web endpoint backed by a
-shared Toss holdings sync service.
+Use a local scheduled job that calls a new trusted web endpoint backed by a shared Toss holdings sync service.
 
-The web app already owns the Toss client, Supabase holdings adapter, ticker
-directory lookup, reconciliation, diff hashing, blocked-row policy, and
-replace-all RPC call. Reusing that logic avoids a Python port and prevents route
-and scheduler behavior from drifting.
+The web app already owns the Toss client, Supabase holdings adapter, ticker directory lookup, reconciliation, diff hashing, blocked-row policy, and replace-all RPC call. Reusing that logic avoids a Python port and prevents route and scheduler behavior from drifting.
 
-The existing browser route stays admin-session protected. The new scheduled
-route is separate and accepts only local requests with a dedicated job token.
-This keeps browser CSRF/session rules intact while allowing non-interactive
-launchd or cron execution.
+The existing browser route stays admin-session protected. The new scheduled route is separate and accepts only local requests with a dedicated job token. This keeps browser CSRF/session rules intact while allowing non-interactive launchd or cron execution.
 
 ## Approach Comparison
 
@@ -65,22 +51,19 @@ Pros:
 Cons:
 
 - Requires storing Toss account credentials in GitHub Secrets.
-- Must either call a local-only web route, which is unsuitable from GitHub, or
-  duplicate/import the web sync logic into a workflow runner.
+- Must either call a local-only web route, which is unsuitable from GitHub, or duplicate/import the web sync logic into a workflow runner.
 - More sensitive operational boundary for a broker-backed mutation.
 
 ### C. Python `sab toss-sync` CLI
 
 Pros:
 
-- Integrates naturally with the existing Python scheduler and Docker scheduler
-  service.
+- Integrates naturally with the existing Python scheduler and Docker scheduler service.
 - Can run without the Next.js server.
 
 Cons:
 
-- Requires porting the Toss client and reconciliation behavior from TypeScript
-  or creating a cross-runtime contract.
+- Requires porting the Toss client and reconciliation behavior from TypeScript or creating a cross-runtime contract.
 - Higher risk of diverging behavior between manual UI sync and scheduled sync.
 
 ## Schedule Policy
@@ -89,20 +72,16 @@ Run once per day at `08:05 Asia/Seoul`.
 
 Reasons:
 
-- It is after the US regular session close and typical post-market settlement
-  visibility for the next Korean morning workflow.
+- It is after the US regular session close and typical post-market settlement visibility for the next Korean morning workflow.
 - It is before the Korean market opens.
 - It gives a small buffer before operator review or morning sell/entry checks.
 
-The first release can run every calendar day because the job is idempotent when
-there is no diff. A later refinement may restrict to weekdays or exchange
-business days if Toss API limits or logs become noisy.
+The first release can run every calendar day because the job is idempotent when there is no diff. A later refinement may restrict to weekdays or exchange business days if Toss API limits or logs become noisy.
 
 ## Data Flow
 
 1. A local scheduler invokes the auto-sync runner.
-2. The runner sends a local POST request to the scheduled Toss sync endpoint
-   with a dedicated bearer token.
+2. The runner sends a local POST request to the scheduled Toss sync endpoint with a dedicated bearer token.
 3. The endpoint verifies:
    - request host/origin is local,
    - `TOSS_SYNC_JOB_TOKEN` is configured,
@@ -113,40 +92,25 @@ business days if Toss API limits or logs become noisy.
    - fetches ticker directory candidates for US symbols,
    - builds the Toss dry-run,
    - computes the `diffHash`.
-5. If the dry-run is blocked, the service returns a skipped result and does not
-   call `replace_holdings_v1`.
+5. If the dry-run is blocked, the service returns a skipped result and does not call `replace_holdings_v1`.
 6. If there are no changes, the service returns a no-op result.
-7. If there are changes and the safety guards pass, the service calls
-   `replaceAllHoldings(targetRows, { expectedCurrentHoldings })` and returns the
-   apply result. The Supabase RPC compares the expected snapshot inside the
-   table lock before writing, so write-time races fail closed.
+7. If there are changes and the safety guards pass, the service calls `replaceAllHoldings(targetRows, { expectedCurrentHoldings })` and returns the apply result. The Supabase RPC compares the expected snapshot inside the table lock before writing, so write-time races fail closed.
 
-The existing manual route should also call the same shared service for dry-run
-and apply so manual and scheduled behavior share normalization and write-time
-race protection. The scheduled route is intentionally stricter for deletes.
+The existing manual route should also call the same shared service for dry-run and apply so manual and scheduled behavior share normalization and write-time race protection. The scheduled route is intentionally stricter for deletes.
 
 ## Safety Policy
 
-Automatic apply may create and update holdings. It must not delete holdings
-until the Toss response is proven to be a complete account snapshot. Destructive
-delete diffs remain a manual reviewed `/api/holdings/toss-sync` apply action.
-The scheduled path must fail closed under these conditions:
+Automatic apply may create and update holdings. It must not delete holdings until the Toss response is proven to be a complete account snapshot. Destructive delete diffs remain a manual reviewed `/api/holdings/toss-sync` apply action. The scheduled path must fail closed under these conditions:
 
 - `applyBlocked=true` because at least one Toss row cannot be normalized safely.
-- The Toss snapshot has zero incoming rows while Supabase currently has one or
-  more holdings. This prevents an API shape change or temporary upstream empty
-  response from wiping the holdings table.
-- Any scheduled reconciliation contains a delete diff. This protects against
-  non-empty but partial upstream snapshots.
+- The Toss snapshot has zero incoming rows while Supabase currently has one or more holdings. This prevents an API shape change or temporary upstream empty response from wiping the holdings table.
+- Any scheduled reconciliation contains a delete diff. This protects against non-empty but partial upstream snapshots.
 - The Toss API, Supabase API, ticker directory lookup, or JSON parsing fails.
 - The replace-all RPC response is malformed.
 - The job token is missing, invalid, or supplied from a non-local request.
-- The current holdings snapshot changes between preview construction and the
-  replace-all RPC transaction.
+- The current holdings snapshot changes between preview construction and the replace-all RPC transaction.
 
-Manual UI sync may continue to show and apply a zero-row diff after review if
-that becomes necessary, but the scheduled path must not automatically wipe all
-holdings.
+Manual UI sync may continue to show and apply a zero-row diff after review if that becomes necessary, but the scheduled path must not automatically wipe all holdings.
 
 The scheduled result should include a machine-readable status:
 
@@ -157,20 +121,16 @@ The scheduled result should include a machine-readable status:
 - `wipe_guard_blocked`
 - `error`
 
-2026-07-08 update: non-empty delete diffs are now preserved as durable
-`broker_state=not_seen_in_toss` quarantine rows and return `applied` with
-quarantine counts. Only full-wipe shaped empty Toss snapshots remain blocked.
+2026-07-08 update: non-empty delete diffs are now preserved as durable `broker_state=not_seen_in_toss` quarantine rows and return `applied` with quarantine counts. Only full-wipe shaped empty Toss snapshots remain blocked.
 
 ## API and Service Shape
 
-Introduce a service module under `web/src/lib/toss/` that exposes two
-operations:
+Introduce a service module under `web/src/lib/toss/` that exposes two operations:
 
 - `buildTossHoldingsSyncPreview()`
 - `applyTossHoldingsSyncFromPreview(preview, options)`
 
-The existing route can keep its public response shape. Internally it should use
-the service rather than owning the full orchestration.
+The existing route can keep its public response shape. Internally it should use the service rather than owning the full orchestration.
 
 Add a scheduled-only route such as:
 
@@ -217,37 +177,30 @@ Responsibilities:
 
 - resolve `WEB_HOST_PORT`, defaulting to `55300`,
 - require `TOSS_SYNC_JOB_TOKEN`,
-- read root `.env` by default so the runner and Docker Compose web container
-  share the same token/enable flag,
+- read root `.env` by default so the runner and Docker Compose web container share the same token/enable flag,
 - preflight the JSON parser before the write request,
-- call the scheduled endpoint with the bearer header passed through curl stdin
-  config rather than process argv,
+- call the scheduled endpoint with the bearer header passed through curl stdin config rather than process argv,
 - use bounded curl timeouts/retries,
 - exit non-zero for `disabled`, `blocked`, `wipe_guard_blocked`, and `error`,
 - print only bounded summaries without secrets or raw Toss payloads.
 
-The script can be run by launchd on macOS. A later release can add a Docker
-scheduler entry if desired, but launchd is enough for the first local daily job.
+The script can be run by launchd on macOS. A later release can add a Docker scheduler entry if desired, but launchd is enough for the first local daily job.
 
 ## Notifications
 
 First release notification can be log-only if no webhook secrets are configured.
 
-If `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` or `SLACK_WEBHOOK_URL` are already
-available in the local scheduler environment, the runner may send a short
-summary:
+If `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` or `SLACK_WEBHOOK_URL` are already available in the local scheduler environment, the runner may send a short summary:
 
 - applied: `create/update/unchanged` counts,
 - unchanged: no changes,
 - disabled: explicit note that no write occurred because auto apply is off,
 - blocked: blocked count and reasons,
 - wipe guard: explicit warning that no write occurred,
-- delete guard: explicit warning that no write occurred because delete diffs
-  require manual review,
+- delete guard: explicit warning that no write occurred because delete diffs require manual review,
 - error: failure category only.
 
-No notification should include raw account identifiers, access tokens, or
-unredacted Toss responses.
+No notification should include raw account identifiers, access tokens, or unredacted Toss responses.
 
 ## Configuration
 
@@ -265,21 +218,16 @@ Existing Toss and Supabase variables remain required:
 - `SUPABASE_URL`
 - `SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`
 
-The token must be stored only in `.envrc.local`, `.env.scheduler.local`, a
-launchd-private environment, or another ignored local secret store.
+The token must be stored only in `.envrc.local`, `.env.scheduler.local`, a launchd-private environment, or another ignored local secret store.
 
 ## Documentation Updates
 
 The implementation must update:
 
-- `docs/api.md`: apply no longer requires `confirmationText`, and the scheduled
-  route contract must be documented.
-- `docs/configuration.md` and `docs/config-reference.md`: add scheduled Toss
-  sync variables.
-- `docs/deployment.md` or local scheduler docs: describe the launchd time,
-  manual smoke command, and failure behavior.
-- `docs/superpowers/specs/2026-06-30-toss-us-ticker-auto-mapping-design.md`:
-  replace the stale statement that apply requires confirmation text.
+- `docs/api.md`: apply no longer requires `confirmationText`, and the scheduled route contract must be documented.
+- `docs/configuration.md` and `docs/config-reference.md`: add scheduled Toss sync variables.
+- `docs/deployment.md` or local scheduler docs: describe the launchd time, manual smoke command, and failure behavior.
+- `docs/superpowers/specs/2026-06-30-toss-us-ticker-auto-mapping-design.md`: replace the stale statement that apply requires confirmation text.
 
 ## Testing
 
@@ -287,29 +235,22 @@ Add tests before implementation code.
 
 Unit/service coverage:
 
-- auto apply writes create/update diffs when preview has changes and no blocked
-  rows or delete diffs.
+- auto apply writes create/update diffs when preview has changes and no blocked rows or delete diffs.
 - blocked rows skip `replaceAllHoldings`.
-- delete diffs from a non-empty Toss snapshot preserve existing holdings as
-  `broker_state=not_seen_in_toss` quarantine rows and still return `applied`.
-- empty Toss snapshot plus existing Supabase holdings triggers
-  `wipe_guard_blocked`, including inactive holdings.
-- empty Toss snapshot plus no Supabase holdings returns unchanged and writes
-  nothing.
+- delete diffs from a non-empty Toss snapshot preserve existing holdings as `broker_state=not_seen_in_toss` quarantine rows and still return `applied`.
+- empty Toss snapshot plus existing Supabase holdings triggers `wipe_guard_blocked`, including inactive holdings.
+- empty Toss snapshot plus no Supabase holdings returns unchanged and writes nothing.
 - `replaceAllHoldings` receives `expectedCurrentHoldings`.
-- RPC result counts that diverge from the preview fail instead of returning a
-  mixed summary/change response.
+- RPC result counts that diverge from the preview fail instead of returning a mixed summary/change response.
 
 Route coverage:
 
 - scheduled route rejects missing token.
 - scheduled route rejects invalid token.
 - scheduled route requires local request semantics.
-- scheduled route returns `disabled` and performs no write unless
-  `TOSS_SYNC_AUTO_APPLY_ENABLED=1`.
+- scheduled route returns `disabled` and performs no write unless `TOSS_SYNC_AUTO_APPLY_ENABLED=1`.
 - scheduled route returns bounded result without raw Toss payloads.
-- manual route still supports dry-run and reviewed apply through the shared
-  service.
+- manual route still supports dry-run and reviewed apply through the shared service.
 
 Runner coverage:
 
@@ -320,16 +261,13 @@ Runner coverage:
 
 Regression checks:
 
-- search for stale `APPLY TOSS HOLDINGS` and `confirmationText` documentation
-  after the implementation.
+- search for stale `APPLY TOSS HOLDINGS` and `confirmationText` documentation after the implementation.
 - run web lint, typecheck, format check, and focused route/service tests.
 
 ## Rollout
 
-1. Land the shared service, scheduled endpoint, script, and docs with
-   `TOSS_SYNC_AUTO_APPLY_ENABLED` defaulting off.
-2. Run a manual scheduled-endpoint smoke locally and confirm it returns
-   `disabled` without writing.
+1. Land the shared service, scheduled endpoint, script, and docs with `TOSS_SYNC_AUTO_APPLY_ENABLED` defaulting off.
+2. Run a manual scheduled-endpoint smoke locally and confirm it returns `disabled` without writing.
 3. Enable `TOSS_SYNC_AUTO_APPLY_ENABLED=1` locally.
 4. Run the script manually once and confirm either `applied` or `unchanged`.
 5. Install the launchd schedule for `08:05 Asia/Seoul`.
@@ -340,11 +278,8 @@ Regression checks:
 - Manual Toss Sync still works from the holdings UI.
 - Scheduled auto sync can run without a browser session.
 - Scheduled auto sync applies create/update diffs when safe.
-- Scheduled auto sync never auto-applies delete diffs; manual reviewed Toss Sync
-  owns destructive deletes.
+- Scheduled auto sync never auto-applies delete diffs; manual reviewed Toss Sync owns destructive deletes.
 - Scheduled auto sync never writes when normalization is blocked.
-- Scheduled auto sync never wipes Supabase holdings from an empty or partial Toss
-  snapshot.
-- Logs and notifications contain summaries only, not secrets or raw account
-  payloads.
+- Scheduled auto sync never wipes Supabase holdings from an empty or partial Toss snapshot.
+- Logs and notifications contain summaries only, not secrets or raw account payloads.
 - Documentation no longer says Toss apply requires `APPLY TOSS HOLDINGS`.

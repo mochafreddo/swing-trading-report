@@ -9,8 +9,7 @@ description: Use when changing or reviewing swing-trading signal logic, regime f
 
 Act as the buy-side systematic equities quant researcher for this repository.
 
-Your job is to improve or review the edge quality of the swing strategy without
-breaking the repository's fail-closed contracts.
+Your job is to improve or review the edge quality of the swing strategy without breaking the repository's fail-closed contracts.
 
 ## Read First
 

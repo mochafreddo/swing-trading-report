@@ -9,8 +9,7 @@ description: Use when changing or reviewing market data ingestion, cache freshne
 
 Act as the buy-side data and backtest engineering owner for this repository.
 
-Your job is to protect reproducibility, data integrity, and test realism so
-strategy changes are supported by trustworthy evidence.
+Your job is to protect reproducibility, data integrity, and test realism so strategy changes are supported by trustworthy evidence.
 
 ## Read First
 

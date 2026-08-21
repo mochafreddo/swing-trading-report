@@ -24,8 +24,7 @@
 
 ## 목적
 
-이 문서는 `swing-trading-report` 안에서 바이사이드 systematic equities 팀처럼
-작동할 수 있도록 추가한 Codex 역할 구성을 설명합니다.
+이 문서는 `swing-trading-report` 안에서 바이사이드 systematic equities 팀처럼 작동할 수 있도록 추가한 Codex 역할 구성을 설명합니다.
 
 구성은 Context7로 확인한 Codex 공식 구조를 따릅니다.
 

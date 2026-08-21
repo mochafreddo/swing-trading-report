@@ -1,10 +1,7 @@
 # 전략/로직 설계 — Swing Core Logic
 
 상태: Accepted
-계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고.
-최종 확인: 2026-07-02
-대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`/`sab sell-ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직**
-비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
+계약 기준: [Spec v1.1](spec-v1.1.md)은 storage/report_index/runtime_state/web API 계약의 source of truth이고, 본 문서는 신호/리스크 로직의 source of truth입니다. backlog 항목은 [Spec v1.3](spec-v1.3.md) 참고. 최종 확인: 2026-07-02 대상: `sab scan`/`sab sell`/`sab entry`/`sab ai-brief`/`sab sell-ai-brief`의 **신호 평가 및 리스크 가이드 산출 로직** 비목표: 자동 주문/체결, 포지션 사이징, 멀티타임프레임(분봉) 매매 로직
 
 ## 문서 상태
 
@@ -20,41 +17,15 @@
 
 ### Replay coverage vs historical backtesting
 
-`tests/fixtures/replay_eod/scan/*` contains deterministic scan replay fixtures
-for active threshold behavior. These fixtures protect implementation semantics:
-market/regime gating, RSI zones, consolidation windows, gap rejection,
-volume confirmation, relative-strength quality, volatility-vs-stop alignment,
-and report artifact shape.
+`tests/fixtures/replay_eod/scan/*` contains deterministic scan replay fixtures for active threshold behavior. These fixtures protect implementation semantics: market/regime gating, RSI zones, consolidation windows, gap rejection, volume confirmation, relative-strength quality, volatility-vs-stop alignment, and report artifact shape.
 
-Replay fixtures are not profitability evidence. They do not estimate win rate,
-expected value, MFE/MAE, stop/target hit-rate, slippage, transaction cost, or
-survivorship effects.
+Replay fixtures are not profitability evidence. They do not estimate win rate, expected value, MFE/MAE, stop/target hit-rate, slippage, transaction cost, or survivorship effects.
 
-`sab backtest` is the local historical runner for that research layer. It
-reuses the same `ema_cross`/`sma_ema_hybrid` buy evaluators and
-`generic`/`sma_ema_hybrid` sell evaluators over historical candle prefixes,
-then writes a local `*.backtest.json` with the period, symbols, trades, win
-rate, return, drawdown, holding period, equity curve, issues, and config
-snapshot. Its execution assumptions are explicit: EOD buy signals enter on the
-next available valid open, `SELL` exits use the signal-day close,
-`SELL_PARTIAL` closes `--partial-exit-fraction` of the remaining position,
-daily OHLC stop/target ambiguity is controlled by `--intraday-exit-policy`
-using the previous completed sell prefix, and gap-through stop/target hits fill
-at the candle open. Position size is weighted with `--position-size-pct`, costs
-are configured with `--transaction-cost-bps`, and slippage is configured with
-`--slippage-bps`.
+`sab backtest` is the local historical runner for that research layer. It reuses the same `ema_cross`/`sma_ema_hybrid` buy evaluators and `generic`/`sma_ema_hybrid` sell evaluators over historical candle prefixes, then writes a local `*.backtest.json` with the period, symbols, trades, win rate, return, drawdown, holding period, equity curve, issues, and config snapshot. Its execution assumptions are explicit: EOD buy signals enter on the next available valid open, `SELL` exits use the signal-day close, `SELL_PARTIAL` closes `--partial-exit-fraction` of the remaining position, daily OHLC stop/target ambiguity is controlled by `--intraday-exit-policy` using the previous completed sell prefix, and gap-through stop/target hits fill at the candle open. Position size is weighted with `--position-size-pct`, costs are configured with `--transaction-cost-bps`, and slippage is configured with `--slippage-bps`.
 
-`summary.total_return_pct` is a non-compounded closed-lot contribution metric
-(`summary.return_model=non_compounded_initial_equity_contribution`), not a
-portfolio NAV simulation. The artifact also records maximum gross exposure, and
-`summary.max_drawdown_pct` uses conservative low-price mark-to-market events for
-open positions so intratrade drawdown is visible.
+`summary.total_return_pct` is a non-compounded closed-lot contribution metric (`summary.return_model=non_compounded_initial_equity_contribution`), not a portfolio NAV simulation. The artifact also records maximum gross exposure, and `summary.max_drawdown_pct` uses conservative low-price mark-to-market events for open positions so intratrade drawdown is visible.
 
-Backtest artifacts are still research outputs, not production execution
-instructions. Data-vendor survivorship bias, point-in-time universe
-construction, benchmark selection, and corporate-action data quality are
-recorded through the artifact `assumptions` object, optionally sourced from
-`--assumptions-file`; the runner does not infer those facts from OHLCV alone.
+Backtest artifacts are still research outputs, not production execution instructions. Data-vendor survivorship bias, point-in-time universe construction, benchmark selection, and corporate-action data quality are recorded through the artifact `assumptions` object, optionally sourced from `--assumptions-file`; the runner does not infer those facts from OHLCV alone.
 
 ### 백로그
 
@@ -391,8 +362,7 @@ hybrid buy는 candidate에 `entry_state`를 포함합니다.
 
 ### 5.4 Buy candidate 근거 필드 계약(`reasons[]`)
 
-buy candidate는 기존 문자열 필드(`score_notes`, `pattern_reasons`, `entry_state_reason`)를 유지하면서,
-UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `reasons[]`를 함께 포함합니다.
+buy candidate는 기존 문자열 필드(`score_notes`, `pattern_reasons`, `entry_state_reason`)를 유지하면서, UI/소비자가 안정적으로 해석할 수 있는 구조화 근거 필드 `reasons[]`를 함께 포함합니다.
 
 - 스키마(요약):
   - `id`: 근거 식별자(예: `ema_cross`, `entry_state_ready`, `gap_within_limit`)
@@ -450,38 +420,13 @@ Sell은 보유 종목을 `HOLD|SELL_PARTIAL|REVIEW|SELL`로 분류하고, stop/t
 
 ### Decision Board V0 ENTRY/HOLDING compiler policy (shadow)
 
-Decision Board V0 compiler는 기존 `scan`/`sell`/`entry` action을 바꾸는 runtime
-통합이 아니라, 이미 선택·봉인된 public SWING fact를 Task 1 payload로 투영하는 순수
-shadow 경계입니다. 모델, 네트워크, 파일, clock, broker, 주문 API를 호출하지 않으며
-후보나 보유 universe를 넓히지 않습니다.
+Decision Board V0 compiler는 기존 `scan`/`sell`/`entry` action을 바꾸는 runtime 통합이 아니라, 이미 선택·봉인된 public SWING fact를 Task 1 payload로 투영하는 순수 shadow 경계입니다. 모델, 네트워크, 파일, clock, broker, 주문 API를 호출하지 않으며 후보나 보유 universe를 넓히지 않습니다.
 
-첫 구현 범위는 US SWING ENTRY/HOLDING뿐입니다. KR과 LONG_TERM 판단, horizon mandate,
-portfolio optimizer는 이 truth table을 재사용해 추측하지 않고 별도 gate가 생길 때까지
-범위 밖입니다. 현재 기본 CLI에는 production preparation/research/claim-verifier adapter가
-연결되지 않아 `CONFIG_UNAVAILABLE`로 닫히며, fixture/recorded 검증 통과를 실제 shadow
-운영으로 오해해서는 안 됩니다. 모든 action은 조언이고 매수·매도는 사용자가 직접 합니다.
+첫 구현 범위는 US SWING ENTRY/HOLDING뿐입니다. KR과 LONG_TERM 판단, horizon mandate, portfolio optimizer는 이 truth table을 재사용해 추측하지 않고 별도 gate가 생길 때까지 범위 밖입니다. 현재 기본 CLI에는 production preparation/research/claim-verifier adapter가 연결되지 않아 `CONFIG_UNAVAILABLE`로 닫히며, fixture/recorded 검증 통과를 실제 shadow 운영으로 오해해서는 안 됩니다. 모든 action은 조언이고 매수·매도는 사용자가 직접 합니다.
 
-ENTRY 우선순위는 item/identity 미승인 `REVIEW`, non-candidate signal omit, 필수
-mandate/signal/price/exposure gap `REVIEW`, deterministic exposure fail `AVOID`, research
-gap/conflict `REVIEW`, action-eligible `MATERIAL_ADVERSE` `AVOID`, 나머지 `BUY`입니다.
-독립 exposure fail이 있으면 stale/unapproved evidence가 없어도 `AVOID`가 유지되지만,
-evidence conflict만으로 adverse veto를 추측하지 않고 `REVIEW`합니다.
+ENTRY 우선순위는 item/identity 미승인 `REVIEW`, non-candidate signal omit, 필수 mandate/signal/price/exposure gap `REVIEW`, deterministic exposure fail `AVOID`, research gap/conflict `REVIEW`, action-eligible `MATERIAL_ADVERSE` `AVOID`, 나머지 `BUY`입니다. 독립 exposure fail이 있으면 stale/unapproved evidence가 없어도 `AVOID`가 유지되지만, evidence conflict만으로 adverse veto를 추측하지 않고 `REVIEW`합니다.
 
-HOLDING 우선순위는 current broker/candle/rule에 근거한 hard stop/confirmed exit `SELL`,
-item/identity 또는 deterministic input gap `REVIEW`, action-eligible material adverse
-`REVIEW`, research coverage gap/error `REVIEW`, 나머지 `HOLD`입니다. 유효한 hard
-`SELL`은 supportive/adverse evidence, timeout, conflict, `NOT_SELECTED_CAP`이
-`HOLD`/`REVIEW`로 낮출 수 없습니다. research selection은 priority/order로 최대 5개만
-고르는 별도 순수 정책이고, 여섯 번째 이후 holding도 compiler universe에는 남아 정확히
-한 번 평가됩니다. selection result는 선택 당시 전체 holding universe의 immutable policy
-snapshot에 process-local로 결속되고 `compile_holding`의 필수 입력입니다. compiler는
-selection과 다른 subset/누락/중복 universe를 거부하고, unselected holding에
-`NOT_SELECTED_CAP`을 직접 적용합니다. 모든 compiler enum은 문자열 equality가 아니라
-canonical enum member identity까지 확인하므로 raw/fresh-equal 문자열 mutation은 action
-precedence를 바꿀 수 없습니다. item ID와 research priority/order도 매 selection/compile에서
-exact scalar type과 lane/ticker/grammar/range를 재검증한 snapshot만 정렬에 사용하므로
-equal subclass나 post-factory mutation은 selection, output order, canonical hash를 바꿀 수
-없습니다.
+HOLDING 우선순위는 current broker/candle/rule에 근거한 hard stop/confirmed exit `SELL`, item/identity 또는 deterministic input gap `REVIEW`, action-eligible material adverse `REVIEW`, research coverage gap/error `REVIEW`, 나머지 `HOLD`입니다. 유효한 hard `SELL`은 supportive/adverse evidence, timeout, conflict, `NOT_SELECTED_CAP`이 `HOLD`/`REVIEW`로 낮출 수 없습니다. research selection은 priority/order로 최대 5개만 고르는 별도 순수 정책이고, 여섯 번째 이후 holding도 compiler universe에는 남아 정확히 한 번 평가됩니다. selection result는 선택 당시 전체 holding universe의 immutable policy snapshot에 process-local로 결속되고 `compile_holding`의 필수 입력입니다. compiler는 selection과 다른 subset/누락/중복 universe를 거부하고, unselected holding에 `NOT_SELECTED_CAP`을 직접 적용합니다. 모든 compiler enum은 문자열 equality가 아니라 canonical enum member identity까지 확인하므로 raw/fresh-equal 문자열 mutation은 action precedence를 바꿀 수 없습니다. item ID와 research priority/order도 매 selection/compile에서 exact scalar type과 lane/ticker/grammar/range를 재검증한 snapshot만 정렬에 사용하므로 equal subclass나 post-factory mutation은 selection, output order, canonical hash를 바꿀 수 없습니다.
 
 ### Decision Board V0 claim evidence policy (shadow)
 
@@ -502,19 +447,13 @@ equal subclass나 post-factory mutation은 selection, output order, canonical ha
 
 ### Decision Board V0 shadow graduation policy
 
-- 첫 측정 전에 policy/researcher/verifier version, planned ENTRY/HOLDING slot, diff reason,
-  provider/coverage/freshness threshold를 local gate manifest로 승인합니다.
-- 최소 20 US 거래 session 동안 모든 planned slot과 기존 경로의 후보/action 차이를
-  `EXPECTED_POLICY_CHANGE|INPUT_GAP|SOURCE_GAP|BUG|UNEXPLAINED`로 분류합니다.
-- `UNEXPLAINED`, privacy leak, order/notification access, replay mismatch, eligible holding
-  누락, queue 밖 hard-SELL 누락은 각각 0건이어야 합니다.
-- 관찰 뒤 threshold를 바꾸거나 서로 다른 policy version을 한 통계로 합치지 않습니다.
-  변경 시 새 gate version과 새 20-session 기간이 필요합니다.
-- gate 통과는 다음 cutover 검토 자격일 뿐 schedule/load, notification, workflow,
-  credential scope를 자동 변경하지 않습니다. 주문 실행은 영구적으로 사용자 수동입니다.
+- 첫 측정 전에 policy/researcher/verifier version, planned ENTRY/HOLDING slot, diff reason, provider/coverage/freshness threshold를 local gate manifest로 승인합니다.
+- 최소 20 US 거래 session 동안 모든 planned slot과 기존 경로의 후보/action 차이를 `EXPECTED_POLICY_CHANGE|INPUT_GAP|SOURCE_GAP|BUG|UNEXPLAINED`로 분류합니다.
+- `UNEXPLAINED`, privacy leak, order/notification access, replay mismatch, eligible holding 누락, queue 밖 hard-SELL 누락은 각각 0건이어야 합니다.
+- 관찰 뒤 threshold를 바꾸거나 서로 다른 policy version을 한 통계로 합치지 않습니다. 변경 시 새 gate version과 새 20-session 기간이 필요합니다.
+- gate 통과는 다음 cutover 검토 자격일 뿐 schedule/load, notification, workflow, credential scope를 자동 변경하지 않습니다. 주문 실행은 영구적으로 사용자 수동입니다.
 
-측정 절차와 산식은 [Decision Board shadow evaluation](decision-board-shadow-evaluation.md),
-public interface는 [Decision Board V0 reference](decision-board.md)를 기준으로 합니다.
+측정 절차와 산식은 [Decision Board shadow evaluation](decision-board-shadow-evaluation.md), public interface는 [Decision Board V0 reference](decision-board.md)를 기준으로 합니다.
 
 ### 6.2 `sell_mode=sma_ema_hybrid` (이익 보호 + 하드스탑)
 

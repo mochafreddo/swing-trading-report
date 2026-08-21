@@ -7,45 +7,31 @@ Scope: AI Brief OpenAI display-language guidance and Telegram report text
 
 ## Context
 
-AI Brief Telegram report notifications already use Telegram HTML rich text and a
-mostly Korean structure. The remaining English in the operator-facing message comes
-from two places:
+AI Brief Telegram report notifications already use Telegram HTML rich text and a mostly Korean structure. The remaining English in the operator-facing message comes from two places:
 
-- OpenAI-generated display fields such as recommendation `rationale`, `checklist`,
-  `vetoed_candidates[].reason`, watch reasons, retrigger conditions, and issue
-  messages.
-- Formatter diagnostics that expose internal labels such as `source issue`,
-  `system issue`, `source_chain`, and `source_providers`.
+- OpenAI-generated display fields such as recommendation `rationale`, `checklist`, `vetoed_candidates[].reason`, watch reasons, retrigger conditions, and issue messages.
+- Formatter diagnostics that expose internal labels such as `source issue`, `system issue`, `source_chain`, and `source_providers`.
 
-Source article titles are external evidence and should remain in their original
-language. Tickers, confidence values, actions, issue codes, source refs, and report
-contract fields also remain unchanged.
+Source article titles are external evidence and should remain in their original language. Tickers, confidence values, actions, issue codes, source refs, and report contract fields also remain unchanged.
 
 ## Problem
 
-The Telegram message can read as mixed Korean/English even when the report sections
-are Korean. This slows down quick mobile review because the most important parts,
-especially recommendation reasons and exclusions, are often in English.
+The Telegram message can read as mixed Korean/English even when the report sections are Korean. This slows down quick mobile review because the most important parts, especially recommendation reasons and exclusions, are often in English.
 
 ## Goals
 
-- Make the AI Brief Telegram message read Korean-first for human-facing explanation
-  text.
-- Ask the OpenAI provider to return Korean for display fields that are meant for the
-  operator.
+- Make the AI Brief Telegram message read Korean-first for human-facing explanation text.
+- Ask the OpenAI provider to return Korean for display fields that are meant for the operator.
 - Localize Telegram-only diagnostic labels and recurring fixed phrases.
 - Preserve report contracts and machine-readable identifiers.
 - Preserve original news/source titles instead of translating them.
-- Keep scan/sell Telegram, Slack summaries, skipped notifications, and strategy logic
-  unchanged.
+- Keep scan/sell Telegram, Slack summaries, skipped notifications, and strategy logic unchanged.
 
 ## Non-Goals
 
 - Do not add machine translation for existing or third-party text.
-- Do not translate news headlines, URLs, source provider names, ticker symbols,
-  confidence/action enums, issue codes, or storage keys.
-- Do not change recommendation ranking, quality gates, source selection, or article
-  reader behavior.
+- Do not translate news headlines, URLs, source provider names, ticker symbols, confidence/action enums, issue codes, or storage keys.
+- Do not change recommendation ranking, quality gates, source selection, or article reader behavior.
 - Do not add a locale setting or multi-language preference system.
 - Do not change Telegram transport or parse mode.
 
@@ -58,18 +44,14 @@ Apply both layers:
 
 Alternatives considered:
 
-- Prompt only: natural for new model output, but fake provider text and diagnostics
-  would still leak English.
-- Formatter only: stable for diagnostics, but model-generated recommendation reasons
-  would still arrive in English.
+- Prompt only: natural for new model output, but fake provider text and diagnostics would still leak English.
+- Formatter only: stable for diagnostics, but model-generated recommendation reasons would still arrive in English.
 
-The two-layer approach is the smallest change that makes new Telegram messages
-Korean-first without changing report semantics.
+The two-layer approach is the smallest change that makes new Telegram messages Korean-first without changing report semantics.
 
 ## OpenAI Provider Language Rules
 
-`OpenAiBriefProvider` should keep the existing structured output schema and add
-language guidance to the request instructions:
+`OpenAiBriefProvider` should keep the existing structured output schema and add language guidance to the request instructions:
 
 - Write these user-facing fields in Korean:
   - `recommendations[].rationale`
@@ -87,28 +69,21 @@ language guidance to the request instructions:
   - article titles, URLs, and published dates
 - Do not use automated-order language in Korean or English.
 
-The fake provider should switch its fixed rationale/checklist strings to Korean so
-local and test-generated Telegram previews match the production intent.
+The fake provider should switch its fixed rationale/checklist strings to Korean so local and test-generated Telegram previews match the production intent.
 
 ## Telegram Formatter Rules
 
-`build_ai_brief_telegram_report_text(...)` remains the single AI Brief Telegram body
-builder. It should continue to escape all dynamic values before embedding them in
-Telegram HTML.
+`build_ai_brief_telegram_report_text(...)` remains the single AI Brief Telegram body builder. It should continue to escape all dynamic values before embedding them in Telegram HTML.
 
 Formatter-local changes:
 
 - Render issue labels as `소스 이슈` and `시스템 이슈`.
-- Render source chain/provider diagnostics as Korean-readable summaries instead of
-  raw `source_chain=...` and `source_providers=...` labels.
-- Translate recurring fixed fallback phrases such as fake-provider rationale and
-  source/provider issue messages when they are generated by local code.
-- Keep dynamic model rationale and veto/watch reasons as supplied by the report; do
-  not attempt automatic translation in the formatter.
+- Render source chain/provider diagnostics as Korean-readable summaries instead of raw `source_chain=...` and `source_providers=...` labels.
+- Translate recurring fixed fallback phrases such as fake-provider rationale and source/provider issue messages when they are generated by local code.
+- Keep dynamic model rationale and veto/watch reasons as supplied by the report; do not attempt automatic translation in the formatter.
 - Keep source article titles as original text.
 
-The formatter should stay compact so the current line-based Telegram splitter remains
-acceptable for HTML output.
+The formatter should stay compact so the current line-based Telegram splitter remains acceptable for HTML output.
 
 ## Data Flow
 
@@ -120,16 +95,12 @@ Entry report and source rows
   -> Telegram sendMessage(parse_mode=HTML)
 ```
 
-Stored artifacts may still contain English if a model ignores the instruction or if
-they were generated before this change. The formatter should not rewrite those
-free-text fields beyond local fixed-label localization.
+Stored artifacts may still contain English if a model ignores the instruction or if they were generated before this change. The formatter should not rewrite those free-text fields beyond local fixed-label localization.
 
 ## Error Handling
 
-- Existing provider contract validation remains the boundary for malformed model
-  output.
-- If the model returns English despite the instruction, keep the output rather than
-  failing the report.
+- Existing provider contract validation remains the boundary for malformed model output.
+- If the model returns English despite the instruction, keep the output rather than failing the report.
 - Existing automated-order-language guards remain active for Korean and English text.
 - Telegram HTML escaping and link safety rules remain unchanged.
 
@@ -157,19 +128,15 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest -q tests/test_notification_text.p
 
 ## Documentation
 
-Update AI Brief API/operations documentation only if implementation changes visible
-operator-facing notification behavior beyond the current rich-text contract.
+Update AI Brief API/operations documentation only if implementation changes visible operator-facing notification behavior beyond the current rich-text contract.
 
-No `docs/STRATEGY.md` update is needed because recommendation strategy, source
-quality gates, and trading logic do not change.
+No `docs/STRATEGY.md` update is needed because recommendation strategy, source quality gates, and trading logic do not change.
 
 ## Acceptance Criteria
 
-- New OpenAI AI Brief outputs are instructed to produce Korean user-facing reasons and
-  checklist text.
+- New OpenAI AI Brief outputs are instructed to produce Korean user-facing reasons and checklist text.
 - AI Brief Telegram diagnostic labels are Korean-first.
 - News/source titles remain original and unmodified.
 - Machine-readable report fields and enums are unchanged.
-- Scan/sell Telegram, Slack, skipped notifications, and AI Brief quality logic are
-  unchanged.
+- Scan/sell Telegram, Slack, skipped notifications, and AI Brief quality logic are unchanged.
 - Targeted tests pass.

@@ -95,8 +95,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab backtest --data-file data/history.js
 UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief --entry-report reports/YYYY-MM-DD.entry.json
 ```
 
-AI Brief source URL 본문 확인을 로컬에서 켜려면 `lightpanda` 바이너리가 `PATH`에
-있어야 합니다.
+AI Brief source URL 본문 확인을 로컬에서 켜려면 `lightpanda` 바이너리가 `PATH`에 있어야 합니다.
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief \
@@ -107,17 +106,13 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab ai-brief \
   --article-reader-max-urls 8
 ```
 
-Reader는 source discovery 이후 선택된 공개 URL만 읽고 bounded excerpt와
-`article_read` 상태를 리포트에 저장합니다. paywall, CAPTCHA, 로그인, robots/bot
-block, 접근 제어는 우회하지 않습니다.
+Reader는 source discovery 이후 선택된 공개 URL만 읽고 bounded excerpt와 `article_read` 상태를 리포트에 저장합니다. paywall, CAPTCHA, 로그인, robots/bot block, 접근 제어는 우회하지 않습니다.
 
 `scan`/`sell`/`entry`는 KIS/Supabase/시장 데이터 상태에 따라 실패할 수 있습니다. 실패 시 [Troubleshooting](troubleshooting.md)을 먼저 확인합니다.
 
 ## 5. Web UI 실행
 
-Direct web scripts preload the repository root `.env` before validation.
-`web/.env` is not a supported env file for this project. Keep local web secrets in
-the root `.env` or export them through `.envrc.local` when direnv is active.
+Direct web scripts preload the repository root `.env` before validation. `web/.env` is not a supported env file for this project. Keep local web secrets in the root `.env` or export them through `.envrc.local` when direnv is active.
 
 Docker Compose production mode:
 
@@ -198,17 +193,13 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-553
 
 로컬 QA 리포트, baseline, 스크린샷은 `.gstack/qa-reports/`에 저장합니다. 이 디렉터리는 검증 증거용 로컬 산출물이므로 git에 커밋하지 않습니다.
 
-Toss scheduled holdings sync 경로를 live Toss나 remote holdings 없이 확인하려면 local
-Supabase와 web env를 준비한 뒤 fixture-backed QA를 실행합니다.
+Toss scheduled holdings sync 경로를 live Toss나 remote holdings 없이 확인하려면 local Supabase와 web env를 준비한 뒤 fixture-backed QA를 실행합니다.
 
 ```bash
 just qa-toss-sync
 ```
 
-이 명령은 web 컨테이너를 QA fixture source로 재생성하고, local admin login,
-scheduled route bearer token, seeded holdings diff apply, 원복, fixture 해제를 한 번에
-검증합니다. 운영/live sync에서는 `TOSS_SYNC_SOURCE`와
-`TOSS_SYNC_QA_FIXTURE_ENABLED`를 unset 상태로 둡니다.
+이 명령은 web 컨테이너를 QA fixture source로 재생성하고, local admin login, scheduled route bearer token, seeded holdings diff apply, 원복, fixture 해제를 한 번에 검증합니다. 운영/live sync에서는 `TOSS_SYNC_SOURCE`와 `TOSS_SYNC_QA_FIXTURE_ENABLED`를 unset 상태로 둡니다.
 
 ## 8. 자주 발생하는 로컬 문제
 

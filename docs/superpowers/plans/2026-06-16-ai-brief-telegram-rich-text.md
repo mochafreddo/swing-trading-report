@@ -509,13 +509,11 @@ UV_CACHE_DIR=.uv-cache uv run python -m pytest -q \
   tests/test_ai_brief_workflow.py::test_ai_brief_workflow_uploads_artifacts_and_delivery_is_opt_in
 ```
 
-Expected: FAIL because the AI Brief Telegram send step does not yet split long
-rich-text messages and send each part with `parse_mode=HTML`.
+Expected: FAIL because the AI Brief Telegram send step does not yet split long rich-text messages and send each part with `parse_mode=HTML`.
 
 - [ ] **Step 3: Add HTML chunked delivery to AI Brief report delivery**
 
-In `.github/workflows/ai-brief.yml`, update only the `Send Telegram notification`
-step that sends `ai-brief.telegram.txt`:
+In `.github/workflows/ai-brief.yml`, update only the `Send Telegram notification` step that sends `ai-brief.telegram.txt`:
 
 ```yaml
           python - <<'PY'
@@ -737,8 +735,7 @@ Expected: commit succeeds.
 
 - [ ] **Step 1: Update notification architecture documentation**
 
-In `docs/ARCHITECTURE.md`, replace the paragraph bullet that starts with
-`` `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다.`` with this text:
+In `docs/ARCHITECTURE.md`, replace the paragraph bullet that starts with `` `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다.`` with this text:
 
 ```markdown
 9. `notification_text`는 생성된 artifact를 Telegram 본문/Slack key-value 요약 텍스트로 렌더링할 수 있습니다. AI Brief Telegram 리포트 본문은 Telegram HTML rich text(`parse_mode=HTML`)로 decision-first 형식을 사용하며, `NO_SIGNAL`이면 휴식 문구, `NEEDS_REVIEW_WATCH_ONLY`이면 watch-only 재트리거 확인 문구, `FINAL_JUDGMENT`이면 source-backed 후보, `NEEDS_REVIEW_WEAK_NEWS`이면 downgraded copy와 issue 요약을 보여줍니다. `watch_candidates[]`, `source_provider_summary`, `vetoed_candidates[]`가 있으면 추천과 별도로 표시합니다. Slack 요약은 watch/source chain/veto count를 key-value로 포함하고, scan/sell Telegram 메시지는 기존 plain text 형식을 유지합니다.

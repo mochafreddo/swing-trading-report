@@ -141,10 +141,7 @@ Run:
 UV_CACHE_DIR=.uv-cache uv run python -m pytest tests/test_config_validation_layers.py tests/test_runtime_config_contract.py tests/test_config_conflict_binding_sync.py -q
 ```
 
-Expected: FAIL because `Config` has no `market_regime_unavailable_policy` attribute
-and `MARKET_REGIME_UNAVAILABLE_POLICY` is not in `_ENV_YAML_CONFLICT_BINDINGS`.
-If the field is added with raw `parser.env_str(...)`, the normalization test
-must still fail until `_resolve_mode_string(...)` is used.
+Expected: FAIL because `Config` has no `market_regime_unavailable_policy` attribute and `MARKET_REGIME_UNAVAILABLE_POLICY` is not in `_ENV_YAML_CONFLICT_BINDINGS`. If the field is added with raw `parser.env_str(...)`, the normalization test must still fail until `_resolve_mode_string(...)` is used.
 
 - [ ] **Step 3: Implement the config contract**
 
@@ -166,10 +163,7 @@ Add the field to `_StrategySection`:
 market_regime_unavailable_policy: str
 ```
 
-In `_parse_strategy_section`, resolve this as a mode-like string before building
-`_StrategySection`. Do not use `parser.env_str(...)` directly here; `_normalize_choice`
-expects an already normalized value and `strategy_mode` follows the same
-`_resolve_mode_string(...)` path.
+In `_parse_strategy_section`, resolve this as a mode-like string before building `_StrategySection`. Do not use `parser.env_str(...)` directly here; `_normalize_choice` expects an already normalized value and `strategy_mode` follows the same `_resolve_mode_string(...)` path.
 
 ```python
 market_regime_unavailable_policy = _resolve_mode_string(
@@ -286,11 +280,7 @@ assert row.entry_price_issue_code == "kis_live_snapshot_missing"
 assert row.entry_price_issues == ["kis_live_snapshot_missing"]
 ```
 
-Add summary assertions to
-`test_run_entry_e2e_kr_pre_open_requires_snapshot_marker_even_with_live_price`
-in `tests/test_entry_command.py`. This is the KIS live snapshot missing case;
-do not add these `kis_live_snapshot_missing` assertions to the provider
-credentials test.
+Add summary assertions to `test_run_entry_e2e_kr_pre_open_requires_snapshot_marker_even_with_live_price` in `tests/test_entry_command.py`. This is the KIS live snapshot missing case; do not add these `kis_live_snapshot_missing` assertions to the provider credentials test.
 
 ```python
 assert payload["summary"]["missing_entry_price_by_reason"] == {
@@ -301,8 +291,7 @@ assert payload["entries"][0]["entry_price_status"] == "missing"
 assert payload["entries"][0]["entry_price_issue_code"] == "kis_live_snapshot_missing"
 ```
 
-Update existing available-price E2E tests so the success path also proves the
-new diagnostics. In `test_run_entry_e2e_uses_kis_us_snapshot_price`, add:
+Update existing available-price E2E tests so the success path also proves the new diagnostics. In `test_run_entry_e2e_uses_kis_us_snapshot_price`, add:
 
 ```python
 assert payload["entries"][0]["entry_price_status"] == "available"
@@ -320,8 +309,7 @@ assert payload["entries"][0]["entry_price_issue_code"] is None
 assert payload["summary"]["entry_price_sources"] == {"pykrx_after_close_daily": 1}
 ```
 
-Add a KIS after-close daily-candle success test so the third source code is
-covered:
+Add a KIS after-close daily-candle success test so the third source code is covered:
 
 ```python
 def test_run_entry_e2e_uses_kis_us_after_close_daily_price_diagnostics(
@@ -388,8 +376,7 @@ def test_run_entry_e2e_uses_kis_us_after_close_daily_price_diagnostics(
     assert payload["summary"]["entry_price_sources"] == {"kis_after_close_daily": 1}
 ```
 
-In `test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing`, assert the
-credentials-specific diagnostic instead:
+In `test_run_entry_e2e_returns_exit_1_when_all_prices_are_missing`, assert the credentials-specific diagnostic instead:
 
 ```python
 assert payload["summary"]["missing_entry_price_by_reason"] == {
@@ -399,9 +386,7 @@ assert payload["entries"][0]["entry_price_status"] == "missing"
 assert payload["entries"][0]["entry_price_issue_code"] == "kis_credentials_missing"
 ```
 
-Update the existing exact summary assertion in
-`test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty` so the
-empty-entry summary includes the new aggregate fields:
+Update the existing exact summary assertion in `test_run_entry_e2e_writes_empty_report_when_buy_candidates_are_empty` so the empty-entry summary includes the new aggregate fields:
 
 ```python
 assert payload["summary"] == {
@@ -417,9 +402,7 @@ assert payload["summary"] == {
 }
 ```
 
-Update every direct `evaluate_entry_candidates` test helper in
-`tests/test_entry_command.py` that still returns `float | None`. Add a small
-helper near `_entry_candidate`:
+Update every direct `evaluate_entry_candidates` test helper in `tests/test_entry_command.py` that still returns `float | None`. Add a small helper near `_entry_candidate`:
 
 ```python
 def _entry_price_result(
@@ -449,13 +432,9 @@ price_lookup_fn=lambda _ticker: _entry_price_result(None)
 price_lookup_fn=lambda ticker: _entry_price_result(prices.get(ticker))
 ```
 
-Also update fake `_make_price_lookup` providers in the same file from
-`Callable[[str], float | None]` to
-`Callable[[str], entry.EntryPriceLookupResult]`, returning
-`_entry_price_result(market_prices.get(ticker))`.
+Also update fake `_make_price_lookup` providers in the same file from `Callable[[str], float | None]` to `Callable[[str], entry.EntryPriceLookupResult]`, returning `_entry_price_result(market_prices.get(ticker))`.
 
-Update the existing `_make_price_lookup` tests in `tests/test_entry_command.py`
-that currently assert `price_lookup("AAPL.NASD") is None`.
+Update the existing `_make_price_lookup` tests in `tests/test_entry_command.py` that currently assert `price_lookup("AAPL.NASD") is None`.
 
 In `test_make_price_lookup_logs_kis_detail_failure`, replace that assertion with:
 
@@ -467,8 +446,7 @@ assert lookup_result.source == "kis_live_snapshot"
 assert lookup_result.issue_codes == ("provider_error",)
 ```
 
-In `test_make_price_lookup_logs_kis_us_snapshot_rejection_reason`, extend the
-parametrize tuple with `expected_issue_code`:
+In `test_make_price_lookup_logs_kis_us_snapshot_rejection_reason`, extend the parametrize tuple with `expected_issue_code`:
 
 ```python
 @pytest.mark.parametrize(
@@ -588,11 +566,7 @@ class EntryPriceLookupResult:
         return cls(price=None, status="rejected", source=source, issue_codes=(issue_code,))
 ```
 
-Change `_make_price_lookup` to return
-`Callable[[str], EntryPriceLookupResult]`. Also update the `price_lookup_fn`
-type hints in `_evaluate_entry_candidate` and `evaluate_entry_candidates` from
-`Callable[[str], float | None]` to `Callable[[str], EntryPriceLookupResult]`.
-Use these source codes:
+Change `_make_price_lookup` to return `Callable[[str], EntryPriceLookupResult]`. Also update the `price_lookup_fn` type hints in `_evaluate_entry_candidate` and `evaluate_entry_candidates` from `Callable[[str], float | None]` to `Callable[[str], EntryPriceLookupResult]`. Use these source codes:
 
 ```python
 "kis_after_close_daily"
@@ -1089,11 +1063,7 @@ class _QualityState:
     reasons: list[str]
 ```
 
-Do not add a candidate-level `data_warning` reason in the first pass. Current
-hybrid system/data failures return `HybridEvaluationResult(candidate=None, ...)`
-and are recorded outside the candidate list, so `_build_quality_state` should
-only classify emitted-candidate inputs: `entry_state`, `rs_diff`, and
-`risk_alignment`.
+Do not add a candidate-level `data_warning` reason in the first pass. Current hybrid system/data failures return `HybridEvaluationResult(candidate=None, ...)` and are recorded outside the candidate list, so `_build_quality_state` should only classify emitted-candidate inputs: `entry_state`, `rs_diff`, and `risk_alignment`.
 
 Add:
 
@@ -1273,8 +1243,7 @@ def test_write_scan_report_includes_market_regime_policy_summary() -> None:
     assert summary["market_regime_blocked_by_market"] == {"US": 2}
 ```
 
-Update `test_write_scan_report_includes_market_regime_filter_in_config_snapshot`
-so the config snapshot also asserts the new policy field:
+Update `test_write_scan_report_includes_market_regime_filter_in_config_snapshot` so the config snapshot also asserts the new policy field:
 
 ```python
 assert (
@@ -1283,8 +1252,7 @@ assert (
 )
 ```
 
-Update the existing tests in `tests/test_market_regime_filter.py` that still
-expect `_resolve_market_regime_context` to return a plain dict.
+Update the existing tests in `tests/test_market_regime_filter.py` that still expect `_resolve_market_regime_context` to return a plain dict.
 
 Add `MarketRegimeResolution` to the import from `sab.scan_evaluation`.
 
@@ -1311,9 +1279,7 @@ assert resolution.unavailable_markets == {}
 assert resolution.issues == []
 ```
 
-In `test_evaluate_candidates_skips_ticker_when_market_regime_blocked` and
-`test_evaluate_candidates_keeps_other_market_when_one_market_blocked`, replace
-the monkeypatched plain dict return value with:
+In `test_evaluate_candidates_skips_ticker_when_market_regime_blocked` and `test_evaluate_candidates_keeps_other_market_when_one_market_blocked`, replace the monkeypatched plain dict return value with:
 
 ```python
 MarketRegimeResolution(
@@ -1323,10 +1289,7 @@ MarketRegimeResolution(
 )
 ```
 
-Keep the existing default `warn_continue` system-issue contract in
-`test_evaluate_candidates_disables_market_regime_filter_when_benchmark_unavailable`.
-After the resolver refactor, it should still assert the aggregated labeled
-message, not the raw resolver issue:
+Keep the existing default `warn_continue` system-issue contract in `test_evaluate_candidates_disables_market_regime_filter_when_benchmark_unavailable`. After the resolver refactor, it should still assert the aggregated labeled message, not the raw resolver issue:
 
 ```python
 assert runtime.system_issues == [
@@ -1374,8 +1337,7 @@ class MarketRegimeResolution:
 
 Change `_resolve_market_regime_context` to return `MarketRegimeResolution`.
 
-When the filter is disabled or there are no active markets, return an empty
-resolution instead of `{}`:
+When the filter is disabled or there are no active markets, return an empty resolution instead of `{}`:
 
 ```python
 return MarketRegimeResolution(
@@ -1385,8 +1347,7 @@ return MarketRegimeResolution(
 )
 ```
 
-On missing benchmark ticker, build one unavailable object and append the same
-message to `issues`:
+On missing benchmark ticker, build one unavailable object and append the same message to `issues`:
 
 ```python
 unavailable = MarketRegimeUnavailable(
@@ -1421,11 +1382,7 @@ return MarketRegimeResolution(
 )
 ```
 
-Move system-issue recording out of `_resolve_market_regime_context`. The
-resolver should only populate `MarketRegimeResolution.issues` and structured
-`unavailable_markets`; `_evaluate_candidates` owns preserving the existing
-report contract by recording one aggregated labeled issue through
-`_record_system_issue(...)`:
+Move system-issue recording out of `_resolve_market_regime_context`. The resolver should only populate `MarketRegimeResolution.issues` and structured `unavailable_markets`; `_evaluate_candidates` owns preserving the existing report contract by recording one aggregated labeled issue through `_record_system_issue(...)`:
 
 ```python
 if market_regime_resolution.issues:
@@ -1441,9 +1398,7 @@ if market_regime_resolution.issues:
     )
 ```
 
-Do not mutate `runtime.system_issues` inside `_resolve_market_regime_context`,
-and do not record each raw resolver issue as a separate `system_issues` entry;
-either would break the existing report and test contract.
+Do not mutate `runtime.system_issues` inside `_resolve_market_regime_context`, and do not record each raw resolver issue as a separate `system_issues` entry; either would break the existing report and test contract.
 
 In `_evaluate_candidates`, change:
 
@@ -1521,8 +1476,7 @@ git commit -m "feat(strategy): 시장 레짐 unavailable 차단 정책을 구현
 
 - [ ] **Step 1: Write failing docs/env reference tests**
 
-In `tests/test_env_example_v11.py`, add the new key to the existing `required`
-set in `test_env_example_contains_v11_required_keys`:
+In `tests/test_env_example_v11.py`, add the new key to the existing `required` set in `test_env_example_contains_v11_required_keys`:
 
 ```python
 "MARKET_REGIME_UNAVAILABLE_POLICY",

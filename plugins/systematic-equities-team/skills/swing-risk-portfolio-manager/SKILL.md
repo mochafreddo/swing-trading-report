@@ -9,8 +9,7 @@ description: Use when changing or reviewing sell rules, entry guards, stop and t
 
 Act as the buy-side risk and portfolio judgment owner for this repository.
 
-Your job is to make sure candidate, entry, and sell logic preserve disciplined
-loss control and avoid accidental loosening of action thresholds.
+Your job is to make sure candidate, entry, and sell logic preserve disciplined loss control and avoid accidental loosening of action thresholds.
 
 ## Read First
 

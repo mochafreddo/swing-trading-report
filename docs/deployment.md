@@ -58,8 +58,7 @@ pnpm --dir web run build
 
 `just ci-web` injects secret-free placeholder env for web build. Direct `pnpm --dir web run build` needs valid placeholder or local env values.
 
-CI parity note: `.github/workflows/ci.yml` runs Python tests with coverage gate:
-`UV_CACHE_DIR=.uv-cache uv run python -m pytest -q --cov=sab --cov-report=term --cov-fail-under=70`.
+CI parity note: `.github/workflows/ci.yml` runs Python tests with coverage gate: `UV_CACHE_DIR=.uv-cache uv run python -m pytest -q --cov=sab --cov-report=term --cov-fail-under=70`.
 
 ## Pre-Deployment Checklist
 
@@ -91,12 +90,7 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-553
 curl -fsSI -o /dev/null -w '%{http_code} %{redirect_url}\n' http://127.0.0.1:${WEB_HOST_PORT:-55300}/reports
 ```
 
-Expected liveness result is `200` for `/login` and `/favicon.ico`. `/reports`
-must return a redirect to `/login?next=%2Freports` for an unauthenticated
-request. `/login` proves the Next.js server is responding; `/favicon.ico` keeps
-the default unauthenticated browser load from reporting a missing asset. The
-protected-page redirect proves the Next proxy auth gate is active. None of these
-checks prove authenticated Supabase-backed pages are healthy.
+Expected liveness result is `200` for `/login` and `/favicon.ico`. `/reports` must return a redirect to `/login?next=%2Freports` for an unauthenticated request. `/login` proves the Next.js server is responding; `/favicon.ico` keeps the default unauthenticated browser load from reporting a missing asset. The protected-page redirect proves the Next proxy auth gate is active. None of these checks prove authenticated Supabase-backed pages are healthy.
 
 Development profile:
 
@@ -154,21 +148,15 @@ Migration 뒤에는 `report_index`의 RLS/FORCE RLS가 모두 켜져 있고 `ano
 
 애플리케이션 rollback은 producer를 먼저 중지한 뒤 Web consumer와 Python adapter를 되돌립니다. Additive nullable column/index/migration은 legacy row를 바꾸지 않으므로 그대로 두는 것이 기본 rollback입니다. 이미 적용한 migration의 column/index 삭제나 Decision Board object/index row 삭제는 데이터 파괴 결정이므로 자동 수행하지 않고 forward-fix를 우선합니다. Storage와 index 사이 원자 coordination이 없으므로 index 실패 뒤 object를 자동 삭제하지 않습니다. matching authoritative index면 성공 수렴하고, absent/mismatch/unavailable이면 object를 보존한 채 typed cleanup failure로 관측합니다.
 
-20-session shadow gate 통과도 배포 트리거가 아닙니다. schedule/load, notification owner,
-credential scope는 별도 수동 승인과 rollback rehearsal 뒤에만 바뀔 수 있으며 Toss 주문
-capability는 영구적으로 추가하지 않습니다. [평가 절차](decision-board-shadow-evaluation.md)를
-참고하세요.
+20-session shadow gate 통과도 배포 트리거가 아닙니다. schedule/load, notification owner, credential scope는 별도 수동 승인과 rollback rehearsal 뒤에만 바뀔 수 있으며 Toss 주문 capability는 영구적으로 추가하지 않습니다. [평가 절차](decision-board-shadow-evaluation.md)를 참고하세요.
 
-For the 2026-06 holdings `entry_pattern` runtime migration, the DB smoke checks
-the column, enabled non-null replace-all writes, omitted-key preserve behavior,
-inactive-row null enforcement, and Add Buy replay shape:
+For the 2026-06 holdings `entry_pattern` runtime migration, the DB smoke checks the column, enabled non-null replace-all writes, omitted-key preserve behavior, inactive-row null enforcement, and Add Buy replay shape:
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/smoke_holdings_entry_pattern.sql
 ```
 
-Run it only against a confirmed local or staging target; the script opens its own
-transaction and rolls back the smoke rows.
+Run it only against a confirmed local or staging target; the script opens its own transaction and rolls back the smoke rows.
 
 ## GitHub Actions Deployment
 
@@ -224,10 +212,7 @@ UV_CACHE_DIR=.uv-cache uv run python -m sab sell-ai-brief-generate-scheduled \
 
 Generic wrapper live generation run:
 
-This is not a smoke test. The wrapper does not forward `--dry-run`; when the
-freshness marker is valid, it can generate reports, upload artifacts, and send
-Telegram through the delivery runner. Use the manual dry smoke above for
-non-side-effect verification.
+This is not a smoke test. The wrapper does not forward `--dry-run`; when the freshness marker is valid, it can generate reports, upload artifacts, and send Telegram through the delivery runner. Use the manual dry smoke above for non-side-effect verification.
 
 ```bash
 SAB_SELL_SCHEDULE_MODE=generation scripts/launchd/sab-scheduled-wrapper.sh --pipeline sell --scope MIXED
@@ -271,13 +256,7 @@ The local Toss holdings sync runs through `scripts/launchd/com.mochafreddo.sab.t
 
 Configure `TOSS_SYNC_JOB_TOKEN` and `TOSS_SYNC_AUTO_APPLY_ENABLED` in the root `.env`. Docker Compose reads that file when creating the web container, and `scripts/toss_daily_auto_sync.sh` uses the same root `.env` by default. After changing either value, recreate the web container with `docker compose up -d --build web` before relying on the launchd runner. `TOSS_SYNC_ENV_FILE` is only an override for isolated smoke tests; do not use a separate scheduler-only env file for the production Toss auto-sync token because the route and runner must share the same value.
 
-The optional reviewed US ticker fallback is configured separately with the
-paired `TOSS_SYNC_REVIEWED_MAPPING_B64` and
-`TOSS_SYNC_REVIEWED_MAPPING_SHA256` values. Keep the decoded personal mapping
-outside Git, export the pair from the local private environment (for example,
-`.envrc.local`), and recreate the web container after changing it. This mapping
-configuration does not enable scheduled apply, seal a broker snapshot, or
-authorize any order operation.
+The optional reviewed US ticker fallback is configured separately with the paired `TOSS_SYNC_REVIEWED_MAPPING_B64` and `TOSS_SYNC_REVIEWED_MAPPING_SHA256` values. Keep the decoded personal mapping outside Git, export the pair from the local private environment (for example, `.envrc.local`), and recreate the web container after changing it. This mapping configuration does not enable scheduled apply, seal a broker snapshot, or authorize any order operation.
 
 Manual smoke:
 
@@ -297,18 +276,9 @@ just qa-toss-sync
 
 ### BrokerSnapshotV0 rollout and rollback
 
-배포 순서는 반드시 `migration -> Web producer -> Python consumer`입니다.
-migration 적용 전에는 scheduled sync 중지 후 진행 중인 producer가 없는지 확인합니다.
-migration 뒤 첫 성공한 scheduled Toss sync 전까지는 `initial unsealed` 상태이며,
-Python consumer는 snapshot 부재를 fail-closed 처리해야 합니다. Web을 migration보다
-먼저 배포하면 seal RPC가 없으므로 성공 sync도 `marker_failed`가 됩니다.
+배포 순서는 반드시 `migration -> Web producer -> Python consumer`입니다. migration 적용 전에는 scheduled sync 중지 후 진행 중인 producer가 없는지 확인합니다. migration 뒤 첫 성공한 scheduled Toss sync 전까지는 `initial unsealed` 상태이며, Python consumer는 snapshot 부재를 fail-closed 처리해야 합니다. Web을 migration보다 먼저 배포하면 seal RPC가 없으므로 성공 sync도 `marker_failed`가 됩니다.
 
-이 RPC는 `service-role-only`, `SECURITY INVOKER`, `advice-only` 경계입니다.
-브라우저 호출이나 주문 생성·수정·취소 용도로 권한을 넓히지 않습니다. migration 적용
-전 코드 rollback만 Python consumer, Web producer 순서로 되돌립니다. 적용된 migration의
-table/revision 이력 삭제는 데이터 손실이므로 자동 rollback하지 않습니다. 새 DB RPC가
-적용된 뒤에는 구 Web rollback 금지입니다. producer 중지 후 새 producer와
-호환되는 `forward-fix` migration을 적용하고 검증이 끝난 뒤 scheduled sync를 재개합니다.
+이 RPC는 `service-role-only`, `SECURITY INVOKER`, `advice-only` 경계입니다. 브라우저 호출이나 주문 생성·수정·취소 용도로 권한을 넓히지 않습니다. migration 적용 전 코드 rollback만 Python consumer, Web producer 순서로 되돌립니다. 적용된 migration의 table/revision 이력 삭제는 데이터 손실이므로 자동 rollback하지 않습니다. 새 DB RPC가 적용된 뒤에는 구 Web rollback 금지입니다. producer 중지 후 새 producer와 호환되는 `forward-fix` migration을 적용하고 검증이 끝난 뒤 scheduled sync를 재개합니다.
 
 ## Rollback
 

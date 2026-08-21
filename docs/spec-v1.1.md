@@ -102,8 +102,7 @@
 #### 4.3.5 ticker 검색 계약(필수)
 
 - ticker 검색(`q`)은 `tickers_hydrated=true` 행만 대상으로 한다.
-  - `tickers_hydrated=false`는 “인덱스만 있고(혹은 파싱 실패) tickers가 비어있는 상태”로 간주하며,
-    목록/검색 결과에서 제외하고 경고로 노출한다.
+  - `tickers_hydrated=false`는 “인덱스만 있고(혹은 파싱 실패) tickers가 비어있는 상태”로 간주하며, 목록/검색 결과에서 제외하고 경고로 노출한다.
 
 ### 4.4 Postgres: `runtime_state` (필수)
 

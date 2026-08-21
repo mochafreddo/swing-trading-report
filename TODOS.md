@@ -18,20 +18,11 @@
 
 ### Type runtime_state domain and payload boundaries
 
-**What:** Split high-value `runtime_state` domains into typed tables/RPCs, or
-add explicit `state_domain`/`state_kind` columns, CHECK constraints,
-domain-specific writers, shared key builders, and contract tests for all
-runtime_state writes.
+**What:** Split high-value `runtime_state` domains into typed tables/RPCs, or add explicit `state_domain`/`state_kind` columns, CHECK constraints, domain-specific writers, shared key builders, and contract tests for all runtime_state writes.
 
-**Why:** Scheduler markers, Toss freshness, dispatch locks, login throttling,
-and caches currently share one untyped `state_key text primary key` plus JSONB
-payload table. A wrong prefix, TTL, or payload shape can silently break
-freshness, duplicate detection, run dispatch, or notification reconciliation.
+**Why:** Scheduler markers, Toss freshness, dispatch locks, login throttling, and caches currently share one untyped `state_key text primary key` plus JSONB payload table. A wrong prefix, TTL, or payload shape can silently break freshness, duplicate detection, run dispatch, or notification reconciliation.
 
-**Context:** Product review `ARCH-003` found that `runtime_state` has become a
-cross-domain coordination bus without typed boundaries. PR #210/#211 fixed the
-immediate scheduled Toss/Sell freshness failure, but the broader coordination
-surface still depends on string-key discipline and scattered payload contracts.
+**Context:** Product review `ARCH-003` found that `runtime_state` has become a cross-domain coordination bus without typed boundaries. PR #210/#211 fixed the immediate scheduled Toss/Sell freshness failure, but the broader coordination surface still depends on string-key discipline and scattered payload contracts.
 
 **Effort:** M-L
 **Priority:** P2
@@ -39,19 +30,11 @@ surface still depends on string-key discipline and scattered payload contracts.
 
 ### Harden scheduled Sell AI Brief generation retry boundaries
 
-**What:** Add continuous generation-lock renewal across long scheduled Sell AI
-Brief runs and record intermediate upload markers so retries can recover after
-a partial sell report upload or delegated delivery failure without duplicate or
-ambiguous artifacts.
+**What:** Add continuous generation-lock renewal across long scheduled Sell AI Brief runs and record intermediate upload markers so retries can recover after a partial sell report upload or delegated delivery failure without duplicate or ambiguous artifacts.
 
-**Why:** Long KIS/model/source/delivery work can approach lock TTL boundaries,
-and a retry after partial upload should not create a second sell report for the
-same session.
+**Why:** Long KIS/model/source/delivery work can approach lock TTL boundaries, and a retry after partial upload should not create a second sell report for the same session.
 
-**Context:** Reliability review found pre-existing generation resilience debt
-outside the PR #210/#211 fix path: generation renews around phases rather than
-continuously, and sell report upload does not have a separate recoverable marker
-before delegated Sell AI Brief delivery finishes.
+**Context:** Reliability review found pre-existing generation resilience debt outside the PR #210/#211 fix path: generation renews around phases rather than continuously, and sell report upload does not have a separate recoverable marker before delegated Sell AI Brief delivery finishes.
 
 **Effort:** M
 **Priority:** P2
@@ -59,18 +42,11 @@ before delegated Sell AI Brief delivery finishes.
 
 ### Consolidate AI Brief provider shared helpers
 
-**What:** Finish consolidating duplicated AI Brief provider helper logic across
-the general AI Brief and Sell AI Brief provider paths.
+**What:** Finish consolidating duplicated AI Brief provider helper logic across the general AI Brief and Sell AI Brief provider paths.
 
-**Why:** Provider parsing, validation, source-summary, and model-call helper
-logic is only partially shared. Keeping parallel implementations raises the
-chance that future provider behavior, validation, or telemetry fixes land in one
-path but not the other.
+**Why:** Provider parsing, validation, source-summary, and model-call helper logic is only partially shared. Keeping parallel implementations raises the chance that future provider behavior, validation, or telemetry fixes land in one path but not the other.
 
-**Context:** Code-quality review `CQ-001` found that the newer shared helpers
-are not fully adopted by `sab/ai_brief_providers.py` and the sell-specific
-provider path. This is not a PR #210/#211 release blocker, but it is worth
-tracking before the provider surface grows again.
+**Context:** Code-quality review `CQ-001` found that the newer shared helpers are not fully adopted by `sab/ai_brief_providers.py` and the sell-specific provider path. This is not a PR #210/#211 release blocker, but it is worth tracking before the provider surface grows again.
 
 **Effort:** M
 **Priority:** P3
@@ -78,18 +54,11 @@ tracking before the provider surface grows again.
 
 ### Split scheduled AI Brief orchestration hotspots
 
-**What:** Continue extracting focused components from the scheduled AI Brief and
-scheduled Sell AI Brief orchestration runners, especially around phase
-execution, marker reconciliation, upload/delivery handoff, and failure handling.
+**What:** Continue extracting focused components from the scheduled AI Brief and scheduled Sell AI Brief orchestration runners, especially around phase execution, marker reconciliation, upload/delivery handoff, and failure handling.
 
-**Why:** Large orchestration runners make lock/marker/idempotency bugs harder to
-review and increase the risk that future scheduling changes mix unrelated
-concerns.
+**Why:** Large orchestration runners make lock/marker/idempotency bugs harder to review and increase the risk that future scheduling changes mix unrelated concerns.
 
-**Context:** Code-quality review `CQ-002` found that scheduled AI Brief
-orchestration remains concentrated in large runner modules despite prior
-incremental refactors. Keep this as deferred maintenance after the first KST
-scheduled Sell AI Brief generation has proven stable.
+**Context:** Code-quality review `CQ-002` found that scheduled AI Brief orchestration remains concentrated in large runner modules despite prior incremental refactors. Keep this as deferred maintenance after the first KST scheduled Sell AI Brief generation has proven stable.
 
 **Effort:** M-L
 **Priority:** P3
@@ -121,17 +90,11 @@ scheduled Sell AI Brief generation has proven stable.
 
 ### Align app-console typography with Evidence Ledger V1
 
-**What:** Keep `Inter` as the V1 app-console font, alias display usage toward
-body typography, and remove hero-scale display treatment from authenticated
-console pages.
+**What:** Keep `Inter` as the V1 app-console font, alias display usage toward body typography, and remove hero-scale display treatment from authenticated console pages.
 
-**Why:** The V1 design system prioritizes scan speed and trust over expressive
-display typography, and `web/src/lib/__tests__/font-build-contract.test.ts`
-currently locks the local font variable contract.
+**Why:** The V1 design system prioritizes scan speed and trust over expressive display typography, and `web/src/lib/__tests__/font-build-contract.test.ts` currently locks the local font variable contract.
 
-**Context:** The 2026-07-07 Evidence Ledger design review decided not to add a
-new type pairing in V1. Future display typography can be revisited after the
-light-first shell, Reports proof, and component vocabulary are stable.
+**Context:** The 2026-07-07 Evidence Ledger design review decided not to add a new type pairing in V1. Future display typography can be revisited after the light-first shell, Reports proof, and component vocabulary are stable.
 
 **Effort:** S
 **Priority:** P2
@@ -139,16 +102,11 @@ light-first shell, Reports proof, and component vocabulary are stable.
 
 ### Metrics mobile card density pass
 
-**What:** Reduce the one-column stream of repeated metric cards on mobile after
-the 2026-07-07 `/design-review`.
+**What:** Reduce the one-column stream of repeated metric cards on mobile after the 2026-07-07 `/design-review`.
 
-**Why:** Metrics preserves the correct task order, but the mobile view is still a
-long sequence of similarly weighted cards. Operators need faster scanning of
-run quality, coverage, fallback, and issue trends.
+**Why:** Metrics preserves the correct task order, but the mobile view is still a long sequence of similarly weighted cards. Operators need faster scanning of run quality, coverage, fallback, and issue trends.
 
-**Context:** The 2026-07-07 design review fixed higher-impact Reports/Holdings
-mobile task ordering first. Revisit Metrics with grouping or denser chart
-summaries rather than adding more decorative card chrome.
+**Context:** The 2026-07-07 design review fixed higher-impact Reports/Holdings mobile task ordering first. Revisit Metrics with grouping or denser chart summaries rather than adding more decorative card chrome.
 
 **Effort:** M
 **Priority:** P3
@@ -156,58 +114,28 @@ summaries rather than adding more decorative card chrome.
 
 ### Investigate web CSS preload warning
 
-**What:** Investigate the repeated browser warning for an unused preloaded
-Next.js CSS chunk in the local web UI.
+**What:** Investigate the repeated browser warning for an unused preloaded Next.js CSS chunk in the local web UI.
 
-**Why:** It did not block the 2026-07-07 design fixes, but preload warnings can
-hide real performance regressions and make browser QA noisier.
+**Why:** It did not block the 2026-07-07 design fixes, but preload warnings can hide real performance regressions and make browser QA noisier.
 
-**Context:** `/design-review` observed the same warning across Reports,
-Holdings, Metrics, and Run after rebuilt local Docker verification. Treat this
-as performance-polish unless it starts affecting load timing or visual flashes.
+**Context:** `/design-review` observed the same warning across Reports, Holdings, Metrics, and Run after rebuilt local Docker verification. Treat this as performance-polish unless it starts affecting load timing or visual flashes.
 
 **Effort:** S
 **Priority:** P3
 **Depends on:** No dependency.
 
-- 2026-06-20: Run a follow-up authenticated `/design-review` on the internal
-  console pages after admin credentials or browser cookies are available. The
-  2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports,
-  holdings, metrics, and run, but authenticated Supabase-backed page states
-  still need visual audit with real credentials or browser auth state.
-- 2026-06-19: Add redacted Toss holdings snapshot upload only after the first
-  local-only Toss sync lands and real Toss fixture redaction tests prove that
-  account identifiers, bearer tokens, and sensitive raw response fields cannot
-  leak into Supabase Storage. First implementation keeps raw snapshots local and
-  stores only redacted summary/hash metadata in runtime state.
-- 2026-06-19: Add a Toss-powered account readiness layer after broker-backed
-  holdings sync is stable, covering NAV, buying power, sellable quantity,
-  stop-distance position sizing, exposure, and downside amount/portfolio-percent
-  context. Keep this out of the first holdings sync PR to avoid mixing state sync
-  with risk-budget decisions.
+- 2026-06-20: Run a follow-up authenticated `/design-review` on the internal console pages after admin credentials or browser cookies are available. The 2026-06-22 QA pass verified unauthenticated Next proxy redirects for reports, holdings, metrics, and run, but authenticated Supabase-backed page states still need visual audit with real credentials or browser auth state.
+- 2026-06-19: Add redacted Toss holdings snapshot upload only after the first local-only Toss sync lands and real Toss fixture redaction tests prove that account identifiers, bearer tokens, and sensitive raw response fields cannot leak into Supabase Storage. First implementation keeps raw snapshots local and stores only redacted summary/hash metadata in runtime state.
+- 2026-06-19: Add a Toss-powered account readiness layer after broker-backed holdings sync is stable, covering NAV, buying power, sellable quantity, stop-distance position sizing, exposure, and downside amount/portfolio-percent context. Keep this out of the first holdings sync PR to avoid mixing state sync with risk-budget decisions.
 - 2026-06-09: Add stop-distance-based position sizing, including per-trade account risk, gross exposure, and currency-aware sizing. The 2026-06-18 swing-trader and investment reviews revalidated this as the top decision-readiness gap. Deferred while buy/portfolio state is manually maintained without Toss Securities API; revisit with an optional holdings/account-risk snapshot contract.
 
 ## Completed
 
-- 2026-07-09: Fixed scheduled Sell AI Brief generation so Toss freshness and
-  sell input share the same Supabase source of truth. PR #211 exports the
-  current Supabase active holdings snapshot to `data/scheduler/` before
-  `sab sell`, fails closed instead of falling back to local `holdings.yaml`,
-  makes manual sell/ai-brief workflows reuse the shared holdings exporter, and
-  preserves broker quarantine evidence through web holdings YAML import/export.
+- 2026-07-09: Fixed scheduled Sell AI Brief generation so Toss freshness and sell input share the same Supabase source of truth. PR #211 exports the current Supabase active holdings snapshot to `data/scheduler/` before `sab sell`, fails closed instead of falling back to local `holdings.yaml`, makes manual sell/ai-brief workflows reuse the shared holdings exporter, and preserves broker quarantine evidence through web holdings YAML import/export.
 - 2026-07-08: Reworked scheduled Toss auto-sync so non-empty delete diffs no longer block freshness or delete holdings. Missing broker rows are preserved with `broker_state=not_seen_in_toss`, first/last missing dates, count, and diff hash evidence; scheduled markers include quarantine counts; Sell reports emit those holdings as `REVIEW`; Sell AI Brief keeps them out of model-ranked candidates while preserving a `broker_state_review_candidates` audit list.
 - 2026-07-08: Added repo-root `DESIGN.md` as the Evidence Ledger UI/interaction/visual source of truth, linked it from `docs/README.md`, and added the synthetic self-contained Reports proof mock at `docs/design/reports-evidence-ledger-proof.html`. The first implementation slice intentionally avoided `web/src/**`; app shell/tokens and Reports React refactors remain follow-up PRs.
 - 2026-07-07: Documented scheduled Sell AI Brief source provider chain examples in `.env.example` and `docs/configuration.md`, and added regression checks so sell-specific US/MIXED chain examples stay aligned. This prevents local scheduler envs from configuring only `AI_BRIEF_SOURCE_PROVIDER_CHAIN_US` and leaving `sab sell-ai-brief` to resolve `none` for sell generation.
-- 2026-07-07: Added `sab backtest` as a local historical OHLCV replay runner.
-  It reuses the existing buy/sell signal evaluators over date-prefix candles,
-  enters on the next available open after an enterable EOD buy signal, exits on
-  sell evaluator actions, applies `SELL_PARTIAL` as a partial close, supports
-  previous-prefix daily-OHLC stop/target path policies with gap-through open
-  fills, position-size fractions, transaction costs/slippage, optional
-  end-of-period force close, validated OHLCV issues, and writes
-  `*.backtest.json` with trades, win rate, return, drawdown, holding-period,
-  gross exposure, period/symbol, assumptions, and config snapshots for
-  profitability and parameter-sensitivity research.
+- 2026-07-07: Added `sab backtest` as a local historical OHLCV replay runner. It reuses the existing buy/sell signal evaluators over date-prefix candles, enters on the next available open after an enterable EOD buy signal, exits on sell evaluator actions, applies `SELL_PARTIAL` as a partial close, supports previous-prefix daily-OHLC stop/target path policies with gap-through open fills, position-size fractions, transaction costs/slippage, optional end-of-period force close, validated OHLCV issues, and writes `*.backtest.json` with trades, win rate, return, drawdown, holding-period, gross exposure, period/symbol, assumptions, and config snapshots for profitability and parameter-sensitivity research.
 - 2026-07-06: Added scheduled Sell AI Brief generation behind the local generic wrapper with explicit `SAB_SELL_SCHEDULE_MODE=generation`, Toss freshness marker gating, sell/Sell AI Brief typed report helpers, quality-gated sell upload, delegated Sell AI Brief delivery, blocked-freshness notifications, and review-required handling for Sell AI Brief eval WARN.
 - 2026-07-06: Completed marker-aware scheduled Sell AI Brief delivery for prebuilt `*.sell-ai-brief.json` artifacts via `sab sell-ai-brief-scheduled` and the launchd generic wrapper route when `SELL_AI_BRIEF_REPORT_PATH` is set, using `scheduled-sell:*` upload/index-before-notify markers and notification reconciliation. Manual `sell.yml` remains opt-in delivery only.
 - 2026-06-23: Normalized `sma_ema_hybrid` volume confirmation semantics so breakout, pullback, and reversal compare the signal candle to the preceding N-day average; added focused detector regressions and strategy documentation.
