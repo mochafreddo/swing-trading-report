@@ -403,6 +403,172 @@ def test_shadow_wrapper_maps_stored_terminal_status(
     assert record.report_file == public["report_file"]
 
 
+def test_shadow_wrapper_uses_dedicated_terminal_channel_with_debug_logs(
+    tmp_path: Path,
+) -> None:
+    run_id = "holding-shadow-debug-logs"
+    expected_at = _current_slot_text()
+    public = {
+        "status": "PUBLISHED",
+        "exit_code": 0,
+        "report_file": _t7_basename("HOLDING", run_id, expected_at=expected_at),
+        "storage_key": None,
+        "degraded": False,
+    }
+    journal_dir = tmp_path / "journal"
+    result = subprocess.run(
+        [
+            str(WRAPPER),
+            "--run-kind",
+            "HOLDING",
+            "--expected-at",
+            expected_at,
+            "--run-id",
+            run_id,
+            "--journal-dir",
+            str(journal_dir),
+            "--grace-seconds",
+            "60",
+            "--stale-seconds",
+            "300",
+            "--",
+            sys.executable,
+            "-c",
+            (
+                "import json,os,sys; "
+                "print('PRIVATE-SENTINEL raw stdout'); "
+                "print('PRIVATE-SENTINEL urllib3 debug', file=sys.stderr); "
+                "payload=json.dumps("
+                f"{public!r}"
+                ",sort_keys=True).encode()+b'\\n'; "
+                "os.write(int(os.environ['SAB_DECISION_BOARD_TERMINAL_FD']), payload)"
+            ),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == public
+    assert "PRIVATE-SENTINEL" not in result.stdout + result.stderr
+    record = RunJournalStoreV0(journal_dir).status(limit=1)[0]
+    assert record.status.value == "PUBLISHED"
+    assert record.report_file == public["report_file"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"\xff",
+        b"x" * 8193,
+        b'{"status":"FAILED","exit_code":2,"issue_code":"UNKNOWN"}\n',
+    ],
+    ids=["invalid-utf8", "oversized", "invalid-contract"],
+)
+def test_shadow_wrapper_rejects_invalid_dedicated_terminal_before_legacy_fallback(
+    tmp_path: Path, payload: bytes
+) -> None:
+    public = {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    result, store = _run_terminal_script(
+        tmp_path,
+        run_id=f"entry-invalid-dedicated-{len(payload)}",
+        script=(
+            "import json,os,sys; "
+            f"os.write(int(os.environ['SAB_DECISION_BOARD_TERMINAL_FD']), {payload!r}); "
+            f"print(json.dumps({public!r}), file=sys.stderr); raise SystemExit(2)"
+        ),
+    )
+
+    assert result.returncode == 2
+    assert json.loads(result.stderr) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "JOURNAL_RUNNER_INVALID",
+    }
+    assert store.status(limit=1)[0].status.value == "STARTED"
+
+
+def test_shadow_wrapper_collects_real_cli_failure_from_terminal_channel(
+    tmp_path: Path,
+) -> None:
+    run_id = "entry-shadow-live-unconfigured"
+    expected_at = _current_slot_text()
+    journal_dir = tmp_path / "journal"
+    env = dict(os.environ)
+    env["LOG_LEVEL"] = "DEBUG"
+    env["PYTHON_DOTENV_DISABLED"] = "1"
+    for name in (
+        "SUPABASE_URL",
+        "SUPABASE_SECRET_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "FINNHUB_API_KEY",
+        "POLYGON_API_KEY",
+        "BENZINGA_API_TOKEN",
+        "OPENAI_API_KEY",
+        "DECISION_BOARD_OPENAI_MODEL",
+        "OPENAI_AI_BRIEF_MODEL",
+    ):
+        env.pop(name, None)
+    result = subprocess.run(
+        [
+            str(WRAPPER),
+            "--run-kind",
+            "ENTRY",
+            "--expected-at",
+            expected_at,
+            "--run-id",
+            run_id,
+            "--journal-dir",
+            str(journal_dir),
+            "--grace-seconds",
+            "60",
+            "--stale-seconds",
+            "300",
+            "--",
+            sys.executable,
+            "-m",
+            "sab",
+            "decision-board",
+            "--run-kind",
+            "ENTRY",
+            "--run-id",
+            run_id,
+            "--idempotency-key",
+            "sha256:" + "1" * 64,
+            "--created-at",
+            expected_at,
+            "--sealed-input-hash",
+            "sha256:" + "2" * 64,
+            "--upload-mode",
+            "disabled",
+            "--report-dir",
+            str(tmp_path / "reports"),
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert json.loads(result.stderr) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+    record = RunJournalStoreV0(journal_dir).status(limit=1)[0]
+    assert record.status.value == "FAILED"
+    assert record.issues[0].code == "CONFIG_UNAVAILABLE"
+
+
 def test_shadow_wrapper_rejects_raw_terminal_payload_and_leaves_started(
     tmp_path: Path,
 ) -> None:

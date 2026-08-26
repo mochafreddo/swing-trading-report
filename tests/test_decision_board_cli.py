@@ -69,6 +69,99 @@ def test_decision_board_cli_parses_safe_boundary_and_failed_exit(
     }
 
 
+def test_decision_board_cli_writes_terminal_result_to_inherited_channel(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        "sab.__main__.execute_decision_board_cli_v0",
+        lambda _config: create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
+        ),
+    )
+    parser = _build_parser()
+    ns = parser.parse_args(
+        [
+            "decision-board",
+            "--run-kind",
+            "entry",
+            "--run-id",
+            "entry-cli-terminal-channel",
+            "--idempotency-key",
+            "sha256:" + "1" * 64,
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "2" * 64,
+            "--upload-mode",
+            "disabled",
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+
+    terminal_path = tmp_path / "terminal-result"
+    with terminal_path.open("w+b") as terminal_file:
+        monkeypatch.setenv(
+            "SAB_DECISION_BOARD_TERMINAL_FD", str(terminal_file.fileno())
+        )
+        assert _dispatch_command(ns, parser) == 2
+        terminal_file.seek(0)
+        public = json.loads(terminal_file.read())
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert public == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+
+
+def test_decision_board_cli_falls_back_when_terminal_channel_write_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        "sab.__main__.execute_decision_board_cli_v0",
+        lambda _config: create_decision_run_failed_v0(
+            issue_code=DecisionRunIssueCodeV0.CONFIG_UNAVAILABLE
+        ),
+    )
+    monkeypatch.setattr("sab.__main__.claim_terminal_fd_v0", lambda: 99)
+    monkeypatch.setattr(
+        "sab.__main__.write_terminal_result_v0", lambda _fd, _value: False
+    )
+    parser = _build_parser()
+    ns = parser.parse_args(
+        [
+            "decision-board",
+            "--run-kind",
+            "entry",
+            "--run-id",
+            "entry-cli-terminal-fallback",
+            "--idempotency-key",
+            "sha256:" + "1" * 64,
+            "--created-at",
+            "2026-08-09T12:00:00Z",
+            "--sealed-input-hash",
+            "sha256:" + "2" * 64,
+            "--upload-mode",
+            "disabled",
+            "--report-dir",
+            str(tmp_path),
+        ]
+    )
+
+    assert _dispatch_command(ns, parser) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err) == {
+        "status": "FAILED",
+        "exit_code": 2,
+        "issue_code": "CONFIG_UNAVAILABLE",
+    }
+
+
 def test_decision_board_cli_defaults_to_local_shadow_and_unconfigured_fails_closed(
     capsys, tmp_path
 ) -> None:

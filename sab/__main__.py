@@ -54,6 +54,10 @@ from .decision_board.shadow_ledger_prepare import (
     load_shadow_evaluation_case_plan_v0,
     prepare_shadow_evaluation_ledgers_v0,
 )
+from .decision_board.terminal_channel import (
+    claim_terminal_fd_v0,
+    write_terminal_result_v0,
+)
 from .entry import run_entry
 from .env_loader import load_dotenv_if_available
 from .observability import sanitize_log_text, structured_log_fields
@@ -777,6 +781,7 @@ def _run_entry_command(ns: argparse.Namespace) -> int:
 
 
 def _run_decision_board_command(ns: argparse.Namespace) -> int:
+    terminal_fd = claim_terminal_fd_v0()
     result: DecisionRunResultV0
     try:
         config = DecisionBoardCliConfigV0.from_strings(
@@ -817,8 +822,9 @@ def _run_decision_board_command(ns: argparse.Namespace) -> int:
         )
         public = serialize_decision_run_result_v0(result)
         exit_code = decision_run_exit_code_v0(result)
-    stream = sys.stderr if public["status"] == "FAILED" else sys.stdout
-    print(json.dumps(public, ensure_ascii=False, sort_keys=True), file=stream)
+    if terminal_fd is None or not write_terminal_result_v0(terminal_fd, public):
+        stream = sys.stderr if public["status"] == "FAILED" else sys.stdout
+        print(json.dumps(public, ensure_ascii=False, sort_keys=True), file=stream)
     return exit_code
 
 
