@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,7 @@ from .shadow_execution import load_shadow_gate_execution_binding_v0
 from .shadow_gate import (
     load_shadow_gate_manifest_v0,
 )
+from .terminal_channel import MAX_TERMINAL_BYTES, TERMINAL_FD_ENV
 
 _REPORT_FILE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}\Z")
 _RUNNER_INVALID = {
@@ -224,8 +226,23 @@ def _parse_runner_terminal_v0(
     streams = [stream.strip() for stream in (stdout, stderr) if stream.strip()]
     if len(streams) != 1:
         return None
+    return _parse_runner_terminal_payload_v0(
+        streams[0],
+        returncode=returncode,
+        expected_run_kind=expected_run_kind,
+        expected_run_id=expected_run_id,
+    )
+
+
+def _parse_runner_terminal_payload_v0(
+    payload: str,
+    *,
+    returncode: int,
+    expected_run_kind: RunKindV0,
+    expected_run_id: str,
+) -> dict[str, object] | None:
     try:
-        value = json.loads(streams[0])
+        value = json.loads(payload)
     except json.JSONDecodeError:
         return None
     allowed_issue_codes = {code.value for code in DecisionRunIssueCodeV0}
@@ -302,6 +319,26 @@ def _parse_runner_terminal_v0(
     return value
 
 
+def _run_with_terminal_channel_v0(
+    runner_args: tuple[str, ...],
+) -> tuple[subprocess.CompletedProcess[str], bytes]:
+    with tempfile.TemporaryFile(mode="w+b") as terminal_file:
+        terminal_fd = terminal_file.fileno()
+        env = dict(os.environ)
+        env[TERMINAL_FD_ENV] = str(terminal_fd)
+        completed = subprocess.run(
+            runner_args,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            pass_fds=(terminal_fd,),
+        )
+        terminal_file.seek(0)
+        terminal_payload = terminal_file.read(MAX_TERMINAL_BYTES + 1)
+    return completed, terminal_payload
+
+
 def _emit_public_result(value: dict[str, object]) -> None:
     stream = sys.stderr if value["status"] == "FAILED" else sys.stdout
     print(json.dumps(value, sort_keys=True), file=stream)
@@ -331,19 +368,30 @@ def execute_journal_shadow_process_v0(config: JournalShadowProcessConfigV0) -> i
             file=sys.stderr,
         )
         return 2
-    completed = subprocess.run(
-        config.runner_args,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    terminal = _parse_runner_terminal_v0(
-        completed.stdout,
-        completed.stderr,
-        returncode=completed.returncode,
-        expected_run_kind=config.run_kind,
-        expected_run_id=config.run_id,
-    )
+    completed, dedicated_payload = _run_with_terminal_channel_v0(config.runner_args)
+    if dedicated_payload:
+        if len(dedicated_payload) > MAX_TERMINAL_BYTES:
+            terminal = None
+        else:
+            try:
+                terminal_text = dedicated_payload.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                terminal = None
+            else:
+                terminal = _parse_runner_terminal_payload_v0(
+                    terminal_text,
+                    returncode=completed.returncode,
+                    expected_run_kind=config.run_kind,
+                    expected_run_id=config.run_id,
+                )
+    else:
+        terminal = _parse_runner_terminal_v0(
+            completed.stdout,
+            completed.stderr,
+            returncode=completed.returncode,
+            expected_run_kind=config.run_kind,
+            expected_run_id=config.run_id,
+        )
     if terminal is None:
         _emit_public_result(_RUNNER_INVALID)
         return 2
