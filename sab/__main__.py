@@ -45,6 +45,12 @@ from .decision_board.shadow_case_prepare import (
     load_shadow_evaluation_case_spec_v0,
     prepare_shadow_evaluation_cases_v0,
 )
+from .decision_board.shadow_dashboard import build_shadow_dashboard_artifact_v0
+from .decision_board.shadow_evaluation import (
+    ShadowEvaluationError,
+    evaluate_shadow_gate_v0,
+    write_private_json_output_v0,
+)
 from .decision_board.shadow_gate import (
     ShadowGateManifestError,
     load_shadow_gate_manifest_v0,
@@ -361,6 +367,24 @@ def _build_parser() -> argparse.ArgumentParser:
     shadow_case_prepare.add_argument("--manifest", required=True)
     shadow_case_prepare.add_argument("--case-spec", required=True)
     shadow_case_prepare.add_argument("--output-dir", required=True)
+
+    shadow_evaluate = sub.add_parser(
+        "decision-board-shadow-evaluate",
+        help="Build one read-only Decision Board shadow evaluation snapshot",
+    )
+    shadow_evaluate.add_argument("--manifest", required=True)
+    shadow_evaluate.add_argument("--input-ledger", required=True)
+    shadow_evaluate.add_argument("--expected-action-ledger", required=True)
+    shadow_evaluate.add_argument("--snapshot-dir", required=True)
+    shadow_evaluate.add_argument("--journal-dir", required=True)
+    shadow_evaluate.add_argument("--report-dir", required=True)
+    shadow_evaluate.add_argument("--as-of", required=True)
+    shadow_evaluate.add_argument(
+        "--format",
+        choices=("evaluation", "dashboard-artifact"),
+        default="evaluation",
+    )
+    shadow_evaluate.add_argument("--output", default=None)
 
     journal_status = sub.add_parser(
         "decision-board-journal-status",
@@ -901,6 +925,65 @@ def _run_decision_board_shadow_case_prepare_command(ns: argparse.Namespace) -> i
     return 0
 
 
+def _run_decision_board_shadow_evaluate_command(ns: argparse.Namespace) -> int:
+    try:
+        snapshot = evaluate_shadow_gate_v0(
+            manifest_path=ns.manifest,
+            input_ledger_path=ns.input_ledger,
+            expected_action_ledger_path=ns.expected_action_ledger,
+            snapshot_dir=ns.snapshot_dir,
+            journal_dir=ns.journal_dir,
+            report_dir=ns.report_dir,
+            as_of=parse_utc_rfc3339_v0(ns.as_of, field="as_of"),
+        )
+        output = (
+            build_shadow_dashboard_artifact_v0(snapshot)
+            if ns.format == "dashboard-artifact"
+            else snapshot
+        )
+    except ShadowEvaluationError, TypeError, ValueError:
+        print(
+            json.dumps(
+                {
+                    "status": "FAILED",
+                    "exit_code": 2,
+                    "issue_code": "SHADOW_EVALUATION_INVALID",
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    if ns.output is not None:
+        try:
+            written = write_private_json_output_v0(ns.output, output)
+        except ShadowEvaluationError:
+            print(
+                json.dumps(
+                    {
+                        "status": "FAILED",
+                        "exit_code": 2,
+                        "issue_code": "SHADOW_EVALUATION_OUTPUT_FAILED",
+                    },
+                    sort_keys=True,
+                ),
+                file=sys.stderr,
+            )
+            return 2
+        print(json.dumps({"status": "WRITTEN", "basename": written.name}))
+        return 0
+    print(
+        json.dumps(
+            output,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    )
+    return 0
+
+
 def _journal_cli_failure() -> int:
     print(
         json.dumps(
@@ -1349,6 +1432,7 @@ def _dispatch_command(
         "decision-board-shadow-case-prepare": (
             _run_decision_board_shadow_case_prepare_command
         ),
+        "decision-board-shadow-evaluate": (_run_decision_board_shadow_evaluate_command),
         "decision-board-journal-status": (_run_decision_board_journal_status_command),
         "decision-board-journal-reconcile": (
             _run_decision_board_journal_reconcile_command

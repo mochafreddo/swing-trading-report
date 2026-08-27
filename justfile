@@ -90,6 +90,9 @@ decision-board-shadow-case-prepare *args:
 decision-board-shadow-ledger-prepare *args:
   uv run python -m sab decision-board-shadow-ledger-prepare {{args}}
 
+decision-board-shadow-evaluate *args:
+  uv run python -m sab decision-board-shadow-evaluate {{args}}
+
 decision-board-shadow-launchd-dry-run-package *args:
   uv run python scripts/launchd/build_decision_board_shadow_dry_run_package.py {{args}}
 
