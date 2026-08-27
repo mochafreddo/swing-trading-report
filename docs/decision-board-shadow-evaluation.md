@@ -15,7 +15,7 @@
 
 ## 1. Validate and approve the gate manifest
 
-저장소의 [approval candidate](../config/decision-board-shadow-gate.proposed.json)는 2026-08-24부터 2026-09-21까지 XNYS 20개 session과 ENTRY/HOLDING 40개 exact slot을 명시합니다. ENTRY 12:30Z, HOLDING 22:40Z는 아직 승인되지 않은 운영 후보입니다. provider failure rate 최대 5%, research coverage와 fresh source rate 최소 90%, 아래 hard failure 전부 0을 첫 실행 전에 고정합니다.
+저장소의 [approval candidate](../config/decision-board-shadow-gate.proposed.json)는 XNYS 20개 session과 ENTRY/HOLDING 40개 exact slot을 검증하는 미승인 template입니다. 실제 운영 window와 runtime/ledger freeze는 gitignore된 `config/decision-board-shadow-gate.approved.local.json`만 기준으로 삼습니다. tracked candidate의 날짜나 `PENDING` 상태를 현재 운영 상태로 해석하지 않습니다. provider failure rate 최대 5%, research coverage와 fresh source rate 최소 90%, 아래 hard failure 전부 0을 첫 실행 전에 고정합니다.
 
 ```bash
 just decision-board-shadow-gate-validate
@@ -239,6 +239,25 @@ uv run python -m sab decision-board-journal-status \
   --max-output-bytes 262144
 ```
 
+승인 manifest, private ledger, immutable local snapshot, journal, report를 변경하지 않고 누적 진행률과 자동 계산 가능한 품질 지표를 재현하려면 다음 명령을 사용합니다. `--as-of`는 결과 재현성을 위해 명시적인 UTC 시각을 받습니다. `--format dashboard-artifact`는 같은 검증 결과를 portable dashboard packaging용 canonical artifact JSON으로 렌더링합니다.
+
+```bash
+just decision-board-shadow-evaluate \
+  --manifest config/decision-board-shadow-gate.approved.local.json \
+  --input-ledger /private/path/decision-board-shadow-input-ledger.json \
+  --expected-action-ledger /private/path/decision-board-shadow-expected-action-ledger.json \
+  --snapshot-dir /private/path/snapshots \
+  --journal-dir logs/decision-board-journal \
+  --report-dir reports \
+  --as-of 2026-08-26T12:35:00Z \
+  --format dashboard-artifact \
+  --output tmp/decision-board-shadow-dashboard-artifact.json
+```
+
+`--output`을 생략하면 canonical-key-order JSON을 stdout으로 출력합니다. 지정하면 기존 target을 mode `0600` 파일로 atomic replace하지만 manifest, ledger, snapshot, journal, report는 바꾸지 않습니다. evaluator는 `--as-of` 뒤에 시작된 journal record를 제외하고, 그 시각 뒤에 terminal이 된 record는 당시의 `STARTED` 상태로 투영하므로 이후 재실행해도 같은 관측 시점을 재현합니다.
+
+집계기는 exact gate slot이 아닌 과거 journal/report를 제외하고, canonical report와 snapshot hash, ledger case membership, full public instrument identity, 종목별 frozen expected action을 검증합니다. frozen action set과 맞지 않거나 운영 실패에 별도 승인 분류가 없으면 `UNEXPLAINED`로 fail closed합니다. provider failure rate, research coverage, fresh source rate는 manifest 산식을 그대로 사용합니다. privacy leak, order/notification capability access, deterministic replay, holding universe, hard-SELL preservation, existing-pipeline impact처럼 artifact만으로 증명할 수 없는 항목은 `NOT_EVALUATED`로 유지하므로 dashboard 상태만으로 졸업을 승인하지 않습니다.
+
 매 slot에 대해 다음만 평가 ledger에 기록합니다.
 
 - session, lane, run ID, sealed input hash, payload hash
@@ -247,6 +266,10 @@ uv run python -m sab decision-board-journal-status \
 - research attempted/succeeded/timed-out count와 source freshness bucket
 - 기존 경로와의 후보/action 차이 및 아래 reason
 - report basename과 RunJournal identity
+
+`research_attempted_count`는 snapshot item 수와 다시 결속한 report `selected_count`입니다. ENTRY selected 수는 eligible 수와 같고 HOLDING은 frozen 최대 5개 선택 정책과 같아야 하며, 이 관계가 깨진 PUBLISHED report는 invalid publication입니다. 현재 report 계약은 hard-SELL precedence나 partial evidence가 있던 timeout의 원래 research outcome을 보존하지 않으므로 `research_succeeded_count`와 `research_timed_out_count`는 추정하지 않고 `NOT_EVALUATED`로 남깁니다. BLOCKED report도 sealed snapshot hash가 없어 eligible/selected 수를 결속할 수 없으므로 해당 slot 수와 aggregate research coverage를 `NOT_EVALUATED`로 닫습니다.
+
+현재 report 계약만으로 증명할 수 있는 후보/action 차이는 frozen ledger case의 누락과 action-set 불일치입니다. 별도 승인된 분류 artifact가 없는 차이, `BLOCKED`, `FAILED`, reconciled missed/stale는 evaluator가 이유를 추정하지 않고 `UNEXPLAINED`로 남깁니다. required upload 실패가 valid local report를 보존한 경우에는 publication contract를 검증하되 운영 실패 자체는 계속 `UNEXPLAINED`입니다.
 
 원시 broker row, article body, provider error, local absolute path는 ledger에 복사하지 않습니다.
 
@@ -279,7 +302,7 @@ uv run python -m sab decision-board-journal-status \
 | invalid publication | schema/hash/key/identity invalid report 수 | 0 |
 | existing-pipeline impact | 기존 result/exit/notification identity 변경 수 | 0 |
 
-Provider failure-rate, research coverage, freshness는 lane과 provider별로 함께 보고합니다. 각 rate의 분자/분모와 0 denominator 처리(`NOT_APPLICABLE`)는 manifest의 `metric_definitions`와 정확히 같아야 합니다. 이 값은 manifest에 사전 threshold가 있을 때만 자동 pass/fail로 사용합니다. threshold가 없다면 graduation review의 정량 증거이지 사후에 만든 합격선이 아닙니다.
+Provider failure-rate는 lane/provider별로, research coverage와 freshness는 aggregate와 ENTRY/HOLDING lane별로 함께 보고합니다. aggregate가 threshold를 충족해도 한 lane이 미달하면 gate는 `ATTENTION_REQUIRED`입니다. 각 rate의 분자/분모와 0 denominator 처리(`NOT_APPLICABLE`)는 manifest의 `metric_definitions`와 정확히 같아야 합니다. 이 값은 manifest에 사전 threshold가 있을 때만 자동 pass/fail로 사용합니다. threshold가 없다면 graduation review의 정량 증거이지 사후에 만든 합격선이 아닙니다.
 
 ## 6. Run the final verification
 

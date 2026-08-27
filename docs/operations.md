@@ -63,7 +63,7 @@ When checking local env files or logs for accidental secrets, use path/line-only
 
 ## Decision Board shadow operations
 
-Decision Board explicit live-shadow composition은 구현되어 있지만 기본 `decision-board`는 계속 `CONFIG_UNAVAILABLE`로 닫히며 schedule과 승인 manifest는 비활성입니다. live command도 content-addressed public snapshot과 모든 provider credential이 없으면 시작하지 않습니다. 이를 운영 성공이나 20-session 표본으로 세지 않습니다. recorded/live 비교와 별도 승인 뒤 실제 평가를 시작하면 ENTRY/HOLDING planned slot을 모두 RunJournal에 결속하고 missed/stale를 삭제하지 않습니다.
+Decision Board explicit live-shadow composition은 구현되어 있지만 기본 `decision-board`는 계속 `CONFIG_UNAVAILABLE`로 닫힙니다. tracked proposal과 launchd template은 비활성이고, 기간 한정 external heartbeat만 gitignore된 승인 manifest의 exact slot을 호출합니다. live command도 content-addressed public snapshot과 모든 provider credential이 없으면 시작하지 않습니다. `NO_SLOT`이나 `CONFIG_UNAVAILABLE`을 운영 성공 또는 20-session 표본으로 세지 않고, ENTRY/HOLDING planned slot을 모두 RunJournal에 결속하며 missed/stale를 삭제하지 않습니다.
 
 운영자는 매 session 다음을 확인합니다.
 

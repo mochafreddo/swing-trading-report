@@ -36,7 +36,8 @@ def test_decision_board_reference_is_linked_and_states_current_boundary() -> Non
     assert "DecisionBoardProductionComponentsV0" in reference
     assert "sab decision-board-shadow-live" in reference
     assert "content-addressed Supabase Storage input snapshot" in reference
-    assert "launchd template과 shadow gate manifest는 여전히 비활성" in reference
+    assert "tracked proposal과 launchd template은 계속 비활성" in reference
+    assert "기간 한정 external heartbeat" in reference
     assert "기존 `sab decision-board`" in reference
     assert "계속 환경변수나" in reference and "credential을 읽지 않으며" in reference
     assert "raw loader, preparer, enricher를" in reference
@@ -103,15 +104,19 @@ def test_decision_board_docs_do_not_claim_default_production_activation() -> Non
 
     readme = _read("README.md")
     assert "explicit live-shadow adapter" in readme
-    assert "schedule은 비활성" in readme
+    assert "기간 한정 exact-slot heartbeat" in readme
+    assert "launchd template은 비활성" in readme
     assert "실제 launchd schedule은 비활성" in _read("docs/deployment.md")
     assert "explicit live-shadow command" in _read("docs/deployment.md")
     operations = _read("docs/operations.md")
     assert "explicit live-shadow composition은 구현되어 있지만" in operations
-    assert "schedule과 승인 manifest는 비활성" in operations
+    assert "tracked proposal과 launchd template은 비활성" in operations
+    assert "기간 한정 external heartbeat" in operations
     assert "decision-board-shadow-live" in _read("docs/api.md")
-    assert "explicit live-shadow adapter가 구현됐지만" in _read("docs/overview.md")
-    assert "recorded/live 비교와 별도 manifest 승인 뒤" in _read("docs/runbook.md")
+    assert "기간 한정 exact-slot heartbeat" in _read("docs/overview.md")
+    runbook = _read("docs/runbook.md")
+    assert "기간 한정 exact-slot external heartbeat" in runbook
+    assert "launchd schedule" in runbook
 
 
 def test_documented_journal_configuration_matches_compose_defaults() -> None:

@@ -48,9 +48,9 @@ curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${WEB_HOST_PORT:-553
 gh run list --limit 10
 ```
 
-Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode는 `disabled`입니다. 기본 `decision-board` composition은 환경변수나 credential을 읽지 않으므로 아래 형식의 실행은 가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. 별도 `decision-board-shadow-live` command에만 content-addressed public snapshot과 production research/claim-verifier adapter가 연결돼 있으며, 이 경로도 기존 workflow gating, schedule, 외부 알림에 연결되지 않습니다.
+Decision Board V0 command boundary 확인은 local-only이며 기본 upload mode는 `disabled`입니다. 기본 `decision-board` composition은 환경변수나 credential을 읽지 않으므로 아래 형식의 실행은 가짜 조언을 만들지 않고 sanitized `CONFIG_UNAVAILABLE`/exit 2로 닫힙니다. 별도 `decision-board-shadow-live` command에만 content-addressed public snapshot과 production research/claim-verifier adapter가 연결돼 있습니다. 승인된 기간 한정 exact-slot external heartbeat가 이 command를 호출하지만 기존 GitHub workflow, launchd schedule, 외부 알림, 주문 경로에는 연결되지 않습니다.
 
-schema/compiler/runner/UI 테스트나 explicit adapter의 recorded fixture가 green이어도 live 비교나 schedule 승인을 뜻하지 않습니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질 표본으로 세지 않습니다. 실제 측정은 recorded/live 비교와 별도 manifest 승인 뒤 [shadow evaluation 절차](decision-board-shadow-evaluation.md)의 local-only `decision-board-shadow-case-prepare`, frozen manifest와 최소 20 US 거래 session을 사용합니다.
+schema/compiler/runner/UI 테스트나 explicit adapter의 recorded fixture가 green인 것만으로 live 비교나 schedule 승인을 뜻하지 않습니다. `CONFIG_UNAVAILABLE` 결과를 실제 shadow session이나 품질 표본으로 세지 않습니다. 현재 측정은 별도 승인된 private manifest와 기간 한정 exact-slot external heartbeat 아래 진행하며, [shadow evaluation 절차](decision-board-shadow-evaluation.md)의 local-only `decision-board-shadow-case-prepare`, frozen manifest와 최소 20 US 거래 session을 사용합니다.
 
 ```bash
 uv run python -m sab decision-board \

@@ -12,11 +12,11 @@
 - `scan`/`sell` GitHub Actions workflow는 manual-only `workflow_dispatch`로 제공됩니다. scheduled scan과 GitHub scheduled sell은 marker-aware fallback 설계 전까지 fail closed 상태입니다.
 - scheduled AI Brief는 로컬 Docker primary가 담당하고, `.github/workflows/ai-brief.yml`은 수동 실행과 monitor/fallback 경로로 사용합니다.
 - scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 담당하며, 정상 판단 전송과 freshness-blocked 보류 알림을 분리합니다.
-- US SWING Decision Board V0의 public identity, bounded research, exact-span claim validation, pure compiler, local runner/report/RunJournal, Supabase index와 Reports UI 계약은 구현되어 있습니다. production preparation/research/claim-verifier adapter와 실제 schedule은 미연결이라 기본 CLI는 `CONFIG_UNAVAILABLE`로 fail closed합니다.
+- US SWING Decision Board V0의 public identity, bounded research, exact-span claim validation, pure compiler, local runner/report/RunJournal, Supabase index와 Reports UI 계약은 구현되어 있습니다. 기본 `decision-board` CLI는 계속 `CONFIG_UNAVAILABLE`로 fail closed하고, 별도 승인된 local `decision-board-shadow-live`와 exact-slot heartbeat만 gitignore된 승인 manifest 기간에 실행됩니다.
 
 ### 실험
 
-- US SWING Decision Board는 advice-only shadow 실험입니다. 최소 20 US 거래 session의 사전 승인 manifest와 diff taxonomy를 통과하기 전 production owner가 될 수 없습니다. 현재 production adapter가 미연결이므로 측정 기간은 아직 시작되지 않았습니다.
+- US SWING Decision Board는 advice-only shadow 실험입니다. 사전 승인된 20 US 거래 session gate가 진행 중이며, diff taxonomy와 전체 수동 졸업 검토를 통과하기 전 production owner가 될 수 없습니다. 진행률은 local journal/report를 `decision-board-shadow-evaluate`로 read-only 집계해 확인합니다.
 - 전략/파라미터 실험은 [전략 문서](STRATEGY.md), replay fixture, 테스트에서 추적합니다.
 
 ### 백로그
@@ -25,7 +25,7 @@
 - 원격 노출/클라우드 상시 운영 같은 운영 모델 확장 여부 결정
 - 장 오픈 진입 가이드(ORH/첫 눌림 재상승 등) 텍스트 보강
 - 추가 유료/벤더별 news/API adapter 운영화 여부 결정
-- Decision Board recorded/live 비교와 manifest 승인을 끝낸 뒤 20-session shadow gate schedule을 시작할지 결정
+- 승인된 Decision Board 20-session shadow gate를 누적하고 기간 종료 뒤 수동 졸업 검토 자료를 완성
 
 ### 폐기 후보
 

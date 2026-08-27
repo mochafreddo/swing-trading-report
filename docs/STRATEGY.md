@@ -9,7 +9,7 @@
 
 - `ema_cross`/`sma_ema_hybrid` buy, `generic`/`sma_ema_hybrid` sell, `sab entry`, 로컬 `sab ai-brief`, 로컬 `sab sell-ai-brief`, trading sessions 기반 time stop은 현재 구현과 테스트가 따르는 계약입니다.
 - corporate action 의심 시 현재 구현은 `flags=["CORPORATE_ACTION_SUSPECT"]`를 남기며, 기존 `SELL`은 보존하고 `SELL`이 아닌 action만 `REVIEW`로 보정합니다.
-- Decision Board V0에는 sealed public fact만 받는 pure compiler와 local-only shadow runner가 있습니다. 이 runner는 기존 `scan`/`sell`/`entry` 결과나 알림을 바꾸지 않으며 production preparation/research adapter가 미설정된 기본 CLI는 `CONFIG_UNAVAILABLE`로 fail closed합니다. 별도 explicit live-shadow command만 credentialed adapter를 조립하고, recorded/live 비교와 manifest 승인 전에는 schedule에 연결하지 않습니다.
+- Decision Board V0에는 sealed public fact만 받는 pure compiler와 local-only shadow runner가 있습니다. 이 runner는 기존 `scan`/`sell`/`entry` 결과나 알림을 바꾸지 않으며 production preparation/research adapter가 미설정된 기본 CLI는 `CONFIG_UNAVAILABLE`로 fail closed합니다. 별도 explicit live-shadow command만 credentialed adapter를 조립하고, 승인된 기간 한정 exact-slot external heartbeat만 이 command를 호출합니다. tracked proposal과 launchd schedule template은 계속 비활성이고 기존 workflow·알림·주문 경로에는 연결되지 않습니다.
 
 ### 실험
 

@@ -1,12 +1,12 @@
 # Decision Board V0 Reference
 
-상태: Accepted (explicit live-shadow adapter 구현, schedule 비활성)
+상태: Accepted (explicit live-shadow adapter와 승인된 exact-slot gate 운영, launchd 비활성)
 
 Decision Board V0는 기존 로직이 만든 US SWING 후보와 확인된 SWING 보유 종목을 공개 근거로 보강해 `BUY|AVOID|REVIEW` 또는 `HOLD|SELL|REVIEW` 조언을 만드는 로컬 shadow 경계입니다. 사용자가 모든 매수·매도를 직접 실행합니다. 이 기능에는 주문 생성·수정·취소, 조건부 주문, 알림 전송 권한이 없습니다.
 
 현재 schema, identity gate, research/claim validation, compiler, runner, atomic report storage, RunJournal, Reports UI와 검증 스위트는 구현되어 있습니다. `DecisionBoardProductionAdapterV0`는 CLI identity와 sealed request를 대조합니다. `DecisionBoardProductionComponentsV0`는 request loader, sealed preparer, public-only enricher와 optional uploader를 기존 CLI executor에 명시적으로 조립합니다. request source에는 report 경로를 제외한 공개 trigger identity만 전달하고, evidence source에는 공개 `run_kind/item_id/InstrumentRefV0`만 전달합니다. ENTRY/HOLDING의 deterministic facts는 `PublicDecisionItemEnricherV0`가 원본 그대로 재발급하며, source는 typed research state와 검증된 evidence만 돌려줄 수 있습니다. 이 경로는 recorded Responses fixture로 canonical report 게시까지 검증합니다. component bundle은 세 least-authority wrapper의 exact type과 내부 request/evidence source capability를 조립 시점에 검증하며 raw loader, preparer, enricher를 허용하지 않습니다. 기존 직접 `adapter=` 주입은 낮은 수준의 호환 seam으로만 유지됩니다.
 
-기존 `sab decision-board`와 dependency-injected composition seam은 계속 환경변수나 credential을 읽지 않으며 기본 상태에서 `CONFIG_UNAVAILABLE`, exit 2로 닫힙니다. 별도 `sab decision-board-shadow-live`만 명시적 live composition root를 사용합니다. 이 경로는 content-addressed Supabase Storage input snapshot, Finnhub/Polygon/Benzinga source chain, public-DNS + pinned-address article fetch, OpenAI Responses claim verifier와 optional Supabase report uploader를 조립합니다. launchd template과 shadow gate manifest는 여전히 비활성/ `PENDING`이며, recorded/live 비교와 별도 일정 승인이 끝나기 전에는 측정 기간으로 세지 않습니다.
+기존 `sab decision-board`와 dependency-injected composition seam은 계속 환경변수나 credential을 읽지 않으며 기본 상태에서 `CONFIG_UNAVAILABLE`, exit 2로 닫힙니다. 별도 `sab decision-board-shadow-live`만 명시적 live composition root를 사용합니다. 이 경로는 content-addressed Supabase Storage input snapshot, Finnhub/Polygon/Benzinga source chain, public-DNS + pinned-address article fetch, OpenAI Responses claim verifier와 optional Supabase report uploader를 조립합니다. tracked proposal과 launchd template은 계속 비활성/`PENDING`이고, 기간 한정 external heartbeat만 별도 승인된 local manifest의 exact slot을 실행합니다. `NO_SLOT`이나 승인 bundle 검증 실패는 측정 표본으로 세지 않습니다.
 
 ## 범위
 
