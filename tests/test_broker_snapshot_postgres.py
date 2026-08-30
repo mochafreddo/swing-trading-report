@@ -109,6 +109,25 @@ def _transaction(sql: str, *, env: Mapping[str, str]) -> str:
     return _psql(f"begin;\n{isolation}\n{sql}\nrollback;", env=env).stdout.strip()
 
 
+def test_service_role_cannot_delete_sealed_broker_snapshot() -> None:
+    env = _integration_env()
+    privileges = _psql(
+        "select privilege_type from information_schema.role_table_grants "
+        "where table_schema = 'public' and table_name = 'broker_snapshot_v0' "
+        "and grantee = 'service_role' order by privilege_type;",
+        env=env,
+    ).stdout.splitlines()
+
+    assert privileges == ["INSERT", "SELECT", "UPDATE"]
+
+    denied = _psql(
+        "set role service_role; delete from public.broker_snapshot_v0;",
+        env=env,
+        succeeds=False,
+    )
+    assert "permission denied for table broker_snapshot_v0" in denied.stderr
+
+
 @pytest.mark.parametrize(
     ("quantity", "price"),
     [
