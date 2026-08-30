@@ -450,6 +450,30 @@ T1–T12는 schema, broker snapshot, public identity, bounded research, exact-sp
 
 ## 10. 관련 문서
 
+### Portfolio Mandate A1 비활성 계약
+
+Portfolio Mandate A1은 RN1 계약을 additive SQL과 Python/Web validator로 표현한
+비활성 설계면이다. `Issuer -> Instrument -> ListingAlias`,
+versioned mandate, broker snapshot/allocation/PositionSlice, append-only journal과
+predicate authority object를 기존 table 옆에 정의한다. Full fixture validator는
+persistence invariant 검사용이고, 별도 public evidence projection은 account
+ID/hash, quantity, cost, P/L, notes, tags를 strict rejection한다.
+
+Version lineage는 mandate-scoped composite FK와 exact supersedes 관계로 고정한다.
+User activation/confirmation은 `authenticated` JWT role, `auth.uid()`, 저장된
+Mandate owner를 transaction 안에서 함께 결속하고, `service_role`은 모든 A1 table의
+ambient DML을 명시적으로 회수한 뒤 SELECT와 non-user RPC만 가진다. Predicate
+fulfillment는 승인된 typed metric/operator/threshold/unit/period와 observed decimal
+value를 실제 비교하며 persistence decimal scale과 유한값 제약은 public validator와
+일치한다.
+
+현재 기존 production writer가 계속 유일한 운영 owner다. A1 migration은 전용
+loopback disposable PostgreSQL 17.11에서만 transaction/concurrency/RLS·grant 계약을
+검증했고 기존 로컬 DB, production DB, 외부 Supabase에는 apply하지 않았다. Runtime
+adapter, report route, notification owner, automation 또는 deploy 경로에도 연결하지
+않았다. 세부 계약은 [Portfolio Mandate A1 contract](portfolio-mandate-a1-contract.md)를
+따른다.
+
 - 제품 방향/backlog: `docs/PRD.md`
 - 현재 계약(contract): `docs/spec-v1.1.md`
 - 백로그/전달 이력: `docs/spec-v1.3.md`

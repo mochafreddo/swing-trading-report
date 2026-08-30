@@ -622,6 +622,23 @@ HOLDING 우선순위는 current broker/candle/rule에 근거한 hard stop/confir
 - `scripts/eval_sell_ai_brief.py`는 source sell report와 Sell AI Brief artifact의 정합성을 평가합니다. Actionable/broker-state review/HOLD/unsupported/cap 후보 정합성, summary count, 원본 action 보존, source-backed ratio, 자동 주문/체결 문구 금지를 확인하며, 새 매도 신호를 생성하지 않습니다.
 - Sell AI Brief Telegram 본문은 판단과 이유를 보여주는 HTML rich text입니다. 표시되는 `sell_action`은 원본 sell action이며 자동 주문, 자동 체결, 브로커 실행을 뜻하지 않습니다.
 
+### 7.3 Portfolio Mandate A1 비활성 계약
+
+Portfolio Mandate A1은 schema/type과 전용 disposable PostgreSQL 계약까지 검증한
+비활성 설계면이며 현재 전략 compiler의 입력이나 action source가 아니다. 기존 US
+SWING hard SELL precedence는 그대로 유지하며 optional AI/evidence가 deterministic
+`SELL`을 낮출 수 없다.
+
+LONG_TERM 방향성 action은 현재 runtime에서 계속 허용하지 않는다. A1 predicate
+authority schema에서 deterministic parser가 user-approved exact
+metric/operator/threshold/unit/period를 observed decimal value와 실제 비교해
+충족하거나 authenticated user가 `auth.uid()`와 Mandate owner에 결속된
+confirmation을 남긴 경우의 미래 `SELL_ELIGIBLE` 계약을 표현한다. Persisted
+decimal은 public validator와 같은 유한값·정밀도 제한을 사용한다. 이 계약은 여전히
+LONG_TERM writer, board, alert와
+`SELL/HOLD` compiler 경로를 만들지 않는다. AI candidate와 자유 텍스트는
+`REVIEW_ONLY`이며 주문이나 Toss write capability를 만들지 않는다.
+
 ## 8. 운영/재현성 권장 사항
 
 - 같은 날짜 리포트라도 “실행 시각(장중/장후)”에 따라 평가 캔들이 달라질 수 있으므로,

@@ -1,0 +1,387 @@
+{
+  "schema_version": "portfolio-mandate.a1",
+  "stable_identity": {
+    "registry_version": "synthetic-registry-v1",
+    "issuers": [
+      {
+        "issuer_id": "11111111-1111-4111-8111-111111111111",
+        "legal_name": "Synthetic Alpha Corporation",
+        "source_identifiers": [
+          { "scheme": "SYNTHETIC_CIK", "value": "0000000001" }
+        ]
+      },
+      {
+        "issuer_id": "22222222-2222-4222-8222-222222222222",
+        "legal_name": "Synthetic Beta Corporation",
+        "source_identifiers": [
+          { "scheme": "SYNTHETIC_CIK", "value": "0000000002" }
+        ]
+      }
+    ],
+    "instruments": [
+      {
+        "instrument_id": "33333333-3333-4333-8333-333333333333",
+        "issuer_id": "11111111-1111-4111-8111-111111111111",
+        "security_type": "COMMON_STOCK",
+        "currency": "USD"
+      },
+      {
+        "instrument_id": "44444444-4444-4444-8444-444444444444",
+        "issuer_id": "22222222-2222-4222-8222-222222222222",
+        "security_type": "COMMON_STOCK",
+        "currency": "USD"
+      }
+    ],
+    "listing_aliases": [
+      {
+        "listing_alias_id": "55555555-5555-4555-8555-555555555555",
+        "instrument_id": "33333333-3333-4333-8333-333333333333",
+        "exchange_mic": "XNAS",
+        "ticker": "SYNTH",
+        "valid_from": "2025-01-01T00:00:00Z",
+        "valid_to": "2026-01-01T00:00:00Z",
+        "registry_version": "synthetic-registry-v1"
+      },
+      {
+        "listing_alias_id": "66666666-6666-4666-8666-666666666666",
+        "instrument_id": "44444444-4444-4444-8444-444444444444",
+        "exchange_mic": "XNYS",
+        "ticker": "SYNTH",
+        "valid_from": "2026-01-01T00:00:00Z",
+        "valid_to": null,
+        "registry_version": "synthetic-registry-v1"
+      }
+    ],
+    "evidence_seals": [
+      {
+        "evidence_seal_id": "77777777-7777-4777-8777-777777777777",
+        "source_id": "88888888-8888-4888-8888-888888888888",
+        "instrument_id": "33333333-3333-4333-8333-333333333333",
+        "issuer_id": "11111111-1111-4111-8111-111111111111",
+        "registry_version": "synthetic-registry-v1",
+        "source_event_time": "2025-06-01T00:00:00Z",
+        "source_issuer_identifier": {
+          "scheme": "SYNTHETIC_CIK",
+          "value": "0000000001"
+        },
+        "scope": "INSTRUMENT",
+        "exchange_mic": "XNAS",
+        "ticker": "SYNTH",
+        "sealed_at": "2026-08-28T00:00:00Z",
+        "actor_kind": "SOURCE_VALIDATOR"
+      },
+      {
+        "evidence_seal_id": "32323232-3232-4232-8232-323232323232",
+        "source_id": "27272727-2727-4727-8727-272727272727",
+        "instrument_id": "33333333-3333-4333-8333-333333333333",
+        "issuer_id": "11111111-1111-4111-8111-111111111111",
+        "registry_version": "synthetic-registry-v1",
+        "source_event_time": "2025-06-01T00:00:00Z",
+        "source_issuer_identifier": {
+          "scheme": "SYNTHETIC_CIK",
+          "value": "0000000001"
+        },
+        "scope": "INSTRUMENT",
+        "exchange_mic": "XNAS",
+        "ticker": "SYNTH",
+        "sealed_at": "2026-08-28T00:00:01Z",
+        "actor_kind": "SOURCE_VALIDATOR"
+      }
+    ]
+  },
+  "mandate_version_core": {
+    "mandates": [
+      {
+        "mandate_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "instrument_id": "33333333-3333-4333-8333-333333333333",
+        "broker_position_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "owner_actor_id": "99999999-9999-4999-8999-999999999998",
+        "created_at": "2026-08-27T00:00:00Z"
+      }
+    ],
+    "versions": [
+      {
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "mandate_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "version_number": 1,
+        "supersedes_version_id": null,
+        "classification_state": "ACTIVE",
+        "horizon": "SWING",
+        "proposed_horizon": null,
+        "approval_state": "APPROVED",
+        "thesis": "Synthetic approved swing thesis.",
+        "invalidation_conditions": ["Synthetic condition A is observed."],
+        "approved_by_kind": "USER",
+        "approved_at": "2026-08-27T00:05:00Z",
+        "policy_version": "synthetic-policy-v1",
+        "effective_from": "2026-08-27T00:05:00Z",
+        "effective_to": null
+      },
+      {
+        "mandate_version_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "mandate_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "version_number": 2,
+        "supersedes_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "classification_state": "UNCLASSIFIED",
+        "horizon": null,
+        "proposed_horizon": "SWING",
+        "approval_state": "DRAFT",
+        "thesis": "Synthetic replacement swing thesis.",
+        "invalidation_conditions": ["Synthetic condition B is observed."],
+        "approved_by_kind": null,
+        "approved_at": null,
+        "policy_version": "synthetic-policy-v1",
+        "effective_from": null,
+        "effective_to": null
+      }
+    ],
+    "activation_commands": [
+      {
+        "command_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "mandate_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "draft_mandate_version_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "expected_mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "actor_kind": "USER",
+        "actor_id": "99999999-9999-4999-8999-999999999998",
+        "broker_snapshot_version": 1,
+        "allocation_version": 1,
+        "requested_at": "2026-08-28T00:00:00Z"
+      }
+    ]
+  },
+  "position_slice_core": {
+    "broker_positions": [
+      {
+        "broker_position_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "instrument_id": "33333333-3333-4333-8333-333333333333",
+        "account_ref_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "currency": "USD"
+      }
+    ],
+    "snapshots": [
+      {
+        "broker_position_snapshot_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "broker_position_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "snapshot_version": 1,
+        "quantity": "10.000000",
+        "currency": "USD",
+        "watermark": "synthetic-watermark-1",
+        "sealed_input_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+        "broker_position_snapshot_id": "10101010-1010-4010-8010-101010101010",
+        "broker_position_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "snapshot_version": 2,
+        "quantity": "13.000000",
+        "currency": "USD",
+        "watermark": "synthetic-watermark-2",
+        "sealed_input_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ],
+    "allocations": [
+      {
+        "allocation_id": "12121212-1212-4212-8212-121212121212",
+        "broker_position_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "allocation_version": 1,
+        "snapshot_version": 1,
+        "active": true,
+        "decision_eligible": true
+      }
+    ],
+    "rebase_evidence": [
+      {
+        "rebase_evidence_id": "30303030-3030-4030-8030-303030303030",
+        "broker_position_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "source_snapshot_version": 1,
+        "target_snapshot_version": 2,
+        "cause": "UNIQUE_BUY",
+        "matched_slice_id": "13131313-1313-4313-8313-131313131313",
+        "corporate_action_ratio": null,
+        "source_id": "31313131-3131-4131-8131-313131313131",
+        "evidence_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "verification_state": "VERIFIED",
+        "producer_kind": "DETERMINISTIC"
+      }
+    ],
+    "slices": [
+      {
+        "slice_id": "13131313-1313-4313-8313-131313131313",
+        "allocation_id": "12121212-1212-4212-8212-121212121212",
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "quantity": "6.000000",
+        "currency": "USD",
+        "classification_state": "ACTIVE",
+        "decision_eligible": true
+      },
+      {
+        "slice_id": "14141414-1414-4414-8414-141414141414",
+        "allocation_id": "12121212-1212-4212-8212-121212121212",
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "quantity": "4.000000",
+        "currency": "USD",
+        "classification_state": "ACTIVE",
+        "decision_eligible": true
+      }
+    ],
+    "rebase_commands": [
+      {
+        "command_id": "15151515-1515-4515-8515-151515151515",
+        "rebase_evidence_id": "30303030-3030-4030-8030-303030303030",
+        "broker_position_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "source_snapshot_version": 1,
+        "target_snapshot_version": 2,
+        "target_quantity": "13.000000",
+        "currency": "USD",
+        "cause": "UNIQUE_BUY",
+        "matched_slice_id": "13131313-1313-4313-8313-131313131313",
+        "corporate_action_ratio": null,
+        "expected_allocation_version": 1,
+        "actor_kind": "DETERMINISTIC",
+        "requested_at": "2026-08-28T00:10:00Z"
+      }
+    ]
+  },
+  "predicate_authority_core": {
+    "definitions": [
+      {
+      "predicate_id": "18181818-1818-4818-8818-181818181818",
+      "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "predicate_schema_version": "synthetic-predicate-v1",
+      "metric": "FREE_CASH_FLOW",
+      "comparison_operator": "GTE",
+      "threshold_value": "100.00",
+      "expected_unit": "USD",
+      "expected_period": "FY2025",
+      "approval_state": "APPROVED",
+        "approved_by_kind": "USER"
+      }
+    ],
+    "events": [
+      {
+        "predicate_authority_event_id": "16161616-1616-4616-8616-161616161616",
+        "command_id": "17171717-1717-4717-8717-171717171717",
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "predicate_id": "18181818-1818-4818-8818-181818181818",
+        "event_type": "PREDICATE_FULFILLED",
+        "producer_kind": "DETERMINISTIC_PARSER",
+        "actor_kind": "DETERMINISTIC",
+        "policy_effect": "SELL_ELIGIBLE",
+        "source_id": "88888888-8888-4888-8888-888888888888",
+        "evidence_seal_id": "77777777-7777-4777-8777-777777777777",
+      "source_span": "Synthetic structured metric span.",
+      "observed_metric": "FREE_CASH_FLOW",
+      "observed_value": "100.01",
+      "unit": "USD",
+        "period": "FY2025",
+        "parser_version": "synthetic-parser-v1",
+        "predicate_schema_version": "synthetic-predicate-v1",
+        "actor_id": null,
+        "reason": null,
+        "structured_surface": true,
+        "free_text_only": false,
+        "supersedes_event_id": null,
+        "created_at": "2026-08-28T00:20:00Z"
+      },
+      {
+        "predicate_authority_event_id": "19191919-1919-4919-8919-191919191919",
+        "command_id": "20202020-2020-4020-8020-202020202020",
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "predicate_id": "18181818-1818-4818-8818-181818181818",
+        "event_type": "USER_PREDICATE_CONFIRMED",
+        "producer_kind": "USER",
+        "actor_kind": "USER",
+        "policy_effect": "SELL_ELIGIBLE",
+        "source_id": "88888888-8888-4888-8888-888888888888",
+        "evidence_seal_id": "77777777-7777-4777-8777-777777777777",
+      "source_span": "Synthetic user-reviewed source span.",
+      "observed_metric": null,
+      "observed_value": null,
+      "unit": null,
+        "period": null,
+        "parser_version": null,
+        "predicate_schema_version": "synthetic-predicate-v1",
+        "actor_id": "99999999-9999-4999-8999-999999999998",
+        "reason": "Synthetic confirmation reason.",
+        "structured_surface": true,
+        "free_text_only": false,
+        "supersedes_event_id": null,
+        "created_at": "2026-08-28T00:21:00Z"
+      },
+      {
+        "predicate_authority_event_id": "21212121-2121-4121-8121-212121212121",
+        "command_id": "22222222-2222-4222-8222-222222222223",
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "predicate_id": "18181818-1818-4818-8818-181818181818",
+        "event_type": "PREDICATE_CANDIDATE",
+        "producer_kind": "AI",
+        "actor_kind": "RESEARCH_ADAPTER",
+        "policy_effect": "REVIEW_ONLY",
+        "source_id": "88888888-8888-4888-8888-888888888888",
+        "evidence_seal_id": "77777777-7777-4777-8777-777777777777",
+      "source_span": "Synthetic candidate span.",
+      "observed_metric": null,
+      "observed_value": null,
+      "unit": null,
+        "period": null,
+        "parser_version": null,
+        "predicate_schema_version": "synthetic-predicate-v1",
+        "actor_id": null,
+        "reason": null,
+        "structured_surface": true,
+        "free_text_only": false,
+        "supersedes_event_id": null,
+        "created_at": "2026-08-28T00:22:00Z"
+      },
+      {
+        "predicate_authority_event_id": "23232323-2323-4323-8323-232323232323",
+        "command_id": "24242424-2424-4424-8424-242424242424",
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "predicate_id": "18181818-1818-4818-8818-181818181818",
+        "event_type": "PROVENANCE_VALIDATED",
+        "producer_kind": "SOURCE_VALIDATOR",
+        "actor_kind": "SOURCE_VALIDATOR",
+        "policy_effect": "PROVENANCE_ONLY",
+        "source_id": "88888888-8888-4888-8888-888888888888",
+        "evidence_seal_id": "77777777-7777-4777-8777-777777777777",
+      "source_span": "Synthetic provenance span.",
+      "observed_metric": null,
+      "observed_value": null,
+      "unit": null,
+        "period": null,
+        "parser_version": null,
+        "predicate_schema_version": null,
+        "actor_id": null,
+        "reason": null,
+        "structured_surface": true,
+        "free_text_only": false,
+        "supersedes_event_id": null,
+        "created_at": "2026-08-28T00:23:00Z"
+      },
+      {
+        "predicate_authority_event_id": "25252525-2525-4525-8525-252525252525",
+        "command_id": "26262626-2626-4626-8626-262626262626",
+        "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "predicate_id": "18181818-1818-4818-8818-181818181818",
+        "event_type": "PREDICATE_SUPERSEDED",
+        "producer_kind": "DETERMINISTIC_PARSER",
+        "actor_kind": "DETERMINISTIC",
+        "policy_effect": "REVIEW_ONLY",
+        "source_id": "27272727-2727-4727-8727-272727272727",
+        "evidence_seal_id": "32323232-3232-4232-8232-323232323232",
+      "source_span": "Synthetic restated source span.",
+      "observed_metric": "FREE_CASH_FLOW",
+      "observed_value": "100.01",
+      "unit": "USD",
+        "period": "FY2025",
+        "parser_version": "synthetic-parser-v2",
+        "predicate_schema_version": "synthetic-predicate-v1",
+        "actor_id": null,
+        "reason": "Synthetic source restatement.",
+        "structured_surface": true,
+        "free_text_only": false,
+        "supersedes_event_id": "16161616-1616-4616-8616-161616161616",
+        "created_at": "2026-08-28T00:24:00Z"
+      }
+    ]
+  }
+}

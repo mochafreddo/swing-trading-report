@@ -1,0 +1,713 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/schemas/portfolio-mandate.a1.schema.json",
+  "title": "Portfolio Mandate A1 synthetic contract fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "stable_identity",
+    "mandate_version_core",
+    "position_slice_core",
+    "predicate_authority_core"
+  ],
+  "properties": {
+    "schema_version": { "const": "portfolio-mandate.a1" },
+    "stable_identity": { "$ref": "#/$defs/stableIdentity" },
+    "mandate_version_core": { "$ref": "#/$defs/mandateVersionCore" },
+    "position_slice_core": { "$ref": "#/$defs/positionSliceCore" },
+    "predicate_authority_core": { "$ref": "#/$defs/predicateAuthorityCore" }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "sourceIdentifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme", "value"],
+      "properties": {
+        "scheme": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$" },
+        "value": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer_id", "legal_name", "source_identifiers"],
+      "properties": {
+        "issuer_id": { "$ref": "#/$defs/uuid" },
+        "legal_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "source_identifiers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sourceIdentifier" }
+        }
+      }
+    },
+    "instrument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument_id", "issuer_id", "security_type", "currency"],
+      "properties": {
+        "instrument_id": { "$ref": "#/$defs/uuid" },
+        "issuer_id": { "$ref": "#/$defs/uuid" },
+        "security_type": {
+          "enum": ["COMMON_STOCK", "PREFERRED_STOCK", "ETF"]
+        },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "listingAlias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "listing_alias_id",
+        "instrument_id",
+        "exchange_mic",
+        "ticker",
+        "valid_from",
+        "valid_to",
+        "registry_version"
+      ],
+      "properties": {
+        "listing_alias_id": { "$ref": "#/$defs/uuid" },
+        "instrument_id": { "$ref": "#/$defs/uuid" },
+        "exchange_mic": { "type": "string", "pattern": "^[A-Z0-9]{4}$" },
+        "ticker": { "type": "string", "pattern": "^[A-Z][A-Z0-9./-]{0,31}$" },
+        "valid_from": { "$ref": "#/$defs/timestamp" },
+        "valid_to": {
+          "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+        },
+        "registry_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "evidenceIdentitySeal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_seal_id",
+        "source_id",
+        "instrument_id",
+        "issuer_id",
+        "registry_version",
+        "source_event_time",
+        "source_issuer_identifier",
+        "scope",
+        "exchange_mic",
+        "ticker",
+        "sealed_at",
+        "actor_kind"
+      ],
+      "properties": {
+        "evidence_seal_id": { "$ref": "#/$defs/uuid" },
+        "source_id": { "$ref": "#/$defs/uuid" },
+        "instrument_id": { "$ref": "#/$defs/uuid" },
+        "issuer_id": { "$ref": "#/$defs/uuid" },
+        "registry_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_event_time": { "$ref": "#/$defs/timestamp" },
+        "source_issuer_identifier": { "$ref": "#/$defs/sourceIdentifier" },
+        "scope": { "enum": ["ISSUER", "INSTRUMENT"] },
+        "exchange_mic": { "type": "string", "pattern": "^[A-Z0-9]{4}$" },
+        "ticker": { "type": "string", "pattern": "^[A-Z][A-Z0-9./-]{0,31}$" },
+        "sealed_at": { "$ref": "#/$defs/timestamp" },
+        "actor_kind": { "const": "SOURCE_VALIDATOR" }
+      }
+    },
+    "mandate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mandate_id",
+        "instrument_id",
+        "broker_position_id",
+        "owner_actor_id",
+        "created_at"
+      ],
+      "properties": {
+        "mandate_id": { "$ref": "#/$defs/uuid" },
+        "instrument_id": { "$ref": "#/$defs/uuid" },
+        "broker_position_id": {
+          "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "owner_actor_id": { "$ref": "#/$defs/uuid" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "mandateVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mandate_version_id",
+        "mandate_id",
+        "version_number",
+        "supersedes_version_id",
+        "classification_state",
+        "horizon",
+        "proposed_horizon",
+        "approval_state",
+        "thesis",
+        "invalidation_conditions",
+        "approved_by_kind",
+        "approved_at",
+        "policy_version",
+        "effective_from",
+        "effective_to"
+      ],
+      "properties": {
+        "mandate_version_id": { "$ref": "#/$defs/uuid" },
+        "mandate_id": { "$ref": "#/$defs/uuid" },
+        "version_number": { "type": "integer", "minimum": 1 },
+        "supersedes_version_id": {
+          "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "classification_state": {
+          "enum": ["UNCLASSIFIED", "ACTIVE", "EXIT_REVIEW", "CLOSED"]
+        },
+        "horizon": {
+          "oneOf": [{ "enum": ["SWING", "LONG_TERM"] }, { "type": "null" }]
+        },
+        "proposed_horizon": {
+          "oneOf": [{ "enum": ["SWING", "LONG_TERM"] }, { "type": "null" }]
+        },
+        "approval_state": {
+          "enum": ["DRAFT", "APPROVED", "NEEDS_REAPPROVAL"]
+        },
+        "thesis": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 2000 },
+            { "type": "null" }
+          ]
+        },
+        "invalidation_conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
+        "approved_by_kind": {
+          "oneOf": [{ "const": "USER" }, { "type": "null" }]
+        },
+        "approved_at": {
+          "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+        },
+        "policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "effective_from": {
+          "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+        },
+        "effective_to": {
+          "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+        }
+      }
+    },
+    "activationCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command_id",
+        "mandate_id",
+        "draft_mandate_version_id",
+        "expected_mandate_version_id",
+        "actor_kind",
+        "actor_id",
+        "broker_snapshot_version",
+        "allocation_version",
+        "requested_at"
+      ],
+      "properties": {
+        "command_id": { "$ref": "#/$defs/uuid" },
+        "mandate_id": { "$ref": "#/$defs/uuid" },
+        "draft_mandate_version_id": { "$ref": "#/$defs/uuid" },
+        "expected_mandate_version_id": { "$ref": "#/$defs/uuid" },
+        "actor_kind": { "const": "USER" },
+        "actor_id": { "$ref": "#/$defs/uuid" },
+        "broker_snapshot_version": { "type": "integer", "minimum": 1 },
+        "allocation_version": { "type": "integer", "minimum": 1 },
+        "requested_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "mandateVersionCore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mandates", "versions", "activation_commands"],
+      "properties": {
+        "mandates": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/mandate" }
+        },
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/mandateVersion" }
+        },
+        "activation_commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/activationCommand" }
+        }
+      }
+    },
+    "decimalQuantity": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,6})?$"
+    },
+    "decimalMetric": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]{1,6})?$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "brokerPosition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker_position_id",
+        "instrument_id",
+        "account_ref_hash",
+        "currency"
+      ],
+      "properties": {
+        "broker_position_id": { "$ref": "#/$defs/uuid" },
+        "instrument_id": { "$ref": "#/$defs/uuid" },
+        "account_ref_hash": { "$ref": "#/$defs/hash" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "brokerPositionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker_position_snapshot_id",
+        "broker_position_id",
+        "snapshot_version",
+        "quantity",
+        "currency",
+        "watermark",
+        "sealed_input_hash"
+      ],
+      "properties": {
+        "broker_position_snapshot_id": { "$ref": "#/$defs/uuid" },
+        "broker_position_id": { "$ref": "#/$defs/uuid" },
+        "snapshot_version": { "type": "integer", "minimum": 1 },
+        "quantity": { "$ref": "#/$defs/decimalQuantity" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "watermark": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sealed_input_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allocation_id",
+        "broker_position_id",
+        "allocation_version",
+        "snapshot_version",
+        "active",
+        "decision_eligible"
+      ],
+      "properties": {
+        "allocation_id": { "$ref": "#/$defs/uuid" },
+        "broker_position_id": { "$ref": "#/$defs/uuid" },
+        "allocation_version": { "type": "integer", "minimum": 1 },
+        "snapshot_version": { "type": "integer", "minimum": 1 },
+        "active": { "type": "boolean" },
+        "decision_eligible": { "type": "boolean" }
+      }
+    },
+    "positionSlice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slice_id",
+        "allocation_id",
+        "mandate_version_id",
+        "quantity",
+        "currency",
+        "classification_state",
+        "decision_eligible"
+      ],
+      "properties": {
+        "slice_id": { "$ref": "#/$defs/uuid" },
+        "allocation_id": { "$ref": "#/$defs/uuid" },
+        "mandate_version_id": {
+          "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "quantity": { "$ref": "#/$defs/decimalQuantity" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "classification_state": {
+          "enum": ["ACTIVE", "UNCLASSIFIED", "PENDING_ALLOCATION"]
+        },
+        "decision_eligible": { "type": "boolean" }
+      }
+    },
+    "rebaseCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command_id",
+        "rebase_evidence_id",
+        "broker_position_id",
+        "source_snapshot_version",
+        "target_snapshot_version",
+        "target_quantity",
+        "currency",
+        "cause",
+        "matched_slice_id",
+        "corporate_action_ratio",
+        "expected_allocation_version",
+        "actor_kind",
+        "requested_at"
+      ],
+      "properties": {
+        "command_id": { "$ref": "#/$defs/uuid" },
+        "rebase_evidence_id": { "$ref": "#/$defs/uuid" },
+        "broker_position_id": { "$ref": "#/$defs/uuid" },
+        "source_snapshot_version": { "type": "integer", "minimum": 1 },
+        "target_snapshot_version": { "type": "integer", "minimum": 1 },
+        "target_quantity": { "$ref": "#/$defs/decimalQuantity" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "cause": {
+          "enum": [
+            "ZERO_DELTA",
+            "UNIQUE_BUY",
+            "UNRESOLVED_BUY",
+            "UNIQUE_SELL",
+            "AMBIGUOUS_SELL",
+            "POSITION_CLOSED",
+            "VERIFIED_CORPORATE_ACTION",
+            "AMBIGUOUS_CORPORATE_ACTION"
+          ]
+        },
+        "matched_slice_id": {
+          "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "corporate_action_ratio": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]{1,8})?$" },
+            { "type": "null" }
+          ]
+        },
+        "expected_allocation_version": { "type": "integer", "minimum": 1 },
+        "actor_kind": { "const": "DETERMINISTIC" },
+        "requested_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "rebaseEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rebase_evidence_id",
+        "broker_position_id",
+        "source_snapshot_version",
+        "target_snapshot_version",
+        "cause",
+        "matched_slice_id",
+        "corporate_action_ratio",
+        "source_id",
+        "evidence_hash",
+        "verification_state",
+        "producer_kind"
+      ],
+      "properties": {
+        "rebase_evidence_id": { "$ref": "#/$defs/uuid" },
+        "broker_position_id": { "$ref": "#/$defs/uuid" },
+        "source_snapshot_version": { "type": "integer", "minimum": 1 },
+        "target_snapshot_version": { "type": "integer", "minimum": 1 },
+        "cause": {
+          "enum": [
+            "ZERO_DELTA",
+            "UNIQUE_BUY",
+            "UNRESOLVED_BUY",
+            "UNIQUE_SELL",
+            "AMBIGUOUS_SELL",
+            "POSITION_CLOSED",
+            "VERIFIED_CORPORATE_ACTION",
+            "AMBIGUOUS_CORPORATE_ACTION"
+          ]
+        },
+        "matched_slice_id": {
+          "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "corporate_action_ratio": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]{1,8})?$" },
+            { "type": "null" }
+          ]
+        },
+        "source_id": { "$ref": "#/$defs/uuid" },
+        "evidence_hash": { "$ref": "#/$defs/hash" },
+        "verification_state": { "enum": ["VERIFIED", "UNRESOLVED"] },
+        "producer_kind": { "const": "DETERMINISTIC" }
+      }
+    },
+    "positionSliceCore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "broker_positions",
+        "snapshots",
+        "allocations",
+        "rebase_evidence",
+        "slices",
+        "rebase_commands"
+      ],
+      "properties": {
+        "broker_positions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/brokerPosition" }
+        },
+        "snapshots": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/brokerPositionSnapshot" }
+        },
+        "allocations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/allocation" }
+        },
+        "rebase_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/rebaseEvidence" }
+        },
+        "slices": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/positionSlice" }
+        },
+        "rebase_commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/rebaseCommand" }
+        }
+      }
+    },
+    "predicateAuthorityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "predicate_authority_event_id",
+        "command_id",
+        "mandate_version_id",
+        "predicate_id",
+        "event_type",
+        "producer_kind",
+        "actor_kind",
+        "policy_effect",
+        "source_id",
+        "evidence_seal_id",
+        "source_span",
+        "observed_metric",
+        "observed_value",
+        "unit",
+        "period",
+        "parser_version",
+        "predicate_schema_version",
+        "actor_id",
+        "reason",
+        "structured_surface",
+        "free_text_only",
+        "supersedes_event_id",
+        "created_at"
+      ],
+      "properties": {
+        "predicate_authority_event_id": { "$ref": "#/$defs/uuid" },
+        "command_id": { "$ref": "#/$defs/uuid" },
+        "mandate_version_id": { "$ref": "#/$defs/uuid" },
+        "predicate_id": { "$ref": "#/$defs/uuid" },
+        "event_type": {
+          "enum": [
+            "PREDICATE_FULFILLED",
+            "USER_PREDICATE_CONFIRMED",
+            "PREDICATE_CANDIDATE",
+            "PROVENANCE_VALIDATED",
+            "PREDICATE_SUPERSEDED"
+          ]
+        },
+        "producer_kind": {
+          "enum": ["DETERMINISTIC_PARSER", "USER", "AI", "SOURCE_VALIDATOR"]
+        },
+        "actor_kind": {
+          "enum": ["DETERMINISTIC", "USER", "RESEARCH_ADAPTER", "SOURCE_VALIDATOR"]
+        },
+        "policy_effect": {
+          "enum": ["SELL_ELIGIBLE", "REVIEW_ONLY", "PROVENANCE_ONLY"]
+        },
+        "source_id": { "$ref": "#/$defs/uuid" },
+        "evidence_seal_id": { "$ref": "#/$defs/uuid" },
+        "source_span": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 4096 },
+            { "type": "null" }
+          ]
+        },
+        "observed_metric": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+            { "type": "null" }
+          ]
+        },
+        "observed_value": {
+          "oneOf": [
+            { "$ref": "#/$defs/decimalMetric" },
+            { "type": "null" }
+          ]
+        },
+        "unit": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 64 },
+            { "type": "null" }
+          ]
+        },
+        "period": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 64 },
+            { "type": "null" }
+          ]
+        },
+        "parser_version": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 128 },
+            { "type": "null" }
+          ]
+        },
+        "predicate_schema_version": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 128 },
+            { "type": "null" }
+          ]
+        },
+        "actor_id": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 128 },
+            { "type": "null" }
+          ]
+        },
+        "reason": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 1000 },
+            { "type": "null" }
+          ]
+        },
+        "structured_surface": { "type": "boolean" },
+        "free_text_only": { "type": "boolean" },
+        "supersedes_event_id": {
+          "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+        },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "predicateDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "predicate_id",
+        "mandate_version_id",
+        "predicate_schema_version",
+        "metric",
+        "comparison_operator",
+        "threshold_value",
+        "expected_unit",
+        "expected_period",
+        "approval_state",
+        "approved_by_kind"
+      ],
+      "properties": {
+        "predicate_id": { "$ref": "#/$defs/uuid" },
+        "mandate_version_id": { "$ref": "#/$defs/uuid" },
+        "predicate_schema_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "metric": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "comparison_operator": { "enum": ["LT", "LTE", "EQ", "GTE", "GT"] },
+        "threshold_value": { "$ref": "#/$defs/decimalMetric" },
+        "expected_unit": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "expected_period": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "approval_state": { "const": "APPROVED" },
+        "approved_by_kind": { "const": "USER" }
+      }
+    },
+    "predicateAuthorityCore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definitions", "events"],
+      "properties": {
+        "definitions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/predicateDefinition" }
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/predicateAuthorityEvent" }
+        }
+      }
+    },
+    "stableIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry_version",
+        "issuers",
+        "instruments",
+        "listing_aliases",
+        "evidence_seals"
+      ],
+      "properties": {
+        "registry_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "issuers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/issuer" }
+        },
+        "instruments": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/instrument" }
+        },
+        "listing_aliases": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/listingAlias" }
+        },
+        "evidence_seals": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidenceIdentitySeal" }
+        }
+      }
+    }
+  }
+}
