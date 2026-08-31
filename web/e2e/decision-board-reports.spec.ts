@@ -208,6 +208,16 @@ test("fixture-only /today Unclassified Queue journey", async ({
   page,
 }) => {
   const unexpectedRequests = await configureFixtureBoundary(context, page);
+  await page.setViewportSize({ width: 375, height: 812 });
+
+  const expectNoHorizontalOverflow = async () => {
+    const layout = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }));
+
+    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
+  };
 
   await page.goto("/today");
   const boardSummary = page.getByRole("region", {
@@ -218,6 +228,7 @@ test("fixture-only /today Unclassified Queue journey", async ({
 
   await expect(queue).toBeVisible();
   await expect(boardSummary.locator("strong")).toHaveText("0");
+  await expectNoHorizontalOverflow();
 
   await input.setInputFiles(unclassifiedFixturePath);
 
@@ -231,6 +242,7 @@ test("fixture-only /today Unclassified Queue journey", async ({
   await expect(queue.getByText(/UNAPPROVED DRAFT/u)).toHaveCount(5);
   await expect(queue).toContainText("not a current, freshness-proven");
   await expect(boardSummary.locator("strong")).toHaveText("0");
+  await expectNoHorizontalOverflow();
   await expect(
     queue.getByRole("button", {
       name: /approve|order|notify|buy|hold|sell|avoid/iu,

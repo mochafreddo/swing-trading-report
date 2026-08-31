@@ -1,5 +1,7 @@
 .board {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: clamp(1.5rem, 3vw, 2.5rem);
 }
 
@@ -384,7 +386,9 @@
 }
 
 .localPreviewControls input {
+  min-width: 0;
   max-width: 100%;
+  flex: 1 1 18rem;
   padding: 0.55rem;
 }
 
