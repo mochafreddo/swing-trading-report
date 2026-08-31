@@ -1,0 +1,65 @@
+{
+  "schema_version": "portfolio-mandate-a2-private-input.v0",
+  "state": "USER_INPUT_RECORDED_UNCLASSIFIED",
+  "snapshot": {
+    "source": "toss-open-api:/api/v1/holdings",
+    "observed_at_kst": "2026-08-31T09:00:00+09:00",
+    "ranking_basis": "marketValue.amount",
+    "currency": "USD",
+    "holding_count": 12,
+    "account_identifier_included": false,
+    "amounts_included": false
+  },
+  "holdings": [
+    {
+      "ticker": "SYNTH1.NAS",
+      "classification_state": "UNCLASSIFIED",
+      "horizon": null,
+      "proposed_horizon": "SWING",
+      "thesis": "Obviously synthetic recalled thesis one.",
+      "thesis_recall": "REMEMBERED",
+      "invalidation": ["Obviously synthetic invalidation one."],
+      "invalidation_recall": "REMEMBERED"
+    },
+    {
+      "ticker": "SYNTH2.NYS",
+      "classification_state": "UNCLASSIFIED",
+      "horizon": null,
+      "proposed_horizon": "LONG_TERM",
+      "thesis": null,
+      "thesis_recall": "NOT_REMEMBERED",
+      "invalidation": [],
+      "invalidation_recall": "NOT_REMEMBERED"
+    },
+    {
+      "ticker": "SYNTH3.AMS",
+      "classification_state": "UNCLASSIFIED",
+      "horizon": null,
+      "proposed_horizon": null,
+      "thesis": "Obviously synthetic recalled thesis three.",
+      "thesis_recall": "REMEMBERED",
+      "invalidation": [],
+      "invalidation_recall": "NOT_REMEMBERED"
+    },
+    {
+      "ticker": "SYNTH4.NAS",
+      "classification_state": "UNCLASSIFIED",
+      "horizon": null,
+      "proposed_horizon": "SWING",
+      "thesis": null,
+      "thesis_recall": "NOT_REMEMBERED",
+      "invalidation": ["Obviously synthetic invalidation four."],
+      "invalidation_recall": "REMEMBERED"
+    },
+    {
+      "ticker": "SYNTH5.NYS",
+      "classification_state": "UNCLASSIFIED",
+      "horizon": null,
+      "proposed_horizon": "LONG_TERM",
+      "thesis": "Obviously synthetic recalled thesis five.",
+      "thesis_recall": "REMEMBERED",
+      "invalidation": ["Obviously synthetic invalidation five."],
+      "invalidation_recall": "REMEMBERED"
+    }
+  ]
+}

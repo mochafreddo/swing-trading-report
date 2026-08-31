@@ -6,6 +6,8 @@ import type {
   DecisionBoardRunKind,
 } from "@/lib/types";
 
+import { UnclassifiedQueuePreview } from "./unclassified-queue-preview";
+
 import styles from "./today-decision-board.module.css";
 
 type PublishedDecisionBoardReport = Extract<
@@ -571,6 +573,8 @@ export function TodayDecisionBoard({
           </p>
         )}
       </section>
+
+      <UnclassifiedQueuePreview />
 
       <p className={styles.completenessNote}>
         This view uses the public projection only. It cannot prove that every
