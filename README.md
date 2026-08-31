@@ -88,6 +88,7 @@ Python-only 변경은 `just quality`, 웹 변경은 `just ci-web`, 문서 구조
 | 전략 신호와 리스크 규칙은 | [docs/STRATEGY.md](docs/STRATEGY.md) |
 | Decision Board V0 계약과 현재 상태는 | [docs/decision-board.md](docs/decision-board.md) |
 | Decision Board shadow를 어떻게 평가하는가 | [docs/decision-board-shadow-evaluation.md](docs/decision-board-shadow-evaluation.md) |
+| Today 보드와 미분류 로컬 미리보기를 어떻게 사용하는가 | [docs/today-decision-board.md](docs/today-decision-board.md) |
 | 기여/커밋/검증 규칙은 | [docs/contributing.md](docs/contributing.md) |
 | 보안 신고와 시크릿 사고 대응은 | [SECURITY.md](SECURITY.md) |
 

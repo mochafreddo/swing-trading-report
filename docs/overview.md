@@ -39,7 +39,7 @@
 3. `sab entry`가 `buy` 리포트 후보를 다음 세션 진입 관점으로 재평가해 `entry` 리포트를 생성합니다.
 4. `sab backtest`가 로컬 historical OHLCV 파일을 기존 buy/sell 전략 로직으로 replay해 `backtest` 연구 리포트를 생성합니다.
 5. `sab ai-brief`가 `entry` 리포트의 recommendable/watch 후보를 source/news/model provider로 요약해 `ai-brief` 리포트를 생성합니다.
-6. Next.js 웹 UI가 Supabase `report_index`, Storage, `holdings`, `runtime_state`를 조회/수정합니다.
+6. Next.js 웹 UI가 fail-closed Today 보드를 제공하고 Supabase `report_index`, Storage, `holdings`, `runtime_state`를 조회/수정합니다. Today의 Unclassified Queue local preview는 Supabase나 API를 사용하지 않고 선택한 A2 private JSON을 현재 browser tab memory에서만 검증합니다.
 7. GitHub Actions와 로컬 Docker scheduler가 정기 실행, 업로드, 알림, cleanup을 담당하고, macOS `launchd` Toss runner가 local scheduled holdings sync를 호출합니다.
 8. Decision Board V0는 US SWING ENTRY/HOLDING public fact를 별도 local shadow report로 compile하고 Reports UI에서 보여줍니다. 기본 executor는 production adapter 미연결로 fail closed하며 기존 실행·알림을 바꾸지 않습니다.
 
@@ -76,4 +76,4 @@
 - 배포: [Deployment](deployment.md)
 - 운영: [Operations](operations.md)
 - 장애 대응: [Troubleshooting](troubleshooting.md)
-- Decision Board: [Reference](decision-board.md), [Shadow evaluation](decision-board-shadow-evaluation.md)
+- Decision Board: [Reference](decision-board.md), [Today](today-decision-board.md), [Shadow evaluation](decision-board-shadow-evaluation.md)

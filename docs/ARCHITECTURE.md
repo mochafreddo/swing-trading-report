@@ -7,7 +7,7 @@
 
 ### 현재 제공
 
-- `scan`/`sell`/`entry`/`backtest` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, 로컬 Docker scheduled AI Brief primary, GitHub monitor/fallback, AI Brief source payload 수집/평가/live 비교, AI Brief recommendation artifact 평가, 웹 Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
+- `scan`/`sell`/`entry`/`backtest` 파이프라인, 로컬/수동/scheduled workflow `ai-brief`, 로컬 Docker scheduled AI Brief primary, GitHub monitor/fallback, AI Brief source payload 수집/평가/live 비교, AI Brief recommendation artifact 평가, 웹 Today/Reports/Holdings/Run/Metrics, schedule/opt-in 알림 경로를 현재 아키텍처 기준으로 설명합니다.
 - `report_index`와 `runtime_state`, Supabase Storage, GitHub Actions cleanup/manual/AI Brief monitor/fallback, 로컬 one-shot Docker scheduled AI Brief 연결이 현재 제공 범위입니다. Scheduled sell은 GitHub schedule이 아니라 Toss freshness-gated local Sell AI Brief generation runner로 제공하며, scheduled scan은 marker-aware fallback 전까지 fail closed입니다.
 
 ### 실험
@@ -34,7 +34,7 @@
 ## 1. 시스템 목적
 
 - Python 엔진(`sab`)으로 KR/US 종목을 평가해 `buy`/`sell`/`entry` JSON 리포트를 생성하고, 로컬 historical OHLCV로 `backtest` JSON 연구 리포트를 만들며, entry 결과를 로컬 `ai-brief` JSON으로 요약하고, fresh Toss holdings marker가 있을 때 scheduled Sell AI Brief를 생성합니다.
-- Next.js 웹(`web`)은 리포트 열람, 운영 메트릭 대시보드, 보유 종목 CRUD, 워크플로우 실행 트리거를 제공합니다.
+- Next.js 웹(`web`)은 fail-closed Today 보드, 리포트 열람, 운영 메트릭 대시보드, 보유 종목 CRUD, 워크플로우 실행 트리거를 제공합니다.
 - Supabase는 보유 종목(Postgres), 리포트(Storage), 런타임 상태(Postgres, 기본값)를 저장하는 단일 백엔드입니다.
 - GitHub Actions는 CI/audit/release, cleanup, manual dispatch, AI Brief monitor/fallback을 담당합니다. scheduled AI Brief는 로컬 Docker primary가 실행하고, scheduled scan은 marker-aware fallback 전까지 fail closed입니다. Scheduled Sell AI Brief는 로컬 generic wrapper가 Toss freshness marker를 확인한 뒤 sell report와 Sell AI Brief를 생성하고, 기존 prebuilt delivery runner는 artifact 전달/재조정 전용으로 남습니다.
 
@@ -86,6 +86,7 @@ flowchart LR
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy/YAML replace-all RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | Toss holdings sync | 서버 전용 OAuth client credentials로 Toss 보유 종목을 조회하고 Supabase holdings와 비교한 뒤, 서버 재조회와 reviewed `diffHash` 일치 검증 및 Supabase RPC expected snapshot guard를 통과한 apply만 replace-all로 반영하는 review 경로. scheduled auto-sync는 `TOSS_SYNC_JOB_TOKEN` local bearer 경계 안에서 같은 service를 쓰되, non-empty Toss snapshot의 delete diff는 삭제하지 않고 holdings row의 `broker_state=not_seen_in_toss`와 durable missing evidence로 격리합니다. 빈 snapshot wipe는 계속 `wipe_guard_blocked`로 fail closed입니다. scheduled preview는 DB가 같은 snapshot에서 반환한 rows+digest token을 사용하고, replace/quarantine mutation wrapper는 같은 transaction의 exact post-state digest를 반환합니다. unchanged capture와 후속 seal은 이 DB token을 CAS guard로 검증한 뒤에만 `BrokerSnapshotV0` revision과 `toss-sync:success:MIXED:<session_date>` freshness marker를 함께 봉인합니다. Local QA는 `TOSS_SYNC_SOURCE=fixture`, `TOSS_SYNC_QA_FIXTURE_ENABLED=1`, local Supabase guard를 함께 요구해 live Toss/remote holdings 없이 valid-token scheduled 경로를 재현합니다. | `web/src/lib/toss/client.ts`, `web/src/lib/toss/holdings-sync.ts`, `web/src/lib/toss/holdings-sync-service.ts`, `web/src/app/api/holdings/toss-sync/route.ts`, `web/src/app/api/holdings/toss-sync/scheduled/route.ts`, `web/src/components/holdings/toss-sync-panel.tsx`, `scripts/toss_daily_auto_sync.sh`, `scripts/qa_toss_sync_local.sh` |
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
+| Today 보드 | ENTRY/HOLDING 공개 projection과 local journal warning을 fail-closed로 조합하고 A2 private input을 browser-memory-only Unclassified Queue로 검증·표시 | `web/src/app/(console)/today/page.tsx`, `web/src/components/today-decision-board.tsx`, `web/src/components/unclassified-queue-preview.tsx` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
 | 배치 워크플로우 | cleanup, 수동 workflow dispatch, 수동 AI Brief artifact 생성, scheduled AI Brief monitor/fallback. `sell.yml`은 여전히 manual opt-in Sell/Sell AI Brief 생성·전달 워크플로우이며 scheduled sell generation은 local generic wrapper가 담당합니다. scheduled scan 생성은 marker-aware fallback 전까지 fail closed | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
@@ -277,6 +278,23 @@ T1–T12는 schema, broker snapshot, public identity, bounded research, exact-sp
 12. Decision Board 목록 데이터 경계는 `run_kind`, `run_id`, `idempotency_key`, `decision_created_at`과 deterministic key의 일치를 검증합니다. malformed row는 legacy row로 강등하지 않고 제외하며, run-kind별 latest는 `decision_created_at DESC, run_id DESC, report_key DESC, bucket_id DESC`로 조회합니다. Reports UI는 exact `ENTRY|HOLDING` lane을 URL/SSR/client cache/navigation identity에 보존하고, lane과 다른 key를 선택하지 않습니다.
 13. Decision Board detail은 1 MiB exact-byte Storage reader, fatal UTF-8 및 duplicate-key-aware JSON parser, T1 Web schema, recomputed payload hash, key의 run-kind/run-ID/idempotency identity를 순서대로 통과합니다. API는 producer object를 그대로 반환하지 않고 명시적 public allowlist envelope를 새로 만들며 issue message도 code에서 재구성합니다. private sentinel/path/token/traceback/provider-error value나 invalid object는 sanitized 422로 끝나며 raw fallback이 없습니다. 선택적 local journal panel은 fixed-argv subprocess로 packaged stdlib-only T9 reader를 호출합니다. reader는 writer와 같은 descriptor-relative authority, bounded filename scan, per-record/output byte cap, fatal UTF-8, duplicate-key/canonical validation을 적용해 public `MISSED_EXPECTED|STALE_INCOMPLETE`만 반환합니다. Web은 1.5초 timeout과 output cap 뒤 결과를 다시 Zod로 검증하며 경로가 없거나 unsafe하면 path/raw error 없이 unavailable 상태로 닫힙니다.
 
+### 4.4.1 Today 보드와 local private preview
+
+1. `/today` server page는 관리자 인증을 먼저 확인하고 ENTRY/HOLDING latest index,
+   검증된 detail과 local journal public status를 병렬로 읽습니다.
+2. V0 report에는 현재 freshness authority가 없으므로 PUBLISHED action도
+   `FRESHNESS_UNPROVEN · NOT ACTIVE` 역사적 사실로만 표시합니다. action count와
+   active queue는 이를 0으로 유지하며 report 부재를 절대 `NO ACTION`으로 추론하지
+   않습니다.
+3. Unclassified Queue는 server/API/Supabase 경로에 연결되지 않은 client component입니다.
+   선택한 1,000,000-byte 이하 JSON을 tab memory에서 strict A2 Zod contract로 전체
+   검증하고 정확히 5개 `UNCLASSIFIED` row의 ticker, unapproved horizon draft와 확인
+   작업만 표시합니다.
+4. 파일 재선택과 Clear는 이전 비동기 읽기 generation을 무효화합니다. preview는
+   fetch, browser storage, writer, approval, provider, order 또는 notification
+   capability를 가지지 않습니다. 자세한 사용·privacy 경계는
+   [Today Decision Board](today-decision-board.md)를 참고합니다.
+
 ### 4.5 웹 운영 메트릭 대시보드 플로우
 
 1. `/metrics`는 `report_index`에서 `buy`, `sell`, `entry` 최근 30개 row를 타입별로 각각 조회합니다.
@@ -366,7 +384,7 @@ T1–T12는 schema, broker snapshot, public identity, bounded research, exact-sp
 - 요청 무결성
   - 보호 API 라우트는 `enforceAdminApiGuard()` 단일 진입점에서 인증 + `same-origin` + 로컬 요청 검증(`host`, `x-forwarded-host`, unsafe의 `origin/referer` 또는 `sec-fetch-site=same-origin`)을 수행
   - 공개 API(`/api/auth/login`, `/api/auth/logout`)는 라우트 내부에서 `same-origin` + 로컬 요청 검증을 수행
-  - `web/src/proxy.ts`는 Next.js 16 page proxy entrypoint이며 `/`, `/reports`, `/metrics`, `/holdings`, `/run`을 렌더링 전에 로그인으로 리다이렉트합니다. `web/middleware.ts`는 이 proxy가 재사용하는 구현 모듈로 유지합니다.
+  - `web/src/proxy.ts`는 Next.js 16 page proxy entrypoint이며 `/`, `/today`, `/reports`, `/metrics`, `/holdings`, `/run`을 렌더링 전에 로그인으로 리다이렉트합니다. `web/middleware.ts`는 이 proxy가 재사용하는 구현 모듈로 유지합니다.
   - Proxy matcher는 Next build가 정적으로 분석할 수 있도록 `web/src/proxy.ts`에 literal `config.matcher`로 둡니다. `just ci-web` build 출력의 `ƒ Proxy (Middleware)`와 보호 페이지 307 smoke가 page-level auth gate 회귀 검증입니다.
   - 로컬 요청 강제는 기본적으로 Host/Origin 헤더를 신뢰하지 않으며, loopback bind 또는 신뢰된 외부 경계에서만 `SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS=1`로 활성화합니다. `SAB_ENFORCE_LOCAL_REQUEST=0` 또는 `NODE_ENV=test`에서는 완화됩니다.
   - 시작 가드는 `SAB_ALLOW_NON_LOOPBACK_BIND=1` 없는 non-loopback bind를 거부하지만, 이 가드는 원격 노출에 대한 완전한 보안 경계가 아니라 로컬 운영 가정의 fail-fast 보조 장치입니다. Docker Compose는 호스트 publish를 `127.0.0.1:PORT:3000`로 제한하고 명시적으로 Host-header 로컬 판정을 신뢰합니다.

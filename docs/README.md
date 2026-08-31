@@ -36,11 +36,12 @@
 | 5 | [Design System](../DESIGN.md) | 콘솔 UI/interaction/visual contract |
 | 6 | [Architecture](ARCHITECTURE.md) | 컴포넌트와 데이터 흐름 |
 | 7 | [Decision Board V0](decision-board.md) | US SWING advice-only shadow 계약과 현재 상태 |
-| 8 | [API](api.md) | CLI와 웹 API route 계약 |
-| 9 | [Deployment](deployment.md) | Docker/GitHub Actions/Supabase 배포 |
-| 10 | [Operations](operations.md) | 정기 운영, 로그, 헬스체크 |
-| 11 | [Troubleshooting](troubleshooting.md) | 증상별 장애 대응 |
-| 12 | [Contributing](contributing.md) | 커밋, PR, 검증 규칙 |
+| 8 | [Today Decision Board](today-decision-board.md) | fail-closed Today projection과 memory-only 미분류 preview |
+| 9 | [API](api.md) | CLI와 웹 API route 계약 |
+| 10 | [Deployment](deployment.md) | Docker/GitHub Actions/Supabase 배포 |
+| 11 | [Operations](operations.md) | 정기 운영, 로그, 헬스체크 |
+| 12 | [Troubleshooting](troubleshooting.md) | 증상별 장애 대응 |
+| 13 | [Contributing](contributing.md) | 커밋, PR, 검증 규칙 |
 
 기존 `docs/runbook.md` 링크로 들어온 경우에는 [Runbook](runbook.md)을 호환 진입점으로 사용합니다. 새 운영 절차의 source of truth는 [Operations](operations.md), [Deployment](deployment.md), [Troubleshooting](troubleshooting.md)입니다.
 
@@ -60,6 +61,7 @@
 - [Swing 핵심 로직 설계](STRATEGY.md)
 - [Decision Board V0 reference](decision-board.md)
 - [Decision Board shadow evaluation](decision-board-shadow-evaluation.md)
+- [Today Decision Board and local preview](today-decision-board.md)
 - [Spec v1.1 현재 계약](spec-v1.1.md)
 - [KIS 설정 가이드](kis-setup.md)
 - [holdings.yaml 스키마](holdings-schema.md)

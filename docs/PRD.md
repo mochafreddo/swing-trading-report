@@ -12,7 +12,7 @@
 - `scan`/`sell` GitHub Actions workflow는 manual-only `workflow_dispatch`로 제공됩니다. scheduled scan과 GitHub scheduled sell은 marker-aware fallback 설계 전까지 fail closed 상태입니다.
 - scheduled AI Brief는 로컬 Docker primary가 담당하고, `.github/workflows/ai-brief.yml`은 수동 실행과 monitor/fallback 경로로 사용합니다.
 - scheduled Sell AI Brief generation은 Toss freshness marker가 있을 때 로컬 generic wrapper가 담당하며, 정상 판단 전송과 freshness-blocked 보류 알림을 분리합니다.
-- US SWING Decision Board V0의 public identity, bounded research, exact-span claim validation, pure compiler, local runner/report/RunJournal, Supabase index와 Reports UI 계약은 구현되어 있습니다. 기본 `decision-board` CLI는 계속 `CONFIG_UNAVAILABLE`로 fail closed하고, 별도 승인된 local `decision-board-shadow-live`와 exact-slot heartbeat만 gitignore된 승인 manifest 기간에 실행됩니다.
+- US SWING Decision Board V0의 public identity, bounded research, exact-span claim validation, pure compiler, local runner/report/RunJournal, Supabase index와 Reports UI 계약은 구현되어 있습니다. `/today`는 최신 공개 projection을 freshness authority 부재 시 역사적 사실로만 표시하고, A2 private input을 upload/write/advice 없는 browser-memory-only Unclassified Queue로 열 수 있습니다. 기본 `decision-board` CLI는 계속 `CONFIG_UNAVAILABLE`로 fail closed하고, 별도 승인된 local `decision-board-shadow-live`와 exact-slot heartbeat만 gitignore된 승인 manifest 기간에 실행됩니다.
 
 ### 실험
 
@@ -61,6 +61,7 @@
 | 신호/리스크 전략 로직 | [STRATEGY](STRATEGY.md) |
 | Decision Board 구현/CLI/report 계약 | [Decision Board V0](decision-board.md) |
 | Decision Board shadow 졸업 측정 | [Shadow evaluation](decision-board-shadow-evaluation.md) |
+| Today 공개 projection과 미분류 local preview | [Today Decision Board](today-decision-board.md) |
 | Storage/report_index/runtime_state 계약 | [Spec v1.1](spec-v1.1.md) |
 | 환경변수와 config override | [config-reference](config-reference.md), [`.env.example`](../.env.example) |
 
