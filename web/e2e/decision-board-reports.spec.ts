@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 const secret = "fixture-session-secret-at-least-32-bytes";
 const username = "fixture-admin";
@@ -23,6 +23,8 @@ const holdingKey =
   "2026/08/2026-08-06.decision-board.holding.holding-2026-08-06T020000Z." +
   "f".repeat(64) +
   ".json";
+const unclassifiedFixturePath =
+  "../tests/fixtures/portfolio_mandate/portfolio-mandate-a2-unclassified-preview.synthetic.json";
 
 function base64url(value: string | Buffer): string {
   return Buffer.from(value).toString("base64url");
@@ -43,10 +45,10 @@ function sessionToken(): string {
   return `${payload}.${createHmac("sha256", secret).update(payload).digest("base64url")}`;
 }
 
-test("fixture-only /reports Decision Board journey", async ({
-  context,
-  page,
-}) => {
+async function configureFixtureBoundary(
+  context: BrowserContext,
+  page: Page,
+): Promise<string[]> {
   await context.addCookies([
     {
       name: "sab_admin_session",
@@ -110,6 +112,16 @@ test("fixture-only /reports Decision Board journey", async ({
       }),
     }),
   );
+
+  return unexpectedRequests;
+}
+
+test("fixture-only /reports Decision Board journey", async ({
+  context,
+  page,
+}) => {
+  const unexpectedRequests = await configureFixtureBoundary(context, page);
+
   await page.goto("/reports?type=decision-board&runKind=ENTRY");
   const entryListResponse = page.waitForResponse(
     (response) =>
@@ -188,5 +200,67 @@ test("fixture-only /reports Decision Board journey", async ({
   await expect(page.getByRole("button", { name: /order|notify/i })).toHaveCount(
     0,
   );
+  expect(unexpectedRequests).toEqual([]);
+});
+
+test("fixture-only /today Unclassified Queue journey", async ({
+  context,
+  page,
+}) => {
+  const unexpectedRequests = await configureFixtureBoundary(context, page);
+
+  await page.goto("/today");
+  const boardSummary = page.getByRole("region", {
+    name: "Today's Investment Actions",
+  });
+  const queue = page.getByRole("region", { name: "Unclassified Queue" });
+  const input = queue.locator("#unclassified-preview-file");
+
+  await expect(queue).toBeVisible();
+  await expect(boardSummary.locator("strong")).toHaveText("0");
+
+  await input.setInputFiles(unclassifiedFixturePath);
+
+  await expect(queue.getByRole("status")).toContainText(
+    "Local preview ready: 5 unclassified rows",
+  );
+  await expect(
+    queue.locator('[aria-label="Unclassified local preview rows"] article'),
+  ).toHaveCount(5);
+  await expect(queue.getByText("UNCLASSIFIED · NO ADVICE")).toHaveCount(5);
+  await expect(queue.getByText(/UNAPPROVED DRAFT/u)).toHaveCount(5);
+  await expect(queue).toContainText("not a current, freshness-proven");
+  await expect(boardSummary.locator("strong")).toHaveText("0");
+  await expect(
+    queue.getByRole("button", {
+      name: /approve|order|notify|buy|hold|sell|avoid/iu,
+    }),
+  ).toHaveCount(0);
+
+  await input.setInputFiles({
+    name: "invalid.synthetic.json",
+    mimeType: "application/json",
+    buffer: Buffer.from('{"schema_version":'),
+  });
+  await expect(queue.getByRole("alert")).toContainText(
+    "not valid unclassified queue JSON",
+  );
+  await expect(
+    queue.locator('[aria-label="Unclassified local preview rows"] article'),
+  ).toHaveCount(0);
+  await expect(boardSummary.locator("strong")).toHaveText("0");
+
+  await input.setInputFiles(unclassifiedFixturePath);
+  await expect(
+    queue.locator('[aria-label="Unclassified local preview rows"] article'),
+  ).toHaveCount(5);
+  await queue.getByRole("button", { name: "Clear local preview" }).click();
+  await expect(queue.getByRole("status")).toContainText(
+    "Local preview cleared from browser memory",
+  );
+  await expect(
+    queue.locator('[aria-label="Unclassified local preview rows"] article'),
+  ).toHaveCount(0);
+  await expect(input).toHaveValue("");
   expect(unexpectedRequests).toEqual([]);
 });
