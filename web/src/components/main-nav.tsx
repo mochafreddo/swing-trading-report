@@ -10,6 +10,7 @@ import { toErrorMessage } from "@/lib/error-utils";
 import styles from "./main-nav.module.css";
 
 const NAV_ITEMS = [
+  { href: "/today", label: "Today" },
   { href: "/reports", label: "Reports" },
   { href: "/metrics", label: "Metrics" },
   { href: "/holdings", label: "Holdings" },

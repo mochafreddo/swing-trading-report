@@ -14,6 +14,7 @@ describe("proxy auth response shape", () => {
     const response = await proxy(request);
 
     expect(config.matcher).toContain("/reports/:path*");
+    expect(config.matcher).toContain("/today/:path*");
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
       "http://localhost:55300/login?next=%2Freports",
