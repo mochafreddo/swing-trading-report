@@ -15,6 +15,7 @@ from sab.ai_brief_sources import (
     AiBriefSourceProviderResult,
 )
 from sab.decision_board import live_adapters as openai_live_adapter_module
+from sab.decision_board import supabase_request as supabase_request_module
 from sab.decision_board.batch_evidence import (
     BatchDecisionEvidenceBuilderV0,
     BatchDecisionEvidenceSourceV0,
@@ -695,6 +696,161 @@ def test_supabase_snapshot_downloader_maps_hard_process_timeout_to_unavailable()
             "decision-board-inputs/v0/" + "a" * 64 + ".json",
             max_bytes=1024,
         )
+
+
+def test_supabase_snapshot_download_retries_one_transient_response(
+    monkeypatch,
+) -> None:
+    responses: list[Response] = []
+    request_timeouts: list[tuple[float, float]] = []
+
+    class Response:
+        def __init__(self, status_code: int, body: bytes = b"") -> None:
+            self.status_code = status_code
+            self.body = body
+            self.closed = False
+
+        def iter_content(self, *, chunk_size: int):
+            assert chunk_size == 64 * 1024
+            yield self.body
+
+        def close(self) -> None:
+            self.closed = True
+
+    class Session:
+        trust_env = True
+
+        def get(self, *args, **kwargs) -> Response:
+            del args
+            request_timeouts.append(kwargs["timeout"])
+            response = Response(503) if not responses else Response(200, b"snapshot")
+            responses.append(response)
+            return response
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        supabase_request_module.requests,
+        "Session",
+        Session,
+    )
+
+    result = supabase_request_module._download_snapshot_sync(
+        SupabaseDecisionInputConfigV0(
+            url="https://supabase.example",
+            service_role_key="recorded-service-key",
+            timeout_seconds=3.0,
+        ),
+        "decision-board-inputs/v0/" + "a" * 64 + ".json",
+        1024,
+    )
+
+    assert result == b"snapshot"
+    assert len(request_timeouts) == 2
+    assert all(response.closed for response in responses)
+
+
+def test_supabase_snapshot_download_retries_one_connection_failure(
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    class Response:
+        status_code = 200
+        closed = False
+
+        def iter_content(self, *, chunk_size: int):
+            assert chunk_size == 64 * 1024
+            yield b"snapshot"
+
+        def close(self) -> None:
+            self.closed = True
+
+    response = Response()
+
+    class Session:
+        trust_env = True
+
+        def get(self, *args, **kwargs) -> Response:
+            nonlocal calls
+            del args, kwargs
+            calls += 1
+            if calls == 1:
+                raise supabase_request_module.requests.ConnectionError(
+                    "recorded transient connection failure"
+                )
+            return response
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        supabase_request_module.requests,
+        "Session",
+        Session,
+    )
+
+    result = supabase_request_module._download_snapshot_sync(
+        SupabaseDecisionInputConfigV0(
+            url="https://supabase.example",
+            service_role_key="recorded-service-key",
+            timeout_seconds=3.0,
+        ),
+        "decision-board-inputs/v0/" + "a" * 64 + ".json",
+        1024,
+    )
+
+    assert result == b"snapshot"
+    assert calls == 2
+    assert response.closed is True
+
+
+def test_supabase_snapshot_download_does_not_retry_permanent_response(
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    class Response:
+        status_code = 404
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    response = Response()
+
+    class Session:
+        trust_env = True
+
+        def get(self, *args, **kwargs) -> Response:
+            nonlocal calls
+            del args, kwargs
+            calls += 1
+            return response
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        supabase_request_module.requests,
+        "Session",
+        Session,
+    )
+
+    with pytest.raises(DecisionBoardAdapterUnavailableError, match="unavailable"):
+        supabase_request_module._download_snapshot_sync(
+            SupabaseDecisionInputConfigV0(
+                url="https://supabase.example",
+                service_role_key="recorded-service-key",
+                timeout_seconds=3.0,
+            ),
+            "decision-board-inputs/v0/" + "a" * 64 + ".json",
+            1024,
+        )
+
+    assert calls == 1
+    assert response.closed is True
 
 
 def test_shadow_binding_rejects_sealed_request_item_set_mismatch() -> None:

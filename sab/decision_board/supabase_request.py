@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Protocol, cast
 from urllib.parse import quote, urlsplit
@@ -35,6 +36,9 @@ from .production_adapter import DecisionBoardAdapterUnavailableError
 from .runner import create_decision_run_request_v0
 
 _MAX_SNAPSHOT_BYTES = 1_048_576
+_SNAPSHOT_DOWNLOAD_ATTEMPTS = 2
+_SNAPSHOT_RETRY_DELAY_SECONDS = 0.1
+_SNAPSHOT_RETRYABLE_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
 _HASH_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _BUCKET_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _SNAPSHOT_FIELDS = {"schema", "run_kind", "metadata", "items"}
@@ -170,39 +174,69 @@ def _download_snapshot_sync(
     url = f"{config.url}/storage/v1/object/{config.bucket}/{quoted_key}"
     session = requests.Session()
     session.trust_env = False
-    response: requests.Response | None = None
+    deadline = time.monotonic() + config.timeout_seconds
     try:
-        response = session.get(
-            url,
-            headers={
-                "Accept": "application/json",
-                "apikey": config.service_role_key,
-                "Authorization": f"Bearer {config.service_role_key}",
-            },
-            timeout=(
-                config.timeout_seconds,
-                config.timeout_seconds,
-            ),
-            allow_redirects=False,
-            stream=True,
-        )
-        if response.status_code != 200:
-            raise DecisionBoardAdapterUnavailableError(
-                "Decision Board snapshot is unavailable"
-            )
-        body = bytearray()
-        for chunk in response.iter_content(chunk_size=64 * 1024):
-            body.extend(chunk)
-            if len(body) > max_bytes:
-                raise ValueError("Decision Board snapshot exceeds the byte limit")
-        return bytes(body)
-    except requests.RequestException as exc:
+        for attempt in range(_SNAPSHOT_DOWNLOAD_ATTEMPTS):
+            response: requests.Response | None = None
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DecisionBoardAdapterUnavailableError(
+                        "Decision Board snapshot is unavailable"
+                    )
+                response = session.get(
+                    url,
+                    headers={
+                        "Accept": "application/json",
+                        "apikey": config.service_role_key,
+                        "Authorization": f"Bearer {config.service_role_key}",
+                    },
+                    timeout=(remaining / 3.0, remaining * 2.0 / 3.0),
+                    allow_redirects=False,
+                    stream=True,
+                )
+                if response.status_code == 200:
+                    body = bytearray()
+                    for chunk in response.iter_content(chunk_size=64 * 1024):
+                        if time.monotonic() >= deadline:
+                            raise DecisionBoardAdapterUnavailableError(
+                                "Decision Board snapshot is unavailable"
+                            )
+                        body.extend(chunk)
+                        if len(body) > max_bytes:
+                            raise ValueError(
+                                "Decision Board snapshot exceeds the byte limit"
+                            )
+                    if time.monotonic() >= deadline:
+                        raise DecisionBoardAdapterUnavailableError(
+                            "Decision Board snapshot is unavailable"
+                        )
+                    return bytes(body)
+                if (
+                    response.status_code not in _SNAPSHOT_RETRYABLE_STATUS_CODES
+                    or attempt + 1 == _SNAPSHOT_DOWNLOAD_ATTEMPTS
+                ):
+                    raise DecisionBoardAdapterUnavailableError(
+                        "Decision Board snapshot is unavailable"
+                    )
+            except requests.RequestException:
+                if attempt + 1 == _SNAPSHOT_DOWNLOAD_ATTEMPTS:
+                    raise DecisionBoardAdapterUnavailableError(
+                        "Decision Board snapshot is unavailable"
+                    ) from None
+            finally:
+                if response is not None:
+                    response.close()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DecisionBoardAdapterUnavailableError(
+                    "Decision Board snapshot is unavailable"
+                )
+            time.sleep(min(_SNAPSHOT_RETRY_DELAY_SECONDS, remaining))
         raise DecisionBoardAdapterUnavailableError(
             "Decision Board snapshot is unavailable"
-        ) from exc
+        )
     finally:
-        if response is not None:
-            response.close()
         session.close()
 
 
