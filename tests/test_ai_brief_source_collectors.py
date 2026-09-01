@@ -1017,12 +1017,16 @@ def test_collect_uses_remaining_timeout_for_feed_url_request(
     response = _MockFeedResponse(Path(_feed_fixture("aapl.rss")).read_bytes())
     session = _MockFeedSession({feed_url: response})
     _install_mock_feed_session(monkeypatch, session)
-    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.75, 0.8])
-    monkeypatch.setattr(
-        collectors.time,
-        "monotonic",
-        lambda: next(monotonic_values, 0.8),
-    )
+    current_time = 0.0
+
+    @contextmanager
+    def advance_clock_at_request(*_args: object, **_kwargs: object) -> Iterator[None]:
+        nonlocal current_time
+        current_time = 0.75
+        yield
+
+    monkeypatch.setattr(collectors, "_pin_feed_url_dns", advance_clock_at_request)
+    monkeypatch.setattr(collectors.time, "monotonic", lambda: current_time)
 
     result = collect_ai_brief_sources(
         feed_catalog_path=catalog.as_posix(),
