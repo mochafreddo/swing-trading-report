@@ -336,7 +336,15 @@ pnpm --dir web run test:e2e:decision-board
 
 ### `CONFIG_UNAVAILABLE`, exit 2
 
-정상 기본값입니다. production adapter가 승인·연결되지 않았으므로 측정 session으로 세지 마세요. 가짜 adapter로 실제 결과를 채우지 않습니다.
+기본 `decision-board` command에서는 production adapter가 승인·연결되지 않았다는
+정상 fail-closed 결과입니다. explicit `decision-board-shadow-live`가 `STARTED` 뒤
+이 상태로 끝났다면 환경 변수 부재만 뜻하지 않습니다. dispatcher가 환경·runtime
+검증을 통과한 뒤 sealed snapshot read가 실패한 경우도 같은 public code로 닫힙니다.
+현재 runtime은 immutable snapshot GET의 transient HTTP/연결 실패만 기존 timeout
+예산 안에서 한 번 재시도합니다. 401/403/404와 재시도 후 실패는 즉시 terminal로
+남깁니다. 해당 slot을 재실행하거나 가짜 adapter로 채우지 말고, 자격증명 존재 여부와
+두 lane의 content-addressed snapshot read/hash를 값 출력 없이 확인한 뒤 새 gate에서
+계속합니다. 어떤 경우에도 `CONFIG_UNAVAILABLE`을 측정 session으로 세지 않습니다.
 
 ### `MISSED_EXPECTED` 또는 `STALE_INCOMPLETE`
 
