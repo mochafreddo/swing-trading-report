@@ -506,6 +506,16 @@ adapter, report route, notification owner, automation 또는 deploy 경로에도
 않았다. 세부 계약은 [Portfolio Mandate A1 contract](portfolio-mandate-a1-contract.md)를
 따른다.
 
+### Portfolio Outcome T15 provider-free adapter
+
+T15 `outcome_history` adapter는 `RECORDED` 또는 `REDACTED_IMPORT` page envelope를 strict
+JSON Schema로 검증하고, cursor chain이 null tail까지 완전할 때만 기존 O1 execution
+lineage validator와 matcher로 전달한다. redacted import는 1 MiB cap, fatal UTF-8와
+duplicate-key rejection을 적용한다. 결과의 `provider_history_state`는 항상
+`NOT_EVALUATED`이며 provider client, OAuth, network, persistence 또는 order capability가
+없다. 세부 계약은 [Portfolio Outcome T15 adapter](portfolio-outcome-t15-adapter.md)를
+따른다.
+
 - 제품 방향/backlog: `docs/PRD.md`
 - 현재 계약(contract): `docs/spec-v1.1.md`
 - 백로그/전달 이력: `docs/spec-v1.3.md`

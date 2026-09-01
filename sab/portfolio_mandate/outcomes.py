@@ -183,6 +183,17 @@ def validate_public_outcome_projection(
     return cast(list[PublicOutcomeProjectionO1], copied)
 
 
+def validate_execution_lineages_o1(
+    value: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Validate execution lineages for a provider-free adapter boundary."""
+
+    copied = [deepcopy(dict(item)) for item in value]
+    _validate_schema(copied, _execution_lineages_validator())
+    _validate_matching_input_invariants([], copied)
+    return tuple(copied)
+
+
 def _matches_decision(
     decision: Mapping[str, Any],
     execution: Mapping[str, Any],
@@ -535,6 +546,18 @@ def _public_projection_validator() -> Draft202012Validator:
     )
 
 
+def _execution_lineages_validator() -> Draft202012Validator:
+    schema = _schema()
+    execution_schema = schema["properties"]["execution_lineages"]
+    return _validator(
+        {
+            "$schema": schema["$schema"],
+            "$defs": schema["$defs"],
+            **execution_schema,
+        }
+    )
+
+
 def _schema() -> dict[str, Any]:
     import json
 
@@ -586,6 +609,7 @@ __all__ = [
     "append_user_outcome_event",
     "project_public_outcome_events",
     "propose_outcome_matches",
+    "validate_execution_lineages_o1",
     "validate_portfolio_outcome_o1_fixture",
     "validate_public_outcome_projection",
 ]
