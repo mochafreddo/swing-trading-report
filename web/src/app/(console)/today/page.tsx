@@ -21,6 +21,25 @@ import type {
 } from "@/lib/types";
 
 const RUN_KINDS = ["ENTRY", "HOLDING"] as const;
+const INVALID_DOGFOOD_SELECTION = "__invalid_selection__";
+
+type TodaySearchParams = Record<string, string | string[] | undefined>;
+
+export function readTodayDogfoodSelection(
+  searchParams: TodaySearchParams,
+): string | undefined {
+  const selection = searchParams.dogfood;
+  if (selection === undefined) {
+    return undefined;
+  }
+  if (
+    typeof selection !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{0,63}$/.test(selection)
+  ) {
+    return INVALID_DOGFOOD_SELECTION;
+  }
+  return selection;
+}
 
 function unavailableLane(
   runKind: DecisionBoardRunKind,
@@ -128,15 +147,31 @@ function TodayPageFallback() {
   );
 }
 
-async function TodayPageContent() {
-  const snapshot = await loadTodayDecisionBoard();
-  return <TodayDecisionBoard {...snapshot} />;
+async function TodayPageContent({
+  searchParams,
+}: {
+  searchParams: Promise<TodaySearchParams>;
+}) {
+  const [snapshot, resolvedSearchParams] = await Promise.all([
+    loadTodayDecisionBoard(),
+    searchParams,
+  ]);
+  return (
+    <TodayDecisionBoard
+      {...snapshot}
+      dogfoodSelection={readTodayDogfoodSelection(resolvedSearchParams)}
+    />
+  );
 }
 
-export default function TodayPage() {
+export default function TodayPage({
+  searchParams = Promise.resolve({}),
+}: {
+  searchParams?: Promise<TodaySearchParams>;
+} = {}) {
   return (
     <Suspense fallback={<TodayPageFallback />}>
-      <TodayPageContent />
+      <TodayPageContent searchParams={searchParams} />
     </Suspense>
   );
 }

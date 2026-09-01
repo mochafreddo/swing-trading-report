@@ -1,8 +1,10 @@
 import Link from "next/link";
 
+import portfolioDogfoodFixture from "../../fixtures/portfolio-dogfood.t14.synthetic.json";
 import longTermSyntheticFixture from "../../fixtures/portfolio-long-term.t13.synthetic.json";
 
 import type { DecisionBoardEnvelopeV0 } from "@/lib/decision-board-schema";
+import { parsePortfolioDogfoodT14Source } from "@/lib/portfolio-dogfood-t14-schema";
 import { parsePortfolioLongTermT13Fixture } from "@/lib/portfolio-long-term-schema";
 import type {
   DecisionBoardJournalStatus,
@@ -11,11 +13,15 @@ import type {
 
 import { UnclassifiedQueuePreview } from "./unclassified-queue-preview";
 import { LongTermSyntheticLane } from "./long-term-synthetic-lane";
+import { MandateEvidenceOutcomeDogfood } from "./mandate-evidence-outcome-dogfood";
 
 import styles from "./today-decision-board.module.css";
 
 const LONG_TERM_SYNTHETIC_FIXTURE = parsePortfolioLongTermT13Fixture(
   longTermSyntheticFixture,
+);
+const PORTFOLIO_DOGFOOD_SOURCE = parsePortfolioDogfoodT14Source(
+  portfolioDogfoodFixture,
 );
 
 type PublishedDecisionBoardReport = Extract<
@@ -462,9 +468,11 @@ function QueueCard({ item }: { item: TodayQueueItem }) {
 export function TodayDecisionBoard({
   lanes,
   journalStatus,
+  dogfoodSelection,
 }: {
   lanes: readonly TodayLaneSnapshot[];
   journalStatus: DecisionBoardJournalStatus;
+  dogfoodSelection?: string;
 }) {
   const model = buildTodayBoardViewModel(lanes, journalStatus);
   return (
@@ -581,6 +589,11 @@ export function TodayDecisionBoard({
           </p>
         )}
       </section>
+
+      <MandateEvidenceOutcomeDogfood
+        source={PORTFOLIO_DOGFOOD_SOURCE}
+        selectedScenarioId={dogfoodSelection}
+      />
 
       <LongTermSyntheticLane fixture={LONG_TERM_SYNTHETIC_FIXTURE} />
 

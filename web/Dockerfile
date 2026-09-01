@@ -15,6 +15,7 @@ COPY web/next.config.ts web/tsconfig.json web/middleware.ts ./
 COPY web/scripts ./scripts
 COPY web/fixtures/toss-holdings.qa.json ./fixtures/toss-holdings.qa.json
 COPY web/fixtures/portfolio-long-term.t13.synthetic.json ./fixtures/portfolio-long-term.t13.synthetic.json
+COPY web/fixtures/portfolio-dogfood.t14.synthetic.json ./fixtures/portfolio-dogfood.t14.synthetic.json
 COPY web/src ./src
 COPY sab/decision_board/run_journal_public.py /opt/sab/decision_board/run_journal_public.py
 RUN python3 -m py_compile /opt/sab/decision_board/run_journal_public.py \

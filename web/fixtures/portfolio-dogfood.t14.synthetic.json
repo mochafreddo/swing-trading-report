@@ -1,0 +1,123 @@
+{
+  "schema_version": "portfolio-dogfood.t14",
+  "mode": "SYNTHETIC_ONLY",
+  "provider_history_state": "NOT_EVALUATED",
+  "scenarios": [
+    {
+      "scenario_id": "corrected-lineage",
+      "label": "Correction",
+      "instrument": {
+        "instrument_id": "11111111-1111-4111-8111-111111111111",
+        "canonical_ticker": "ACME.NAS",
+        "company_name": "Acme Holdings"
+      },
+      "mandate": {
+        "state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Recurring revenue can compound while retention stays durable.",
+        "predicate": "net_revenue_retention_pct LT 100.000000 PERCENT"
+      },
+      "evidence": {
+        "state": "VALID",
+        "issue_code": null,
+        "items": [
+          {
+            "role": "SUPPORTING",
+            "source_url": "https://investor.example.com/acme/fy2026q2",
+            "publisher": "Acme Holdings",
+            "published_at": "2026-08-31T20:00:00.000Z",
+            "supporting_span": "Net revenue retention was 108 percent."
+          }
+        ]
+      },
+      "outcome": {
+        "state": "CORRECTED",
+        "issue_code": null,
+        "prior_event_count": 2,
+        "public_projection": {
+          "outcome_lineage_id": "41111111-1111-4111-8111-111111111111",
+          "status": "PARTIALLY_EXECUTED",
+          "decision_id": "51111111-1111-4111-8111-111111111111",
+          "feedback_reason": "OTHER",
+          "last_event_id": "61111111-1111-4111-8111-111111111111",
+          "last_event_at": "2026-08-31T21:00:00.000Z"
+        }
+      }
+    },
+    {
+      "scenario_id": "empty-outcome",
+      "label": "Empty",
+      "instrument": {
+        "instrument_id": "12222222-2222-4222-8222-222222222222",
+        "canonical_ticker": "BETA.NYS",
+        "company_name": "Beta Systems"
+      },
+      "mandate": {
+        "state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Operating margin expansion supports durable cash generation.",
+        "predicate": "operating_margin_pct LT 8.000000 PERCENT"
+      },
+      "evidence": {
+        "state": "VALID",
+        "issue_code": null,
+        "items": [
+          {
+            "role": "SUPPORTING",
+            "source_url": "https://investor.example.com/beta/fy2026q2",
+            "publisher": "Beta Systems",
+            "published_at": "2026-08-31T20:05:00.000Z",
+            "supporting_span": "Operating margin remained above the approved threshold."
+          }
+        ]
+      },
+      "outcome": {
+        "state": "EMPTY",
+        "issue_code": null,
+        "prior_event_count": 0,
+        "public_projection": null
+      }
+    },
+    {
+      "scenario_id": "blocked-evidence",
+      "label": "Blocked",
+      "instrument": {
+        "instrument_id": "13333333-3333-4333-8333-333333333333",
+        "canonical_ticker": "GAMMA.NAS",
+        "company_name": "Gamma Labs"
+      },
+      "mandate": {
+        "state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Research productivity can sustain the product pipeline.",
+        "predicate": "active_program_count LT 4.000000 COUNT"
+      },
+      "evidence": {
+        "state": "CONFLICTED",
+        "issue_code": "EVIDENCE_CONFLICTED",
+        "items": [
+          {
+            "role": "SUPPORTING",
+            "source_url": "https://investor.example.com/gamma/fy2026q2",
+            "publisher": "Gamma Labs",
+            "published_at": "2026-08-31T20:10:00.000Z",
+            "supporting_span": "Four active programs remained in development."
+          },
+          {
+            "role": "OPPOSING",
+            "source_url": "https://investor.example.com/gamma/restatement",
+            "publisher": "Gamma Labs",
+            "published_at": "2026-08-31T20:15:00.000Z",
+            "supporting_span": "The restatement lists only three active programs."
+          }
+        ]
+      },
+      "outcome": {
+        "state": "BLOCKED",
+        "issue_code": "EVIDENCE_CONFLICTED",
+        "prior_event_count": 0,
+        "public_projection": null
+      }
+    }
+  ]
+}

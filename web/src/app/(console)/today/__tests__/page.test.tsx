@@ -25,7 +25,10 @@ vi.mock("@/lib/decision-board-journal.server", () => ({
   readDecisionBoardJournalStatus,
 }));
 
-import TodayPage, { loadTodayDecisionBoard } from "@/app/(console)/today/page";
+import TodayPage, {
+  loadTodayDecisionBoard,
+  readTodayDogfoodSelection,
+} from "@/app/(console)/today/page";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
 
@@ -61,6 +64,20 @@ describe("TodayPage", () => {
 
   it("returns a Suspense boundary immediately", () => {
     expect(TodayPage().type).toBe(Suspense);
+  });
+
+  it("accepts one bounded dogfood query and rejects ambiguous input", () => {
+    expect(readTodayDogfoodSelection({ dogfood: "empty-outcome" })).toBe(
+      "empty-outcome",
+    );
+    expect(
+      readTodayDogfoodSelection({
+        dogfood: ["empty-outcome", "blocked-evidence"],
+      }),
+    ).toBe("__invalid_selection__");
+    expect(readTodayDogfoodSelection({ dogfood: "../private" })).toBe(
+      "__invalid_selection__",
+    );
   });
 
   it("does not query report storage without a valid admin session", async () => {

@@ -513,6 +513,115 @@
   font-size: 0.76rem;
 }
 
+.dogfoodPanel {
+  min-width: 0;
+  padding: var(--space-6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.dogfoodTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-5) 0;
+}
+
+.dogfoodTabs a {
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-decoration: none;
+}
+
+.dogfoodTabs a[aria-current="page"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+
+.dogfoodTabs a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.dogfoodScenario {
+  min-width: 0;
+}
+
+.dogfoodScenario h3 {
+  margin: var(--space-4) 0;
+  font-family: var(--font-display);
+}
+
+.dogfoodScenario h3 span {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 400;
+}
+
+.dogfoodFlow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.dogfoodFlow article {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-strong);
+}
+
+.dogfoodFlow h4 {
+  margin: var(--space-2) 0;
+  overflow-wrap: anywhere;
+  color: var(--warn);
+}
+
+.dogfoodFlow p,
+.dogfoodFlow code,
+.evidenceItem {
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+}
+
+.dogfoodFlow code {
+  display: block;
+  white-space: normal;
+}
+
+.evidenceItem {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+}
+
+.evidenceItem a {
+  color: var(--accent);
+}
+
+.errorState {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--warn) 58%, var(--line));
+  border-radius: var(--radius);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 6%, var(--panel));
+}
+
 .unclassifiedCard {
   min-width: 0;
   padding: var(--space-5);
@@ -573,6 +682,10 @@
   .unclassifiedGrid,
   .longTermGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dogfoodFlow {
+    grid-template-columns: 1fr;
   }
 }
 

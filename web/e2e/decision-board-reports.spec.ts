@@ -276,3 +276,64 @@ test("fixture-only /today Unclassified Queue journey", async ({
   await expect(input).toHaveValue("");
   expect(unexpectedRequests).toEqual([]);
 });
+
+test("fixture-only /today Mandate Evidence Outcome journey", async ({
+  context,
+  page,
+}) => {
+  const unexpectedRequests = await configureFixtureBoundary(context, page);
+  const expectNoHorizontalOverflow = async () => {
+    const layout = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }));
+    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
+  };
+
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 720 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(
+      "/today?dogfood=corrected-lineage#mandate-evidence-outcome",
+    );
+    const drilldown = page.getByRole("region", {
+      name: "Mandate → Evidence → Outcome",
+    });
+    await expect(drilldown).toContainText("CORRECTED");
+    await expect(drilldown).toContainText("PARTIALLY_EXECUTED");
+    await expectNoHorizontalOverflow();
+  }
+
+  const drilldown = page.getByRole("region", {
+    name: "Mandate → Evidence → Outcome",
+  });
+  const emptyLink = drilldown.getByRole("link", { name: "Empty" });
+  await emptyLink.focus();
+  await expect(emptyLink).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(
+    (url) => url.searchParams.get("dogfood") === "empty-outcome",
+  );
+  await expect(drilldown).toContainText("EMPTY · NO INFERENCE");
+  await page.reload();
+  await expect(drilldown).toContainText("No public outcome events yet");
+  await expect(drilldown.getByRole("link", { name: "Empty" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+
+  await drilldown.getByRole("link", { name: "Blocked" }).click();
+  await expect(drilldown).toContainText("BLOCKED · EVIDENCE_CONFLICTED");
+  await expect(drilldown).toContainText("Outcome projection withheld");
+
+  await page.goto("/today?dogfood=unknown-case#mandate-evidence-outcome");
+  await expect(drilldown).toContainText("INVALID SELECTION");
+  await expect(drilldown).toContainText("No scenario was inferred");
+  await expect(drilldown).not.toContainText(
+    "Synthetic private correction note",
+  );
+  expect(unexpectedRequests).toEqual([]);
+});

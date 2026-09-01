@@ -146,6 +146,22 @@ function lane(
 }
 
 describe("TodayDecisionBoard", () => {
+  it("renders the URL-selected Mandate Evidence Outcome dogfood scenario", () => {
+    const html = renderToStaticMarkup(
+      createElement(TodayDecisionBoard, {
+        lanes: [],
+        journalStatus: { state: "AVAILABLE", records: [] },
+        dogfoodSelection: "empty-outcome",
+      }),
+    );
+
+    expect(html).toContain("Mandate → Evidence → Outcome");
+    expect(html).toContain("No public outcome events yet");
+    expect(html).toContain(
+      'href="/today?dogfood=empty-outcome#mandate-evidence-outcome"',
+    );
+  });
+
   it("includes the local-only LONG_TERM lane without activating its synthetic actions", () => {
     const html = renderToStaticMarkup(
       createElement(TodayDecisionBoard, {

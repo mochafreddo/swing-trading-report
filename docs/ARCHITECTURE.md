@@ -86,7 +86,7 @@ flowchart LR
 | Supabase 어댑터 | holdings/report_index/runtime_state/storage 접근 + holdings add-buy/YAML replace-all RPC 브리지 | `web/src/lib/supabase-admin.ts` |
 | Toss holdings sync | 서버 전용 OAuth client credentials로 Toss 보유 종목을 조회하고 Supabase holdings와 비교한 뒤, 서버 재조회와 reviewed `diffHash` 일치 검증 및 Supabase RPC expected snapshot guard를 통과한 apply만 replace-all로 반영하는 review 경로. scheduled auto-sync는 `TOSS_SYNC_JOB_TOKEN` local bearer 경계 안에서 같은 service를 쓰되, non-empty Toss snapshot의 delete diff는 삭제하지 않고 holdings row의 `broker_state=not_seen_in_toss`와 durable missing evidence로 격리합니다. 빈 snapshot wipe는 계속 `wipe_guard_blocked`로 fail closed입니다. scheduled preview는 DB가 같은 snapshot에서 반환한 rows+digest token을 사용하고, replace/quarantine mutation wrapper는 같은 transaction의 exact post-state digest를 반환합니다. unchanged capture와 후속 seal은 이 DB token을 CAS guard로 검증한 뒤에만 `BrokerSnapshotV0` revision과 `toss-sync:success:MIXED:<session_date>` freshness marker를 함께 봉인합니다. Local QA는 `TOSS_SYNC_SOURCE=fixture`, `TOSS_SYNC_QA_FIXTURE_ENABLED=1`, local Supabase guard를 함께 요구해 live Toss/remote holdings 없이 valid-token scheduled 경로를 재현합니다. | `web/src/lib/toss/client.ts`, `web/src/lib/toss/holdings-sync.ts`, `web/src/lib/toss/holdings-sync-service.ts`, `web/src/app/api/holdings/toss-sync/route.ts`, `web/src/app/api/holdings/toss-sync/scheduled/route.ts`, `web/src/components/holdings/toss-sync-panel.tsx`, `scripts/toss_daily_auto_sync.sh`, `scripts/qa_toss_sync_local.sh` |
 | 운영 메트릭 로더 | `report_index.summary` 기반 최근 30-run 운영 건강도 집계 + 패널별 장애 격리 | `web/src/lib/metrics-data.ts`, `web/src/app/(console)/metrics/page.tsx` |
-| Today 보드 | ENTRY/HOLDING 공개 projection과 local journal warning을 fail-closed로 조합하고, 공유 합성 fixture의 LONG_TERM policy projection과 A2 private input의 browser-memory-only Unclassified Queue를 외부 쓰기 없이 검증·표시 | `web/src/app/(console)/today/page.tsx`, `web/src/components/today-decision-board.tsx`, `web/src/components/long-term-synthetic-lane.tsx`, `web/src/components/unclassified-queue-preview.tsx` |
+| Today 보드 | ENTRY/HOLDING 공개 projection과 local journal warning을 fail-closed로 조합하고, 공유 합성 fixture의 LONG_TERM policy 및 Mandate→Evidence→Outcome projection과 A2 private input의 browser-memory-only Unclassified Queue를 외부 쓰기 없이 검증·표시 | `web/src/app/(console)/today/page.tsx`, `web/src/components/today-decision-board.tsx`, `web/src/components/mandate-evidence-outcome-dogfood.tsx`, `web/src/components/long-term-synthetic-lane.tsx`, `web/src/components/unclassified-queue-preview.tsx` |
 | 실행 트리거 | GitHub workflow_dispatch 호출 | `web/src/lib/github-actions.ts` |
 | 티커 디렉토리(웹) | buy 리포트 기반 티커/회사명 캐시 + 검색/최근 후보 제공(증분 갱신) | `web/src/lib/ticker-directory.ts`, `docs/holdings-ticker-lookup.md`, ADR-0008 |
 | 배치 워크플로우 | cleanup, 수동 workflow dispatch, 수동 AI Brief artifact 생성, scheduled AI Brief monitor/fallback. `sell.yml`은 여전히 manual opt-in Sell/Sell AI Brief 생성·전달 워크플로우이며 scheduled sell generation은 local generic wrapper가 담당합니다. scheduled scan 생성은 marker-aware fallback 전까지 fail closed | `.github/workflows/scan.yml`, `.github/workflows/sell.yml`, `.github/workflows/cleanup.yml`, `.github/workflows/ai-brief.yml` |
@@ -301,6 +301,13 @@ T1–T12는 schema, broker snapshot, public identity, bounded research, exact-sp
    `LOCAL_ONLY · NOT ACTIVE`로 표시합니다. AI predicate는 `REVIEW`까지만 만들고,
    `UNCLASSIFIED`는 `NO_ADVICE`로 닫힙니다. 이 lane은 실제 holding, provider, DB,
    order 또는 notification 경로에 연결되지 않습니다.
+6. Mandate→Evidence→Outcome drilldown은 strict T14 public-only fixture의 correction,
+   empty와 evidence-blocked 상태를 선택해 표시합니다. `dogfood` query는 단일 bounded
+   slug만 허용하고 선택을 URL에 보존하므로 native link keyboard 이동과 refresh 뒤
+   선택 복원이 가능합니다. unknown selection과 invalid fixture는 값을 추정하지 않고
+   sanitized 오류 상태로 닫힙니다. execution-private account, order/fill ID, quantity와
+   private feedback note는 fixture schema와 렌더 모델에 존재하지 않습니다. 자세한
+   경계와 검증은 [Portfolio dogfood T14](portfolio-dogfood-t14.md)를 참고합니다.
 
 ### 4.5 웹 운영 메트릭 대시보드 플로우
 
