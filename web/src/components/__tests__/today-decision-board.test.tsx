@@ -151,7 +151,7 @@ describe("TodayDecisionBoard", () => {
       createElement(TodayDecisionBoard, {
         lanes: [],
         journalStatus: { state: "AVAILABLE", records: [] },
-        dogfoodSelection: "empty-outcome",
+        dogfoodSelection: { state: "SELECTED", scenarioId: "empty-outcome" },
       }),
     );
 

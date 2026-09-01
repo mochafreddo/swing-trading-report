@@ -7,9 +7,11 @@ import styles from "./today-decision-board.module.css";
 export function MandateEvidenceOutcomeDogfood({
   source,
   selectedScenarioId,
+  invalidSelection = false,
 }: {
   source: PortfolioDogfoodT14Source;
   selectedScenarioId?: string;
+  invalidSelection?: boolean;
 }) {
   if (source.state === "INVALID") {
     return (
@@ -60,9 +62,12 @@ export function MandateEvidenceOutcomeDogfood({
             {item.label}
           </Link>
         ))}
+        <Link href="/today?dogfood=invalid-contract#mandate-evidence-outcome">
+          Invalid contract
+        </Link>
       </nav>
 
-      {scenario === undefined ? (
+      {invalidSelection || scenario === undefined ? (
         <div className={styles.errorState} role="status">
           <strong>INVALID SELECTION</strong>
           <span>
@@ -117,15 +122,29 @@ export function MandateEvidenceOutcomeDogfood({
 
             <article>
               <p className={styles.kicker}>3 · Outcome</p>
-              {scenario.outcome.state === "EMPTY" ? (
+              {scenario.outcome.state === "LOADING" ? (
+                <div role="status" aria-busy="true">
+                  <h4>LOADING · FIXTURE REPLAY</h4>
+                  <p>No outcome is inferred while the replay is pending.</p>
+                </div>
+              ) : scenario.outcome.state === "EMPTY" ? (
                 <>
                   <h4>EMPTY · NO INFERENCE</h4>
                   <p>No public outcome events yet.</p>
                 </>
               ) : scenario.outcome.state === "BLOCKED" ? (
                 <>
-                  <h4>BLOCKED · {scenario.outcome.issue_code}</h4>
+                  <h4>
+                    {scenario.evidence.state === "STALE" ? "STALE" : "BLOCKED"}
+                    {" · "}
+                    {scenario.outcome.issue_code}
+                  </h4>
                   <p>Outcome projection withheld.</p>
+                </>
+              ) : scenario.outcome.state === "AMBIGUOUS" ? (
+                <>
+                  <h4>AMBIGUOUS MATCH · REVIEW ONLY</h4>
+                  <p>No execution lineage was selected.</p>
                 </>
               ) : (
                 <>

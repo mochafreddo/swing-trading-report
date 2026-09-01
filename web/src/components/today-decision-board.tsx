@@ -4,7 +4,10 @@ import portfolioDogfoodFixture from "../../fixtures/portfolio-dogfood.t14.synthe
 import longTermSyntheticFixture from "../../fixtures/portfolio-long-term.t13.synthetic.json";
 
 import type { DecisionBoardEnvelopeV0 } from "@/lib/decision-board-schema";
-import { parsePortfolioDogfoodT14Source } from "@/lib/portfolio-dogfood-t14-schema";
+import {
+  parsePortfolioDogfoodT14Source,
+  type TodayDogfoodSelection,
+} from "@/lib/portfolio-dogfood-t14-schema";
 import { parsePortfolioLongTermT13Fixture } from "@/lib/portfolio-long-term-schema";
 import type {
   DecisionBoardJournalStatus,
@@ -23,6 +26,9 @@ const LONG_TERM_SYNTHETIC_FIXTURE = parsePortfolioLongTermT13Fixture(
 const PORTFOLIO_DOGFOOD_SOURCE = parsePortfolioDogfoodT14Source(
   portfolioDogfoodFixture,
 );
+const INVALID_PORTFOLIO_DOGFOOD_SOURCE = parsePortfolioDogfoodT14Source({
+  schema_version: "invalid-contract-rehearsal",
+});
 
 type PublishedDecisionBoardReport = Extract<
   DecisionBoardEnvelopeV0,
@@ -472,9 +478,16 @@ export function TodayDecisionBoard({
 }: {
   lanes: readonly TodayLaneSnapshot[];
   journalStatus: DecisionBoardJournalStatus;
-  dogfoodSelection?: string;
+  dogfoodSelection?: TodayDogfoodSelection;
 }) {
   const model = buildTodayBoardViewModel(lanes, journalStatus);
+  const selection = dogfoodSelection ?? { state: "DEFAULT" as const };
+  const selectedScenarioId =
+    selection.state === "SELECTED" ? selection.scenarioId : undefined;
+  const dogfoodSource =
+    selection.state === "INVALID_FIXTURE"
+      ? INVALID_PORTFOLIO_DOGFOOD_SOURCE
+      : PORTFOLIO_DOGFOOD_SOURCE;
   return (
     <div className={styles.board}>
       <section className={styles.intro} aria-labelledby="today-board-title">
@@ -591,8 +604,9 @@ export function TodayDecisionBoard({
       </section>
 
       <MandateEvidenceOutcomeDogfood
-        source={PORTFOLIO_DOGFOOD_SOURCE}
-        selectedScenarioId={dogfoodSelection}
+        source={dogfoodSource}
+        selectedScenarioId={selectedScenarioId}
+        invalidSelection={selection.state === "INVALID"}
       />
 
       <LongTermSyntheticLane fixture={LONG_TERM_SYNTHETIC_FIXTURE} />

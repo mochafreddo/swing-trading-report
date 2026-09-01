@@ -13,6 +13,7 @@ import {
   InvalidDecisionBoardReportError,
   readReportDetail,
 } from "@/lib/reports-data";
+import type { TodayDogfoodSelection } from "@/lib/portfolio-dogfood-t14-schema";
 import { readDecisionBoardJournalStatus } from "@/lib/decision-board-journal.server";
 import { fetchLatestDecisionBoardReport } from "@/lib/supabase-admin";
 import type {
@@ -21,24 +22,25 @@ import type {
 } from "@/lib/types";
 
 const RUN_KINDS = ["ENTRY", "HOLDING"] as const;
-const INVALID_DOGFOOD_SELECTION = "__invalid_selection__";
-
 type TodaySearchParams = Record<string, string | string[] | undefined>;
 
 export function readTodayDogfoodSelection(
   searchParams: TodaySearchParams,
-): string | undefined {
+): TodayDogfoodSelection {
   const selection = searchParams.dogfood;
   if (selection === undefined) {
-    return undefined;
+    return { state: "DEFAULT" };
+  }
+  if (selection === "invalid-contract") {
+    return { state: "INVALID_FIXTURE" };
   }
   if (
     typeof selection !== "string" ||
     !/^[a-z0-9][a-z0-9-]{0,63}$/.test(selection)
   ) {
-    return INVALID_DOGFOOD_SELECTION;
+    return { state: "INVALID" };
   }
-  return selection;
+  return { state: "SELECTED", scenarioId: selection };
 }
 
 function unavailableLane(

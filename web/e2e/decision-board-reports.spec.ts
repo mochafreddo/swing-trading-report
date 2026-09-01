@@ -26,6 +26,15 @@ const holdingKey =
 const unclassifiedFixturePath =
   "../tests/fixtures/portfolio_mandate/portfolio-mandate-a2-unclassified-preview.synthetic.json";
 
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const layout = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
+
+  expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
+}
+
 function base64url(value: string | Buffer): string {
   return Buffer.from(value).toString("base64url");
 }
@@ -210,15 +219,6 @@ test("fixture-only /today Unclassified Queue journey", async ({
   const unexpectedRequests = await configureFixtureBoundary(context, page);
   await page.setViewportSize({ width: 375, height: 812 });
 
-  const expectNoHorizontalOverflow = async () => {
-    const layout = await page.evaluate(() => ({
-      documentWidth: document.documentElement.scrollWidth,
-      viewportWidth: window.innerWidth,
-    }));
-
-    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
-  };
-
   await page.goto("/today");
   const boardSummary = page.getByRole("region", {
     name: "Today's Investment Actions",
@@ -228,7 +228,7 @@ test("fixture-only /today Unclassified Queue journey", async ({
 
   await expect(queue).toBeVisible();
   await expect(boardSummary.locator("strong")).toHaveText("0");
-  await expectNoHorizontalOverflow();
+  await expectNoHorizontalOverflow(page);
 
   await input.setInputFiles(unclassifiedFixturePath);
 
@@ -242,7 +242,7 @@ test("fixture-only /today Unclassified Queue journey", async ({
   await expect(queue.getByText(/UNAPPROVED DRAFT/u)).toHaveCount(5);
   await expect(queue).toContainText("not a current, freshness-proven");
   await expect(boardSummary.locator("strong")).toHaveText("0");
-  await expectNoHorizontalOverflow();
+  await expectNoHorizontalOverflow(page);
   await expect(
     queue.getByRole("button", {
       name: /approve|order|notify|buy|hold|sell|avoid/iu,
@@ -282,13 +282,6 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
   page,
 }) => {
   const unexpectedRequests = await configureFixtureBoundary(context, page);
-  const expectNoHorizontalOverflow = async () => {
-    const layout = await page.evaluate(() => ({
-      documentWidth: document.documentElement.scrollWidth,
-      viewportWidth: window.innerWidth,
-    }));
-    expect(layout.documentWidth).toBeLessThanOrEqual(layout.viewportWidth);
-  };
 
   for (const viewport of [
     { width: 375, height: 812 },
@@ -304,7 +297,7 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
     });
     await expect(drilldown).toContainText("CORRECTED");
     await expect(drilldown).toContainText("PARTIALLY_EXECUTED");
-    await expectNoHorizontalOverflow();
+    await expectNoHorizontalOverflow(page);
   }
 
   const drilldown = page.getByRole("region", {
@@ -328,6 +321,22 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
   await drilldown.getByRole("link", { name: "Blocked" }).click();
   await expect(drilldown).toContainText("BLOCKED · EVIDENCE_CONFLICTED");
   await expect(drilldown).toContainText("Outcome projection withheld");
+
+  await drilldown.getByRole("link", { name: "Loading" }).click();
+  await expect(drilldown.getByRole("status")).toHaveAttribute(
+    "aria-busy",
+    "true",
+  );
+  await expect(drilldown).toContainText("LOADING · FIXTURE REPLAY");
+
+  await drilldown.getByRole("link", { name: "Stale" }).click();
+  await expect(drilldown).toContainText("STALE · EVIDENCE_STALE");
+
+  await drilldown.getByRole("link", { name: "Ambiguous" }).click();
+  await expect(drilldown).toContainText("AMBIGUOUS MATCH · REVIEW ONLY");
+
+  await drilldown.getByRole("link", { name: "Invalid contract" }).click();
+  await expect(drilldown).toContainText("FIXTURE CONTRACT INVALID");
 
   await page.goto("/today?dogfood=unknown-case#mandate-evidence-outcome");
   await expect(drilldown).toContainText("INVALID SELECTION");

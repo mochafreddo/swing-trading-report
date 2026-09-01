@@ -5,13 +5,23 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 SqlExecutor = Callable[[str], str]
 
 
 class PersistencePrototypeDisabledError(RuntimeError):
     """The local-only T16 writer was invoked without explicit opt-in."""
+
+
+class PersistenceRehearsalContractError(ValueError):
+    """A T16 target or executor result failed closed."""
+
+    def __init__(self, operation: str, field: str, message: str) -> None:
+        self.operation = operation
+        self.field = field
+        self.message = message
+        super().__init__(f"{operation}.{field}: {message}")
 
 
 class T16ActivationResult(TypedDict):
@@ -38,6 +48,45 @@ class T16RollbackResult(TypedDict):
     correction_count: int
     rebuilt_projection_count: int
     transaction_outcome: Literal["ROLLED_BACK"]
+
+
+@dataclass(frozen=True)
+class T16DisposableTarget:
+    """Expected identity of the independently created disposable database."""
+
+    port: int
+    database_name: str
+    data_directory: str
+    session_user: str
+    server_version_num: Literal["170011"] = "170011"
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.port <= 65535:
+            raise PersistenceRehearsalContractError(
+                "target", "port", "must be an explicit TCP port"
+            )
+        if not self.database_name.startswith("portfolio_mandate_a1_test_"):
+            raise PersistenceRehearsalContractError(
+                "target", "database_name", "must use the disposable database prefix"
+            )
+        data_parts = self.data_directory.split("/")
+        if (
+            len(data_parts) != 5
+            or data_parts[:3] != ["", "private", "tmp"]
+            or not data_parts[3].startswith("portfolio-mandate-a1-pg17.")
+            or data_parts[4] != "data"
+        ):
+            raise PersistenceRehearsalContractError(
+                "target", "data_directory", "must use the dedicated disposable path"
+            )
+        if not self.session_user:
+            raise PersistenceRehearsalContractError(
+                "target", "session_user", "must be explicit"
+            )
+        if self.server_version_num != "170011":
+            raise PersistenceRehearsalContractError(
+                "target", "server_version_num", "must be PostgreSQL 17.11"
+            )
 
 
 @dataclass(frozen=True)
@@ -73,67 +122,200 @@ class PortfolioMandatePersistenceT16:
         executor: SqlExecutor,
         *,
         writer_enabled: bool = False,
-        target_kind: Literal["DISPOSABLE_LOOPBACK"] | None = None,
+        target: T16DisposableTarget | None = None,
     ) -> None:
-        if writer_enabled and target_kind != "DISPOSABLE_LOOPBACK":
-            raise ValueError("T16 requires the DISPOSABLE_LOOPBACK target")
         self._executor = executor
         self._writer_enabled = writer_enabled
-        self._target_kind = target_kind
+        self._target = target
+        if writer_enabled:
+            if target is None:
+                raise PersistenceRehearsalContractError(
+                    "target", "identity", "verified disposable target is required"
+                )
+            self._verify_target_identity(target)
 
     def activate(self, command: T16ActivationCommand) -> T16ActivationResult:
         """Call the existing A1 activation RPC and parse its typed result."""
 
-        self._require_enabled()
-        raw = self._executor(_activation_sql(command))
-        parts = raw.split("|")
-        if len(parts) != 3 or parts[2] not in {"ACTIVATED", "ALREADY_ACTIVATED"}:
-            raise ValueError("unexpected A1 activation result")
+        target = self._require_enabled()
+        raw = self._executor(_activation_sql(command, target))
+        parts = _split_result(raw, operation="activation", expected_fields=3)
+        activation_event_id = _parse_uuid(parts[0], "activation", "activation_event_id")
+        mandate_version_id = _parse_uuid(parts[1], "activation", "mandate_version_id")
+        if activation_event_id != command.activation_event_id:
+            raise PersistenceRehearsalContractError(
+                "activation", "activation_event_id", "does not match the command"
+            )
+        if mandate_version_id != command.draft_mandate_version_id:
+            raise PersistenceRehearsalContractError(
+                "activation", "mandate_version_id", "does not match the command"
+            )
+        if parts[2] not in {"ACTIVATED", "ALREADY_ACTIVATED"}:
+            raise PersistenceRehearsalContractError(
+                "activation", "result_status", "is not an allowed A1 status"
+            )
         return T16ActivationResult(
-            activation_event_id=parts[0],
-            mandate_version_id=parts[1],
-            result_status=parts[2],  # type: ignore[typeddict-item]
+            activation_event_id=str(activation_event_id),
+            mandate_version_id=str(mandate_version_id),
+            result_status=cast(Literal["ACTIVATED", "ALREADY_ACTIVATED"], parts[2]),
         )
 
     def project(self, command: T16ActivationCommand) -> T16DecisionProjection:
         """Read the public decision semantics through the service role."""
 
-        self._require_enabled()
-        raw = self._executor(_projection_sql(command))
-        parts = raw.split("|")
-        if len(parts) != 4 or parts[1] != "SUPERSEDED" or parts[2] not in {"t", "f"}:
-            raise ValueError("unexpected A1 decision projection")
+        target = self._require_enabled()
+        raw = self._executor(_projection_sql(command, target))
+        parts = _split_result(raw, operation="projection", expected_fields=4)
+        mandate_version_id = _parse_uuid(parts[0], "projection", "mandate_version_id")
+        if mandate_version_id != command.expected_mandate_version_id:
+            raise PersistenceRehearsalContractError(
+                "projection", "mandate_version_id", "does not match the source version"
+            )
+        if parts[1] != "SUPERSEDED":
+            raise PersistenceRehearsalContractError(
+                "projection", "projection_status", "must be SUPERSEDED"
+            )
+        if parts[2] != "f":
+            raise PersistenceRehearsalContractError(
+                "projection", "eligible", "superseded decision must be ineligible"
+            )
+        projection_version = _parse_positive_int(
+            parts[3], "projection", "projection_version"
+        )
         return T16DecisionProjection(
-            mandate_version_id=parts[0],
+            mandate_version_id=str(mandate_version_id),
             projection_status="SUPERSEDED",
-            eligible=parts[2] == "t",
-            projection_version=int(parts[3]),
+            eligible=False,
+            projection_version=projection_version,
         )
 
     def rebuild_and_rollback(self, command: T16ActivationCommand) -> T16RollbackResult:
         """Rebuild a corrected projection inside a transaction, then roll it back."""
 
-        self._require_enabled()
-        raw = self._executor(_rebuild_rollback_sql(command))
-        parts = raw.split("|")
-        if len(parts) != 4 or parts[0] != "ENFORCED" or parts[3] != "ROLLED_BACK":
-            raise ValueError("unexpected T16 rollback rehearsal result")
+        target = self._require_enabled()
+        raw = self._executor(_rebuild_rollback_sql(command, target))
+        parts = _split_result(raw, operation="rollback", expected_fields=4)
+        correction_count = _parse_positive_int(parts[1], "rollback", "correction_count")
+        rebuilt_projection_count = _parse_positive_int(
+            parts[2], "rollback", "rebuilt_projection_count"
+        )
+        if parts[0] != "ENFORCED":
+            raise PersistenceRehearsalContractError(
+                "rollback", "append_only_guard", "must be ENFORCED"
+            )
+        if correction_count != 1 or rebuilt_projection_count != 1:
+            raise PersistenceRehearsalContractError(
+                "rollback", "result_count", "must contain one correction and projection"
+            )
+        if parts[3] != "ROLLED_BACK":
+            raise PersistenceRehearsalContractError(
+                "rollback", "transaction_outcome", "must be ROLLED_BACK"
+            )
         return T16RollbackResult(
             append_only_guard="ENFORCED",
-            correction_count=int(parts[1]),
-            rebuilt_projection_count=int(parts[2]),
+            correction_count=correction_count,
+            rebuilt_projection_count=rebuilt_projection_count,
             transaction_outcome="ROLLED_BACK",
         )
 
-    def _require_enabled(self) -> None:
-        if not self._writer_enabled or self._target_kind != "DISPOSABLE_LOOPBACK":
+    def _require_enabled(self) -> T16DisposableTarget:
+        if not self._writer_enabled or self._target is None:
             raise PersistencePrototypeDisabledError(
                 "T16 persistence prototype is default-off"
             )
+        return self._target
+
+    def _verify_target_identity(self, target: T16DisposableTarget) -> None:
+        raw = self._executor(_target_identity_sql())
+        parts = raw.split("\t")
+        expected = [
+            "127.0.0.1",
+            str(target.port),
+            target.database_name,
+            target.data_directory,
+            target.session_user,
+            target.server_version_num,
+        ]
+        if parts != expected:
+            raise PersistenceRehearsalContractError(
+                "target", "identity", "does not match the disposable proof"
+            )
 
 
-def _activation_sql(command: T16ActivationCommand) -> str:
+def _split_result(raw: str, *, operation: str, expected_fields: int) -> list[str]:
+    parts = raw.split("|")
+    if len(parts) != expected_fields:
+        raise PersistenceRehearsalContractError(
+            operation, "result", f"must contain {expected_fields} fields"
+        )
+    return parts
+
+
+def _parse_uuid(raw: str, operation: str, field: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(raw)
+    except (AttributeError, ValueError) as error:
+        raise PersistenceRehearsalContractError(
+            operation, field, "must be a UUID"
+        ) from error
+
+
+def _parse_positive_int(raw: str, operation: str, field: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise PersistenceRehearsalContractError(
+            operation, field, "must be an integer"
+        ) from error
+    if value <= 0:
+        raise PersistenceRehearsalContractError(operation, field, "must be positive")
+    return value
+
+
+def _target_identity_sql() -> str:
+    return """
+    select concat_ws(E'\\t',
+      host(inet_server_addr()),
+      inet_server_port()::text,
+      current_database(),
+      current_setting('data_directory'),
+      session_user,
+      current_setting('server_version_num')
+    );
+    """
+
+
+def _target_identity_guard_sql(target: T16DisposableTarget) -> str:
+    expected_database = _sql_text_literal(target.database_name)
+    expected_data_directory = _sql_text_literal(target.data_directory)
+    expected_session_user = _sql_text_literal(target.session_user)
+    expected_version = _sql_text_literal(target.server_version_num)
     return f"""
+    do $t16_disposable_identity$
+    begin
+      if host(inet_server_addr()) is distinct from '127.0.0.1'
+         or inet_server_port() is distinct from {target.port}
+         or current_database() is distinct from {expected_database}
+         or current_setting('data_directory') is distinct from {expected_data_directory}
+         or session_user is distinct from {expected_session_user}
+         or current_setting('server_version_num') is distinct from {expected_version}
+      then
+        raise exception using
+          errcode = '55000',
+          message = 'T16 disposable target identity mismatch';
+      end if;
+    end;
+    $t16_disposable_identity$;
+    """
+
+
+def _sql_text_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _activation_sql(command: T16ActivationCommand, target: T16DisposableTarget) -> str:
+    return f"""
+    {_target_identity_guard_sql(target)}
     set role authenticated;
     set request.jwt.claim.role = 'authenticated';
     set request.jwt.claim.sub = '{command.actor_id}';
@@ -149,8 +331,9 @@ def _activation_sql(command: T16ActivationCommand) -> str:
     """
 
 
-def _projection_sql(command: T16ActivationCommand) -> str:
+def _projection_sql(command: T16ActivationCommand, target: T16DisposableTarget) -> str:
     return f"""
+    {_target_identity_guard_sql(target)}
     set role service_role;
     select concat_ws('|',
       mandate_version_id,
@@ -163,8 +346,11 @@ def _projection_sql(command: T16ActivationCommand) -> str:
     """
 
 
-def _rebuild_rollback_sql(command: T16ActivationCommand) -> str:
+def _rebuild_rollback_sql(
+    command: T16ActivationCommand, target: T16DisposableTarget
+) -> str:
     return f"""
+    {_target_identity_guard_sql(target)}
     begin;
     create temporary table t16_rehearsal_guard (
       append_only_guard text not null
@@ -267,9 +453,11 @@ def _rebuild_rollback_sql(command: T16ActivationCommand) -> str:
 
 __all__ = [
     "PersistencePrototypeDisabledError",
+    "PersistenceRehearsalContractError",
     "PortfolioMandatePersistenceT16",
     "T16ActivationCommand",
     "T16ActivationResult",
     "T16DecisionProjection",
+    "T16DisposableTarget",
     "T16RollbackResult",
 ]

@@ -12,6 +12,7 @@ import pytest
 from sab.portfolio_mandate.persistence_rehearsal import (
     PortfolioMandatePersistenceT16,
     T16ActivationCommand,
+    T16DisposableTarget,
 )
 
 _MIGRATION = Path("supabase/migrations/20260828230000_create_portfolio_mandate_a1.sql")
@@ -1209,7 +1210,16 @@ def test_t16_writer_projects_and_rebuilds_with_rollback(
     prototype = PortfolioMandatePersistenceT16(
         lambda sql: _psql(portfolio_mandate_postgres_dsn, sql=sql),
         writer_enabled=True,
-        target_kind="DISPOSABLE_LOOPBACK",
+        target=T16DisposableTarget(
+            port=urlparse(portfolio_mandate_postgres_dsn.dsn).port or 0,
+            database_name=unquote(
+                urlparse(portfolio_mandate_postgres_dsn.dsn).path.removeprefix("/")
+            ),
+            data_directory=os.environ[_DATA_DIR_ENV],
+            session_user=unquote(
+                urlparse(portfolio_mandate_postgres_dsn.dsn).username or ""
+            ),
+        ),
     )
 
     first = prototype.activate(command)

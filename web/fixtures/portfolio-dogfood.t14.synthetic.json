@@ -79,6 +79,108 @@
       }
     },
     {
+      "scenario_id": "loading-outcome",
+      "label": "Loading",
+      "instrument": {
+        "instrument_id": "14444444-4444-4444-8444-444444444444",
+        "canonical_ticker": "DELTA.NYS",
+        "company_name": "Delta Networks"
+      },
+      "mandate": {
+        "state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Network density can support durable unit economics.",
+        "predicate": "gross_margin_pct LT 40.000000 PERCENT"
+      },
+      "evidence": {
+        "state": "VALID",
+        "issue_code": null,
+        "items": [
+          {
+            "role": "SUPPORTING",
+            "source_url": "https://investor.example.com/delta/fy2026q2",
+            "publisher": "Delta Networks",
+            "published_at": "2026-08-31T20:07:00.000Z",
+            "supporting_span": "Gross margin remained above forty percent."
+          }
+        ]
+      },
+      "outcome": {
+        "state": "LOADING",
+        "issue_code": null,
+        "prior_event_count": 0,
+        "public_projection": null
+      }
+    },
+    {
+      "scenario_id": "stale-evidence",
+      "label": "Stale",
+      "instrument": {
+        "instrument_id": "15555555-5555-4555-8555-555555555555",
+        "canonical_ticker": "EPSILON.NAS",
+        "company_name": "Epsilon Software"
+      },
+      "mandate": {
+        "state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Renewal durability can support recurring cash flow.",
+        "predicate": "renewal_rate_pct LT 90.000000 PERCENT"
+      },
+      "evidence": {
+        "state": "STALE",
+        "issue_code": "EVIDENCE_STALE",
+        "items": [
+          {
+            "role": "SUPPORTING",
+            "source_url": "https://investor.example.com/epsilon/fy2025q4",
+            "publisher": "Epsilon Software",
+            "published_at": "2026-01-31T20:00:00.000Z",
+            "supporting_span": "The last published renewal rate was ninety-four percent."
+          }
+        ]
+      },
+      "outcome": {
+        "state": "BLOCKED",
+        "issue_code": "EVIDENCE_STALE",
+        "prior_event_count": 0,
+        "public_projection": null
+      }
+    },
+    {
+      "scenario_id": "ambiguous-match",
+      "label": "Ambiguous",
+      "instrument": {
+        "instrument_id": "16666666-6666-4666-8666-666666666666",
+        "canonical_ticker": "ZETA.NYS",
+        "company_name": "Zeta Industrial"
+      },
+      "mandate": {
+        "state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Backlog conversion can sustain multi-year demand.",
+        "predicate": "backlog_growth_pct LT 5.000000 PERCENT"
+      },
+      "evidence": {
+        "state": "VALID",
+        "issue_code": null,
+        "items": [
+          {
+            "role": "SUPPORTING",
+            "source_url": "https://investor.example.com/zeta/fy2026q2",
+            "publisher": "Zeta Industrial",
+            "published_at": "2026-08-31T20:09:00.000Z",
+            "supporting_span": "Backlog growth remained above the approved floor."
+          }
+        ]
+      },
+      "outcome": {
+        "state": "AMBIGUOUS",
+        "issue_code": "AMBIGUOUS_MATCH",
+        "prior_event_count": 0,
+        "public_projection": null
+      }
+    },
+    {
       "scenario_id": "blocked-evidence",
       "label": "Blocked",
       "instrument": {

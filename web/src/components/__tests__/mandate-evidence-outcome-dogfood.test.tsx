@@ -52,6 +52,19 @@ describe("MandateEvidenceOutcomeDogfood", () => {
     expect(blocked).not.toContain("PARTIALLY_EXECUTED");
   });
 
+  it("renders loading, stale, and ambiguous states without inference", () => {
+    const loading = renderScenario("loading-outcome");
+    const stale = renderScenario("stale-evidence");
+    const ambiguous = renderScenario("ambiguous-match");
+
+    expect(loading).toContain("LOADING · FIXTURE REPLAY");
+    expect(loading).toContain('aria-busy="true"');
+    expect(stale).toContain("STALE · EVIDENCE_STALE");
+    expect(stale).toContain("Outcome projection withheld");
+    expect(ambiguous).toContain("AMBIGUOUS MATCH · REVIEW ONLY");
+    expect(ambiguous).toContain("No execution lineage was selected");
+  });
+
   it("fails closed for an unknown selection and an invalid fixture", () => {
     const unknown = renderScenario("not-a-scenario");
     const invalid = renderToStaticMarkup(
@@ -78,6 +91,9 @@ describe("MandateEvidenceOutcomeDogfood", () => {
     );
     expect(html).toContain(
       'href="/today?dogfood=blocked-evidence#mandate-evidence-outcome"',
+    );
+    expect(html).toContain(
+      'href="/today?dogfood=invalid-contract#mandate-evidence-outcome"',
     );
   });
 });

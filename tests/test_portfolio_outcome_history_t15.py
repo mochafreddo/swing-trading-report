@@ -86,6 +86,11 @@ def test_redacted_import_is_bounded_duplicate_key_aware_and_private_safe() -> No
         parse_redacted_outcome_history_t15_bytes(b" " * 1_048_577)
 
 
+def test_redacted_import_cannot_bypass_the_bounded_bytes_parser() -> None:
+    with pytest.raises(OutcomeHistoryContractError, match="bytes parser"):
+        adapt_outcome_history_t15(_read(REDACTED_PATH))
+
+
 def test_adapted_history_replays_existing_append_only_correction_contract() -> None:
     history = adapt_outcome_history_t15(_read(RECORDED_PATH))
     o1 = _read(O1_PATH)

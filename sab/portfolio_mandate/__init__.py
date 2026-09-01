@@ -25,10 +25,12 @@ from .outcomes import (
 )
 from .persistence_rehearsal import (
     PersistencePrototypeDisabledError,
+    PersistenceRehearsalContractError,
     PortfolioMandatePersistenceT16,
     T16ActivationCommand,
     T16ActivationResult,
     T16DecisionProjection,
+    T16DisposableTarget,
     T16RollbackResult,
 )
 
@@ -37,6 +39,7 @@ __all__ = [
     "OutcomeHistoryT15Result",
     "OutcomeProposalO1",
     "PersistencePrototypeDisabledError",
+    "PersistenceRehearsalContractError",
     "PortfolioMandateA1Fixture",
     "PortfolioMandateContractError",
     "PortfolioMandatePersistenceT16",
@@ -46,6 +49,7 @@ __all__ = [
     "T16ActivationCommand",
     "T16ActivationResult",
     "T16DecisionProjection",
+    "T16DisposableTarget",
     "T16RollbackResult",
     "adapt_outcome_history_t15",
     "append_user_outcome_event",

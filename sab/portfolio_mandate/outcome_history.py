@@ -41,10 +41,19 @@ class OutcomeHistoryT15Result(TypedDict):
 
 
 def adapt_outcome_history_t15(value: Mapping[str, Any]) -> OutcomeHistoryT15Result:
-    """Validate a complete provider-free page chain and flatten its lineages."""
+    """Validate a complete recorded page chain and flatten its lineages."""
 
     envelope = deepcopy(dict(value))
     _validate_schema(envelope)
+    if envelope["input_mode"] != "RECORDED":
+        raise OutcomeHistoryContractError(
+            "input_mode",
+            "REDACTED_IMPORT must use the bounded bytes parser",
+        )
+    return _adapt_validated_envelope(envelope)
+
+
+def _adapt_validated_envelope(envelope: dict[str, Any]) -> OutcomeHistoryT15Result:
     pages = cast(list[dict[str, Any]], envelope["pages"])
     expected_cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -113,7 +122,8 @@ def parse_redacted_outcome_history_t15_bytes(
         raise OutcomeHistoryContractError(
             "input_mode", "redacted import must declare REDACTED_IMPORT"
         )
-    return adapt_outcome_history_t15(value)
+    _validate_schema(value)
+    return _adapt_validated_envelope(value)
 
 
 def _reject_duplicate_keys(pairs: Iterable[tuple[str, Any]]) -> dict[str, Any]:

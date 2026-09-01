@@ -78,8 +78,16 @@ const scenarioSchema = z
       .strict(),
     outcome: z
       .object({
-        state: z.enum(["CORRECTED", "EMPTY", "BLOCKED"]),
-        issue_code: z.literal("EVIDENCE_CONFLICTED").nullable(),
+        state: z.enum([
+          "CORRECTED",
+          "EMPTY",
+          "LOADING",
+          "BLOCKED",
+          "AMBIGUOUS",
+        ]),
+        issue_code: z
+          .enum(["EVIDENCE_CONFLICTED", "EVIDENCE_STALE", "AMBIGUOUS_MATCH"])
+          .nullable(),
         prior_event_count: z.number().int().min(0),
         public_projection: publicProjectionSchema.nullable(),
       })
@@ -87,6 +95,19 @@ const scenarioSchema = z
   })
   .strict()
   .superRefine((scenario, context) => {
+    const expectedEvidenceIssue =
+      scenario.evidence.state === "CONFLICTED"
+        ? "EVIDENCE_CONFLICTED"
+        : scenario.evidence.state === "STALE"
+          ? "EVIDENCE_STALE"
+          : null;
+    if (scenario.evidence.issue_code !== expectedEvidenceIssue) {
+      context.addIssue({
+        code: "custom",
+        path: ["evidence", "issue_code"],
+        message: "evidence issue must match its state",
+      });
+    }
     const projectionRequired = scenario.outcome.state === "CORRECTED";
     if (projectionRequired !== (scenario.outcome.public_projection !== null)) {
       context.addIssue({
@@ -97,13 +118,34 @@ const scenarioSchema = z
     }
     if (
       scenario.outcome.state === "BLOCKED" &&
-      (scenario.evidence.state !== "CONFLICTED" ||
-        scenario.outcome.issue_code !== "EVIDENCE_CONFLICTED")
+      (expectedEvidenceIssue === null ||
+        scenario.outcome.issue_code !== expectedEvidenceIssue)
     ) {
       context.addIssue({
         code: "custom",
         path: ["outcome"],
-        message: "BLOCKED requires conflicted evidence",
+        message: "BLOCKED requires matching stale or conflicted evidence",
+      });
+    }
+    if (
+      scenario.outcome.state === "AMBIGUOUS" &&
+      (scenario.evidence.state !== "VALID" ||
+        scenario.outcome.issue_code !== "AMBIGUOUS_MATCH")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["outcome"],
+        message: "AMBIGUOUS requires valid evidence and an ambiguous match",
+      });
+    }
+    if (
+      !["BLOCKED", "AMBIGUOUS"].includes(scenario.outcome.state) &&
+      scenario.outcome.issue_code !== null
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["outcome", "issue_code"],
+        message: "only blocked or ambiguous outcomes carry an issue",
       });
     }
   });
@@ -131,6 +173,11 @@ const fixtureSchema = z
   });
 
 export type PortfolioDogfoodT14Fixture = z.infer<typeof fixtureSchema>;
+export type TodayDogfoodSelection =
+  | { state: "DEFAULT" }
+  | { state: "INVALID" }
+  | { state: "INVALID_FIXTURE" }
+  | { state: "SELECTED"; scenarioId: string };
 export type PortfolioDogfoodT14Source =
   | { state: "READY"; fixture: PortfolioDogfoodT14Fixture }
   | { state: "INVALID"; issueCode: "FIXTURE_CONTRACT_INVALID" };

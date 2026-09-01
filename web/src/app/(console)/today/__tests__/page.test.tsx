@@ -67,17 +67,22 @@ describe("TodayPage", () => {
   });
 
   it("accepts one bounded dogfood query and rejects ambiguous input", () => {
-    expect(readTodayDogfoodSelection({ dogfood: "empty-outcome" })).toBe(
-      "empty-outcome",
-    );
+    expect(readTodayDogfoodSelection({ dogfood: "empty-outcome" })).toEqual({
+      state: "SELECTED",
+      scenarioId: "empty-outcome",
+    });
     expect(
       readTodayDogfoodSelection({
         dogfood: ["empty-outcome", "blocked-evidence"],
       }),
-    ).toBe("__invalid_selection__");
-    expect(readTodayDogfoodSelection({ dogfood: "../private" })).toBe(
-      "__invalid_selection__",
-    );
+    ).toEqual({ state: "INVALID" });
+    expect(readTodayDogfoodSelection({ dogfood: "../private" })).toEqual({
+      state: "INVALID",
+    });
+    expect(readTodayDogfoodSelection({})).toEqual({ state: "DEFAULT" });
+    expect(readTodayDogfoodSelection({ dogfood: "invalid-contract" })).toEqual({
+      state: "INVALID_FIXTURE",
+    });
   });
 
   it("does not query report storage without a valid admin session", async () => {
