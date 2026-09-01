@@ -15,6 +15,9 @@ T15는 실제 broker 주문 이력 provider를 연결하기 전에 pagination과
 
 두 모드 모두 `provider_history_state=NOT_EVALUATED`를 강제한다. 이는 실제 provider
 보존 기간, read-only scope 또는 pagination 동작을 확인했다는 뜻이 아니다.
+Mapping entrypoint인 `adapt_outcome_history_t15`는 `RECORDED`만 받는다. Redacted payload는
+반드시 `parse_redacted_outcome_history_t15_bytes`의 byte cap, UTF-8, duplicate-key 검사를
+통과해야 하며 mapping API로 이 경계를 우회하면 fail closed한다.
 
 ## Pagination과 lineage
 
@@ -52,5 +55,5 @@ UV_CACHE_DIR=.uv-cache uv run mypy --config-file pyproject.toml \
 ```
 
 테스트는 complete two-page replay, incomplete/discontinuous pagination, cross-page duplicate
-fill, bounded redacted import와 adapted lineage를 사용한 append-only correction replay를
-검증한다.
+fill, bounded redacted import, mapping API 우회 거부와 adapted lineage를 사용한 append-only
+correction replay를 검증한다.

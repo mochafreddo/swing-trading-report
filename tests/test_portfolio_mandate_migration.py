@@ -704,7 +704,8 @@ def test_t16_default_off_persistence_rehearsal_is_documented() -> None:
 
     assert "Accepted (Implemented and usable, disposable local-only)" in contract
     assert "default-off" in contract
-    assert "DISPOSABLE_LOOPBACK" in contract
+    assert "T16DisposableTarget" in contract
+    assert "같은 executor call" in contract
     assert "20260828230000_create_portfolio_mandate_a1.sql" in contract
     assert "REQUIRES_SEPARATE_APPROVAL" in contract
     assert "Portfolio Mandate T16 persistence rehearsal" in architecture

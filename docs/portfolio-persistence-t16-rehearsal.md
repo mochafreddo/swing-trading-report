@@ -5,8 +5,10 @@
 T16은 기존 A1 persistence 계약을 실제 provider나 운영 writer에 연결하지 않고 반복
 실행할 수 있는 동작 prototype이다. `PortfolioMandatePersistenceT16`은 database
 connection을 소유하지 않으며, 호출자가 별도로 검증한 executor만 주입받는다. 생성
-직후에는 default-off이고 `writer_enabled=true`와
-`target_kind=DISPOSABLE_LOOPBACK`을 동시에 지정해야 SQL을 실행한다.
+직후에는 default-off이고 `writer_enabled=true`와 exact `T16DisposableTarget`을 동시에
+지정해야 SQL을 실행한다. 생성 시 read-only preflight를 수행하고, 이후 각 operation의
+같은 executor call 안에서 server address, port, database, data directory, session user와
+PostgreSQL version을 다시 확인한 뒤에만 mutation 또는 projection을 실행한다.
 
 ## 기존 계약 재사용
 
@@ -56,7 +58,8 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q \
 ```
 
 Disposable PostgreSQL 계약은 opt-in environment와 새 전용 cluster에서 다음 test
-selection으로 실행한다.
+selection으로 실행한다. 전체 파일 실행은 operation-session identity guard를 포함한
+23개 계약을 검증한다.
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run pytest -q \

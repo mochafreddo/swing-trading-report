@@ -12,7 +12,10 @@ T14는 `/today`에서 Mandate, Evidence, Outcome의 public projection을 한 흐
 
 - `corrected-lineage`: append-only event history의 최신 public correction projection
 - `empty-outcome`: public outcome event가 없으며 어떤 상태도 추론하지 않음
+- `loading-outcome`: fixture replay가 진행 중이며 결과를 확정하지 않음
+- `stale-evidence`: stale evidence 때문에 outcome projection을 보류함
 - `blocked-evidence`: conflicting primary evidence 때문에 outcome projection을 보류함
+- `ambiguous-match`: 여러 candidate가 남아 review-only 상태를 유지함
 
 선택은 native link의 URL query에만 존재하므로 keyboard로 이동할 수 있고 refresh 뒤에도
 유지된다. unknown selection과 malformed query는 `INVALID SELECTION`, invalid fixture는
@@ -47,4 +50,5 @@ pnpm --dir web run format:check
 
 Playwright journey는 외부 origin과 Toss/order/notification/Supabase 문자열 요청을
 차단하고 375, 768, 1280px에서 수평 오버플로, keyboard 선택, refresh retention,
-correction/empty/blocked/invalid와 private-field 부재를 검증한다.
+correction/empty/loading/stale/blocked/ambiguous/invalid-contract와 private-field 부재를
+검증한다.

@@ -10,8 +10,21 @@ def test_t17_records_each_package_and_promotion_boundary() -> None:
         assert f"## {package}" in evidence
         assert f"{package}: `IMPLEMENTED_AND_USABLE`" in evidence
 
-    for commit in ("800bccd", "a010c9f", "54fc984", "aba5637"):
+    for commit in ("800bccd", "a010c9f", "54fc984", "aba5637", "01d0830"):
         assert commit in evidence
+
+    for fixture in (
+        "web/fixtures/portfolio-long-term.t13.synthetic.json",
+        "web/fixtures/portfolio-dogfood.t14.synthetic.json",
+    ):
+        assert fixture in evidence
+
+    for regression in (
+        "loading/stale/ambiguous/invalid-contract",
+        "mapping bypass 거부",
+        "test_t16_rechecks_disposable_identity_in_every_operation_session",
+    ):
+        assert regression in evidence
 
     for field in (
         "Data mode",
