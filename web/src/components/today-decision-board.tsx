@@ -1,14 +1,22 @@
 import Link from "next/link";
 
+import longTermSyntheticFixture from "../../fixtures/portfolio-long-term.t13.synthetic.json";
+
 import type { DecisionBoardEnvelopeV0 } from "@/lib/decision-board-schema";
+import { parsePortfolioLongTermT13Fixture } from "@/lib/portfolio-long-term-schema";
 import type {
   DecisionBoardJournalStatus,
   DecisionBoardRunKind,
 } from "@/lib/types";
 
 import { UnclassifiedQueuePreview } from "./unclassified-queue-preview";
+import { LongTermSyntheticLane } from "./long-term-synthetic-lane";
 
 import styles from "./today-decision-board.module.css";
+
+const LONG_TERM_SYNTHETIC_FIXTURE = parsePortfolioLongTermT13Fixture(
+  longTermSyntheticFixture,
+);
 
 type PublishedDecisionBoardReport = Extract<
   DecisionBoardEnvelopeV0,
@@ -573,6 +581,8 @@ export function TodayDecisionBoard({
           </p>
         )}
       </section>
+
+      <LongTermSyntheticLane fixture={LONG_TERM_SYNTHETIC_FIXTURE} />
 
       <UnclassifiedQueuePreview />
 

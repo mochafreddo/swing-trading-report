@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.swing-trading-report.invalid/schemas/portfolio-long-term.t13.schema.json",
+  "title": "Portfolio LONG_TERM T13 synthetic local-only contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "as_of",
+    "cases",
+    "expected_decisions"
+  ],
+  "properties": {
+    "schema_version": { "const": "portfolio-long-term.t13" },
+    "mode": { "const": "LOCAL_ONLY" },
+    "as_of": { "type": "string", "format": "date-time" },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    },
+    "expected_decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/decision" }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?(?:0|[1-9][0-9]*)\\.[0-9]{6}$"
+    },
+    "instrument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument_id", "canonical_ticker", "company_name"],
+      "properties": {
+        "instrument_id": { "$ref": "#/$defs/uuid" },
+        "canonical_ticker": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*$"
+        },
+        "company_name": { "type": "string", "minLength": 1, "maxLength": 160 }
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "operator", "threshold", "unit", "period"],
+      "properties": {
+        "metric": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "operator": { "enum": ["LT", "LTE", "GT", "GTE", "EQ"] },
+        "threshold": { "$ref": "#/$defs/decimal" },
+        "unit": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$" },
+        "period": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9._-]{0,31}$" }
+      }
+    },
+    "mandate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "classification_state",
+        "approval_state",
+        "horizon",
+        "thesis",
+        "invalidation_predicate",
+        "review_cadence"
+      ],
+      "properties": {
+        "classification_state": { "enum": ["ACTIVE", "UNCLASSIFIED"] },
+        "approval_state": { "enum": ["APPROVED", "DRAFT"] },
+        "horizon": { "type": ["string", "null"], "enum": ["LONG_TERM", null] },
+        "thesis": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "invalidation_predicate": {
+          "oneOf": [{ "$ref": "#/$defs/predicate" }, { "type": "null" }]
+        },
+        "review_cadence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "due"],
+          "properties": {
+            "kind": { "enum": ["WEEKLY", "FILING_EVENT"] },
+            "due": { "type": "boolean" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "classification_state": { "const": "ACTIVE" } }
+          },
+          "then": {
+            "properties": {
+              "approval_state": { "const": "APPROVED" },
+              "horizon": { "const": "LONG_TERM" },
+              "thesis": { "type": "string" },
+              "invalidation_predicate": { "$ref": "#/$defs/predicate" }
+            }
+          },
+          "else": {
+            "properties": {
+              "approval_state": { "const": "DRAFT" },
+              "horizon": { "type": "null" },
+              "thesis": { "type": "null" },
+              "invalidation_predicate": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "filingEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "source_url",
+        "publisher",
+        "published_at",
+        "period",
+        "supporting_span"
+      ],
+      "properties": {
+        "source_id": { "$ref": "#/$defs/uuid" },
+        "source_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "publisher": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "published_at": { "type": "string", "format": "date-time" },
+        "period": {
+          "type": "string",
+          "pattern": "^[A-Z0-9][A-Z0-9._-]{0,31}$"
+        },
+        "supporting_span": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    },
+    "predicateEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority",
+        "result",
+        "observed_value",
+        "unit",
+        "period",
+        "parser_version"
+      ],
+      "properties": {
+        "authority": {
+          "enum": ["DETERMINISTIC_PARSER", "USER", "AI_RESEARCH"]
+        },
+        "result": { "enum": ["FULFILLED", "NOT_FULFILLED", "CANDIDATE"] },
+        "observed_value": { "$ref": "#/$defs/decimal" },
+        "unit": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,31}$" },
+        "period": {
+          "type": "string",
+          "pattern": "^[A-Z0-9][A-Z0-9._-]{0,31}$"
+        },
+        "parser_version": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "instrument",
+        "mandate",
+        "evidence",
+        "concentration"
+      ],
+      "properties": {
+        "case_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "instrument": { "$ref": "#/$defs/instrument" },
+        "mandate": { "$ref": "#/$defs/mandate" },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "validation_status",
+            "source_tier",
+            "filing_event",
+            "predicate_evaluation"
+          ],
+          "properties": {
+            "validation_status": { "enum": ["VALID", "STALE", "CONFLICTED"] },
+            "source_tier": { "const": "PRIMARY" },
+            "filing_event": { "$ref": "#/$defs/filingEvent" },
+            "predicate_evaluation": { "$ref": "#/$defs/predicateEvaluation" }
+          }
+        },
+        "concentration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": { "status": { "enum": ["PASS", "BREACH"] } }
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "instrument_id",
+        "canonical_ticker",
+        "status",
+        "action",
+        "reason_code",
+        "mode"
+      ],
+      "properties": {
+        "case_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "instrument_id": { "$ref": "#/$defs/uuid" },
+        "canonical_ticker": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9]*(?:[./-][A-Z0-9]+)*$"
+        },
+        "status": { "enum": ["DECIDED", "REVIEW", "NO_ADVICE", "NOT_DUE"] },
+        "action": {
+          "type": ["string", "null"],
+          "enum": ["HOLD", "SELL", "REVIEW", null]
+        },
+        "reason_code": {
+          "enum": [
+            "PREDICATE_NOT_FULFILLED",
+            "PREDICATE_FULFILLED",
+            "EVIDENCE_STALE",
+            "EVIDENCE_CONFLICTED",
+            "CONCENTRATION_BREACH",
+            "PREDICATE_REVIEW_ONLY",
+            "MANDATE_UNCLASSIFIED",
+            "REVIEW_NOT_DUE"
+          ]
+        },
+        "mode": { "const": "LOCAL_ONLY" }
+      }
+    }
+  }
+}

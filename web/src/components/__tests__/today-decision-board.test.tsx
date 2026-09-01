@@ -146,6 +146,20 @@ function lane(
 }
 
 describe("TodayDecisionBoard", () => {
+  it("includes the local-only LONG_TERM lane without activating its synthetic actions", () => {
+    const html = renderToStaticMarkup(
+      createElement(TodayDecisionBoard, {
+        lanes: [lane(entryReport()), lane(holdingReport())],
+        journalStatus: { state: "AVAILABLE", records: [] },
+      }),
+    );
+
+    expect(html).toContain("LONG_TERM synthetic lane");
+    expect(html).toContain("LOCAL_ONLY · NOT ACTIVE");
+    expect(html).toContain("UNCLASSIFIED · NO ADVICE");
+    expect(html).toContain("<strong>0</strong><span>queued decisions</span>");
+  });
+
   it("keeps every V0 source item historical and all active surfaces empty", () => {
     const model = buildTodayBoardViewModel([
       lane(holdingReport()),
@@ -219,7 +233,7 @@ describe("TodayDecisionBoard", () => {
     expect(html).toContain("WITHIN_POLICY");
     expect(html).toContain("2026-08-30T12:00:00Z");
     expect(html).toContain("never infers an absolute");
-    expect(html).not.toMatch(/confidence|exposure|mandate|key driver/i);
+    expect(html).not.toMatch(/confidence:|exposure:|mandate:|key driver:/i);
   });
 
   it("renders missing and BLOCKED lanes as explicit fail-closed states", () => {

@@ -1,0 +1,419 @@
+{
+  "schema_version": "portfolio-long-term.t13",
+  "mode": "LOCAL_ONLY",
+  "as_of": "2026-09-01T00:00:00Z",
+  "cases": [
+    {
+      "case_id": "representative-hold",
+      "instrument": {
+        "instrument_id": "11111111-1111-4111-8111-111111111111",
+        "canonical_ticker": "ACME.NAS",
+        "company_name": "Acme Holdings"
+      },
+      "mandate": {
+        "classification_state": "ACTIVE",
+        "approval_state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Recurring revenue can compound while retention stays durable.",
+        "invalidation_predicate": {
+          "metric": "net_revenue_retention_pct",
+          "operator": "LT",
+          "threshold": "100.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2"
+        },
+        "review_cadence": { "kind": "WEEKLY", "due": true }
+      },
+      "evidence": {
+        "validation_status": "VALID",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "21111111-1111-4111-8111-111111111111",
+          "source_url": "https://investor.example.com/filings/fy2026q2",
+          "publisher": "Acme Holdings",
+          "published_at": "2026-08-31T20:00:00Z",
+          "period": "FY2026Q2",
+          "supporting_span": "Net revenue retention was 108 percent."
+        },
+        "predicate_evaluation": {
+          "authority": "DETERMINISTIC_PARSER",
+          "result": "NOT_FULFILLED",
+          "observed_value": "108.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2",
+          "parser_version": "filing-parser.v1"
+        }
+      },
+      "concentration": { "status": "PASS" }
+    },
+    {
+      "case_id": "predicate-fulfilled",
+      "instrument": {
+        "instrument_id": "12222222-2222-4222-8222-222222222222",
+        "canonical_ticker": "BETA.NYS",
+        "company_name": "Beta Systems"
+      },
+      "mandate": {
+        "classification_state": "ACTIVE",
+        "approval_state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Operating margin expansion supports durable cash generation.",
+        "invalidation_predicate": {
+          "metric": "operating_margin_pct",
+          "operator": "LT",
+          "threshold": "8.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2"
+        },
+        "review_cadence": { "kind": "FILING_EVENT", "due": true }
+      },
+      "evidence": {
+        "validation_status": "VALID",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "22222222-2222-4222-8222-222222222222",
+          "source_url": "https://investor.example.com/beta/fy2026q2",
+          "publisher": "Beta Systems",
+          "published_at": "2026-08-31T20:05:00Z",
+          "period": "FY2026Q2",
+          "supporting_span": "Operating margin declined to 7 percent."
+        },
+        "predicate_evaluation": {
+          "authority": "DETERMINISTIC_PARSER",
+          "result": "FULFILLED",
+          "observed_value": "7.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2",
+          "parser_version": "filing-parser.v1"
+        }
+      },
+      "concentration": { "status": "PASS" }
+    },
+    {
+      "case_id": "stale-evidence",
+      "instrument": {
+        "instrument_id": "13333333-3333-4333-8333-333333333333",
+        "canonical_ticker": "GAMMA.NAS",
+        "company_name": "Gamma Labs"
+      },
+      "mandate": {
+        "classification_state": "ACTIVE",
+        "approval_state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Research productivity can sustain the product pipeline.",
+        "invalidation_predicate": {
+          "metric": "active_program_count",
+          "operator": "LT",
+          "threshold": "4.000000",
+          "unit": "COUNT",
+          "period": "FY2026Q2"
+        },
+        "review_cadence": { "kind": "WEEKLY", "due": true }
+      },
+      "evidence": {
+        "validation_status": "STALE",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "23333333-3333-4333-8333-333333333333",
+          "source_url": "https://investor.example.com/gamma/fy2026q1",
+          "publisher": "Gamma Labs",
+          "published_at": "2026-05-01T20:00:00Z",
+          "period": "FY2026Q1",
+          "supporting_span": "Four active programs remained in development."
+        },
+        "predicate_evaluation": {
+          "authority": "DETERMINISTIC_PARSER",
+          "result": "NOT_FULFILLED",
+          "observed_value": "4.000000",
+          "unit": "COUNT",
+          "period": "FY2026Q1",
+          "parser_version": "filing-parser.v1"
+        }
+      },
+      "concentration": { "status": "PASS" }
+    },
+    {
+      "case_id": "conflicting-evidence",
+      "instrument": {
+        "instrument_id": "14444444-4444-4444-8444-444444444444",
+        "canonical_ticker": "DELTA.NYS",
+        "company_name": "Delta Industries"
+      },
+      "mandate": {
+        "classification_state": "ACTIVE",
+        "approval_state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Backlog conversion can support multi-year revenue visibility.",
+        "invalidation_predicate": {
+          "metric": "backlog_growth_yoy_pct",
+          "operator": "LT",
+          "threshold": "0.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2"
+        },
+        "review_cadence": { "kind": "FILING_EVENT", "due": true }
+      },
+      "evidence": {
+        "validation_status": "CONFLICTED",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "24444444-4444-4444-8444-444444444444",
+          "source_url": "https://investor.example.com/delta/fy2026q2",
+          "publisher": "Delta Industries",
+          "published_at": "2026-08-31T20:10:00Z",
+          "period": "FY2026Q2",
+          "supporting_span": "The filing and restatement report different backlog values."
+        },
+        "predicate_evaluation": {
+          "authority": "DETERMINISTIC_PARSER",
+          "result": "CANDIDATE",
+          "observed_value": "-2.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2",
+          "parser_version": "filing-parser.v1"
+        }
+      },
+      "concentration": { "status": "PASS" }
+    },
+    {
+      "case_id": "concentration-breach",
+      "instrument": {
+        "instrument_id": "15555555-5555-4555-8555-555555555555",
+        "canonical_ticker": "EPSILON.NAS",
+        "company_name": "Epsilon Networks"
+      },
+      "mandate": {
+        "classification_state": "ACTIVE",
+        "approval_state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Installed base growth can improve recurring service revenue.",
+        "invalidation_predicate": {
+          "metric": "service_revenue_growth_pct",
+          "operator": "LT",
+          "threshold": "5.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2"
+        },
+        "review_cadence": { "kind": "WEEKLY", "due": true }
+      },
+      "evidence": {
+        "validation_status": "VALID",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "25555555-5555-4555-8555-555555555555",
+          "source_url": "https://investor.example.com/epsilon/fy2026q2",
+          "publisher": "Epsilon Networks",
+          "published_at": "2026-08-31T20:15:00Z",
+          "period": "FY2026Q2",
+          "supporting_span": "Service revenue grew 9 percent."
+        },
+        "predicate_evaluation": {
+          "authority": "DETERMINISTIC_PARSER",
+          "result": "NOT_FULFILLED",
+          "observed_value": "9.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2",
+          "parser_version": "filing-parser.v1"
+        }
+      },
+      "concentration": { "status": "BREACH" }
+    },
+    {
+      "case_id": "ai-predicate-candidate",
+      "instrument": {
+        "instrument_id": "16666666-6666-4666-8666-666666666666",
+        "canonical_ticker": "ZETA.NYS",
+        "company_name": "Zeta Materials"
+      },
+      "mandate": {
+        "classification_state": "ACTIVE",
+        "approval_state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Capacity expansion can support profitable volume growth.",
+        "invalidation_predicate": {
+          "metric": "gross_margin_pct",
+          "operator": "LT",
+          "threshold": "20.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2"
+        },
+        "review_cadence": { "kind": "FILING_EVENT", "due": true }
+      },
+      "evidence": {
+        "validation_status": "VALID",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "26666666-6666-4666-8666-666666666666",
+          "source_url": "https://investor.example.com/zeta/fy2026q2",
+          "publisher": "Zeta Materials",
+          "published_at": "2026-08-31T20:20:00Z",
+          "period": "FY2026Q2",
+          "supporting_span": "Management described continued margin pressure."
+        },
+        "predicate_evaluation": {
+          "authority": "AI_RESEARCH",
+          "result": "CANDIDATE",
+          "observed_value": "19.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2",
+          "parser_version": null
+        }
+      },
+      "concentration": { "status": "PASS" }
+    },
+    {
+      "case_id": "unclassified-no-advice",
+      "instrument": {
+        "instrument_id": "17777777-7777-4777-8777-777777777777",
+        "canonical_ticker": "ETA.NAS",
+        "company_name": "Eta Software"
+      },
+      "mandate": {
+        "classification_state": "UNCLASSIFIED",
+        "approval_state": "DRAFT",
+        "horizon": null,
+        "thesis": null,
+        "invalidation_predicate": null,
+        "review_cadence": { "kind": "WEEKLY", "due": true }
+      },
+      "evidence": {
+        "validation_status": "VALID",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "27777777-7777-4777-8777-777777777777",
+          "source_url": "https://investor.example.com/eta/fy2026q2",
+          "publisher": "Eta Software",
+          "published_at": "2026-08-31T20:25:00Z",
+          "period": "FY2026Q2",
+          "supporting_span": "The filing is present but no mandate is approved."
+        },
+        "predicate_evaluation": {
+          "authority": "AI_RESEARCH",
+          "result": "CANDIDATE",
+          "observed_value": "0.000000",
+          "unit": "UNKNOWN",
+          "period": "FY2026Q2",
+          "parser_version": null
+        }
+      },
+      "concentration": { "status": "PASS" }
+    },
+    {
+      "case_id": "weekly-not-due",
+      "instrument": {
+        "instrument_id": "18888888-8888-4888-8888-888888888888",
+        "canonical_ticker": "THETA.NYS",
+        "company_name": "Theta Logistics"
+      },
+      "mandate": {
+        "classification_state": "ACTIVE",
+        "approval_state": "APPROVED",
+        "horizon": "LONG_TERM",
+        "thesis": "Network density can improve returns on invested capital.",
+        "invalidation_predicate": {
+          "metric": "return_on_invested_capital_pct",
+          "operator": "LT",
+          "threshold": "10.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2"
+        },
+        "review_cadence": { "kind": "WEEKLY", "due": false }
+      },
+      "evidence": {
+        "validation_status": "VALID",
+        "source_tier": "PRIMARY",
+        "filing_event": {
+          "source_id": "28888888-8888-4888-8888-888888888888",
+          "source_url": "https://investor.example.com/theta/fy2026q2",
+          "publisher": "Theta Logistics",
+          "published_at": "2026-08-31T20:30:00Z",
+          "period": "FY2026Q2",
+          "supporting_span": "Return on invested capital was 12 percent."
+        },
+        "predicate_evaluation": {
+          "authority": "DETERMINISTIC_PARSER",
+          "result": "NOT_FULFILLED",
+          "observed_value": "12.000000",
+          "unit": "PERCENT",
+          "period": "FY2026Q2",
+          "parser_version": "filing-parser.v1"
+        }
+      },
+      "concentration": { "status": "PASS" }
+    }
+  ],
+  "expected_decisions": [
+    {
+      "case_id": "representative-hold",
+      "instrument_id": "11111111-1111-4111-8111-111111111111",
+      "canonical_ticker": "ACME.NAS",
+      "status": "DECIDED",
+      "action": "HOLD",
+      "reason_code": "PREDICATE_NOT_FULFILLED",
+      "mode": "LOCAL_ONLY"
+    },
+    {
+      "case_id": "predicate-fulfilled",
+      "instrument_id": "12222222-2222-4222-8222-222222222222",
+      "canonical_ticker": "BETA.NYS",
+      "status": "DECIDED",
+      "action": "SELL",
+      "reason_code": "PREDICATE_FULFILLED",
+      "mode": "LOCAL_ONLY"
+    },
+    {
+      "case_id": "stale-evidence",
+      "instrument_id": "13333333-3333-4333-8333-333333333333",
+      "canonical_ticker": "GAMMA.NAS",
+      "status": "REVIEW",
+      "action": "REVIEW",
+      "reason_code": "EVIDENCE_STALE",
+      "mode": "LOCAL_ONLY"
+    },
+    {
+      "case_id": "conflicting-evidence",
+      "instrument_id": "14444444-4444-4444-8444-444444444444",
+      "canonical_ticker": "DELTA.NYS",
+      "status": "REVIEW",
+      "action": "REVIEW",
+      "reason_code": "EVIDENCE_CONFLICTED",
+      "mode": "LOCAL_ONLY"
+    },
+    {
+      "case_id": "concentration-breach",
+      "instrument_id": "15555555-5555-4555-8555-555555555555",
+      "canonical_ticker": "EPSILON.NAS",
+      "status": "REVIEW",
+      "action": "REVIEW",
+      "reason_code": "CONCENTRATION_BREACH",
+      "mode": "LOCAL_ONLY"
+    },
+    {
+      "case_id": "ai-predicate-candidate",
+      "instrument_id": "16666666-6666-4666-8666-666666666666",
+      "canonical_ticker": "ZETA.NYS",
+      "status": "REVIEW",
+      "action": "REVIEW",
+      "reason_code": "PREDICATE_REVIEW_ONLY",
+      "mode": "LOCAL_ONLY"
+    },
+    {
+      "case_id": "unclassified-no-advice",
+      "instrument_id": "17777777-7777-4777-8777-777777777777",
+      "canonical_ticker": "ETA.NAS",
+      "status": "NO_ADVICE",
+      "action": null,
+      "reason_code": "MANDATE_UNCLASSIFIED",
+      "mode": "LOCAL_ONLY"
+    },
+    {
+      "case_id": "weekly-not-due",
+      "instrument_id": "18888888-8888-4888-8888-888888888888",
+      "canonical_ticker": "THETA.NYS",
+      "status": "NOT_DUE",
+      "action": null,
+      "reason_code": "REVIEW_NOT_DUE",
+      "mode": "LOCAL_ONLY"
+    }
+  ]
+}

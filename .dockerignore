@@ -17,6 +17,7 @@ web/src/**/*.test.tsx
 web/scripts/*.test.mjs
 !web/fixtures/
 !web/fixtures/toss-holdings.qa.json
+!web/fixtures/portfolio-long-term.t13.synthetic.json
 !sab/
 !sab/decision_board/
 !sab/decision_board/run_journal_public.py

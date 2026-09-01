@@ -639,6 +639,25 @@ LONG_TERM writer, board, alert와
 `SELL/HOLD` compiler 경로를 만들지 않는다. AI candidate와 자유 텍스트는
 `REVIEW_ONLY`이며 주문이나 Toss write capability를 만들지 않는다.
 
+### 7.4 LONG_TERM T13 합성 정책
+
+T13은 A1 persistence 계약을 변경하거나 실제 mandate를 활성화하지 않고, 공유 합성
+fixture만 입력으로 받는 별도 `LOCAL_ONLY` 정책 compiler다. 승인된 LONG_TERM
+mandate의 review cadence가 due일 때 current primary evidence를 평가한다.
+
+정책 우선순위는 다음과 같다.
+
+1. `UNCLASSIFIED`는 `NO_ADVICE`다.
+2. cadence/event가 due가 아니면 `NOT_DUE`다.
+3. stale evidence, conflicting evidence, concentration breach는 `REVIEW`다.
+4. AI research predicate candidate는 `REVIEW`이며 방향성 action을 만들지 않는다.
+5. deterministic parser 또는 user authority가 승인된 typed predicate를 충족하면
+   합성 `SELL`, 충족하지 않으면 합성 `HOLD`다.
+
+모든 결과는 Today에서 `LOCAL_ONLY · NOT ACTIVE`로 표시한다. 실제 holding,
+provider, DB, order, alert와 연결되지 않으므로 production LONG_TERM action authority가
+아니다. 실제 5종목 mandate 승인과 방향성 조언 활성화는 별도 promotion gate로 남는다.
+
 ## 8. 운영/재현성 권장 사항
 
 - 같은 날짜 리포트라도 “실행 시각(장중/장후)”에 따라 평가 캔들이 달라질 수 있으므로,
