@@ -1,6 +1,6 @@
 # Portfolio Mandate T17 dogfood evidence
 
-상태: Implemented and usable (recurring local-only evidence)
+상태: Accepted (implemented and usable, recurring local-only evidence)
 
 이 문서는 T13–T16의 local vertical journey에서 기대 결과와 실제 결과를 함께 기록한다.
 모든 fixture와 actor ID는 합성이며 외부 계정·주문·credential을 포함하지 않는다.

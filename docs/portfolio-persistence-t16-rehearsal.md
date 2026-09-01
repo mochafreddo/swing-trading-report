@@ -1,6 +1,6 @@
 # Portfolio Mandate T16 persistence rehearsal
 
-상태: Implemented and usable (disposable local-only)
+상태: Accepted (Implemented and usable, disposable local-only)
 
 T16은 기존 A1 persistence 계약을 실제 provider나 운영 writer에 연결하지 않고 반복
 실행할 수 있는 동작 prototype이다. `PortfolioMandatePersistenceT16`은 database

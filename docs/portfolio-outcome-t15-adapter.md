@@ -1,6 +1,6 @@
 # Portfolio Outcome T15 adapter seam
 
-상태: Implemented and usable (recorded/redacted local-only)
+상태: Accepted (implemented and usable, recorded/redacted local-only)
 
 T15는 실제 broker 주문 이력 provider를 연결하기 전에 pagination과 privacy 계약을
 실행 가능하게 고정하는 입력 adapter seam이다. O1 matcher와 correction event 계약은

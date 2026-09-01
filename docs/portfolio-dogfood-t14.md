@@ -1,6 +1,6 @@
 # Portfolio dogfood T14
 
-상태: Implemented and usable (synthetic local-only)
+상태: Accepted (implemented and usable, synthetic local-only)
 
 T14는 `/today`에서 Mandate, Evidence, Outcome의 public projection을 한 흐름으로
 검토하는 fixture-only UI다. 실제 holding, provider, DB, order와 notification을 읽거나

@@ -702,7 +702,7 @@ def test_t16_default_off_persistence_rehearsal_is_documented() -> None:
     )
     architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
 
-    assert "Implemented and usable (disposable local-only)" in contract
+    assert "Accepted (Implemented and usable, disposable local-only)" in contract
     assert "default-off" in contract
     assert "DISPOSABLE_LOOPBACK" in contract
     assert "20260828230000_create_portfolio_mandate_a1.sql" in contract
