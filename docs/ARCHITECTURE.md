@@ -516,6 +516,20 @@ duplicate-key rejection을 적용한다. 결과의 `provider_history_state`는 �
 없다. 세부 계약은 [Portfolio Outcome T15 adapter](portfolio-outcome-t15-adapter.md)를
 따른다.
 
+### Portfolio Mandate T16 persistence rehearsal
+
+T16은 기존 A1 command boundary에 default-off local prototype을 연결한다. Prototype은
+검증된 executor를 주입받고 `writer_enabled`와 `DISPOSABLE_LOOPBACK` target opt-in이
+함께 있을 때만 기존 activation RPC를 호출한다. Typed projection read와
+append-only correction/rebuild는 전용 transaction에서 실행하며 rebuild 결과를 확인한
+뒤 항상 rollback한다. Runtime command나 database connection을 소유하지 않는다.
+
+검증은 새 migration 없이 기존 create-only A1 migration만 빈 loopback PostgreSQL
+17.11에 적용한다. 기존·live DB apply, backfill, writer activation, provider 연결과
+production promotion은 포함하지 않는다. 세부 계약은
+[Portfolio Mandate T16 persistence rehearsal](portfolio-persistence-t16-rehearsal.md)을
+따른다.
+
 - 제품 방향/backlog: `docs/PRD.md`
 - 현재 계약(contract): `docs/spec-v1.1.md`
 - 백로그/전달 이력: `docs/spec-v1.3.md`

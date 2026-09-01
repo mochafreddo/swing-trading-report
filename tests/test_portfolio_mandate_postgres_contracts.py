@@ -9,6 +9,10 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse, urlunsplit
 
 import pytest
+from sab.portfolio_mandate.persistence_rehearsal import (
+    PortfolioMandatePersistenceT16,
+    T16ActivationCommand,
+)
 
 _MIGRATION = Path("supabase/migrations/20260828230000_create_portfolio_mandate_a1.sql")
 _ALLOW_ENV = "PORTFOLIO_MANDATE_A1_ALLOW_DISPOSABLE"
@@ -1177,6 +1181,69 @@ def test_activation_commits_version_slice_journal_and_projection_together(
 
     assert result == (f"{ids['activation_event']}|{ids['draft_version']}|ACTIVATED")
     assert state == "1,1,1,1,1,1,1"
+
+
+def test_t16_writer_projects_and_rebuilds_with_rollback(
+    portfolio_mandate_postgres_dsn: _DisposablePostgresConnection,
+) -> None:
+    ids = _seed_activation_case(
+        portfolio_mandate_postgres_dsn,
+        case="t16-persistence-rehearsal",
+    )
+    command = T16ActivationCommand(
+        command_id=uuid.UUID(ids["command"]),
+        activation_event_id=uuid.UUID(ids["activation_event"]),
+        mandate_id=uuid.UUID(ids["mandate"]),
+        draft_mandate_version_id=uuid.UUID(ids["draft_version"]),
+        expected_mandate_version_id=uuid.UUID(ids["active_version"]),
+        actor_id=uuid.UUID(ids["actor"]),
+        broker_snapshot_version=1,
+        allocation_version=1,
+        correction_command_id=uuid.uuid5(
+            _UUID_NAMESPACE, "t16-persistence-rehearsal:correction-command"
+        ),
+        correction_event_id=uuid.uuid5(
+            _UUID_NAMESPACE, "t16-persistence-rehearsal:correction-event"
+        ),
+    )
+    prototype = PortfolioMandatePersistenceT16(
+        lambda sql: _psql(portfolio_mandate_postgres_dsn, sql=sql),
+        writer_enabled=True,
+        target_kind="DISPOSABLE_LOOPBACK",
+    )
+
+    first = prototype.activate(command)
+    retry = prototype.activate(command)
+    projected_before = prototype.project(command)
+    rehearsal = prototype.rebuild_and_rollback(command)
+    projected_after = prototype.project(command)
+
+    assert first["result_status"] == "ACTIVATED"
+    assert retry["result_status"] == "ALREADY_ACTIVATED"
+    assert projected_before == {
+        "mandate_version_id": ids["active_version"],
+        "projection_status": "SUPERSEDED",
+        "eligible": False,
+        "projection_version": 1,
+    }
+    assert rehearsal == {
+        "append_only_guard": "ENFORCED",
+        "correction_count": 1,
+        "rebuilt_projection_count": 1,
+        "transaction_outcome": "ROLLED_BACK",
+    }
+    assert projected_after == projected_before
+    assert (
+        _psql(
+            portfolio_mandate_postgres_dsn,
+            sql=f"""
+        select count(*)
+        from public.portfolio_mandate_journal_event_a1
+        where journal_event_id = '{command.correction_event_id}';
+        """,
+        )
+        == "0"
+    )
 
 
 def test_activation_retry_revalidates_actor_before_returning_existing_result(

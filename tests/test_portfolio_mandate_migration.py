@@ -694,3 +694,18 @@ def test_portfolio_mandate_a1_disposable_verification_boundary_is_documented() -
     assert "Portfolio Mandate A1" in strategy
     assert "hard SELL" in strategy
     assert "LONG_TERM 방향성 action" in strategy
+
+
+def test_t16_default_off_persistence_rehearsal_is_documented() -> None:
+    contract = Path("docs/portfolio-persistence-t16-rehearsal.md").read_text(
+        encoding="utf-8"
+    )
+    architecture = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
+
+    assert "Implemented and usable (disposable local-only)" in contract
+    assert "default-off" in contract
+    assert "DISPOSABLE_LOOPBACK" in contract
+    assert "20260828230000_create_portfolio_mandate_a1.sql" in contract
+    assert "REQUIRES_SEPARATE_APPROVAL" in contract
+    assert "Portfolio Mandate T16 persistence rehearsal" in architecture
+    assert "새 migration" in architecture
