@@ -530,6 +530,9 @@ production promotion은 포함하지 않는다. 세부 계약은
 [Portfolio Mandate T16 persistence rehearsal](portfolio-persistence-t16-rehearsal.md)을
 따른다.
 
+T13–T16의 build, local journey, 발견 결함, regression과 남은 `NOT_EVALUATED` 항목은
+[Portfolio Mandate T17 dogfood evidence](portfolio-dogfood-t17.md)에 package별로 기록한다.
+
 - 제품 방향/backlog: `docs/PRD.md`
 - 현재 계약(contract): `docs/spec-v1.1.md`
 - 백로그/전달 이력: `docs/spec-v1.3.md`
