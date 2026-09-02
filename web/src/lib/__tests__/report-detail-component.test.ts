@@ -770,6 +770,41 @@ describe("ReportDetail component", () => {
     },
   );
 
+  it("renders a source-backed AI brief as a positive review state", () => {
+    const detail: ReportJson = {
+      schema: "sab.ai_brief.v1",
+      type: "ai_brief",
+      generated_at: "2026-05-05T08:40:00+09:00",
+      market: "US",
+      model_provider: "openai",
+      model_name: "gpt-test",
+      source_entry_report: "2026-05-05.entry.json",
+      summary: {
+        preselected_count: 1,
+        recommendation_count: 1,
+        source_issue_count: 0,
+        system_issue_count: 0,
+      },
+      eligible_tickers: ["AAPL.NAS"],
+      recommendations: [
+        {
+          ticker: "AAPL.NAS",
+          sources: [
+            { title: "Apple update", url: "https://example.test/aapl" },
+          ],
+        },
+      ],
+      source_issues: [],
+      system_issues: [],
+    };
+
+    const html = renderReportDetail(detail);
+
+    expect(html).toContain("FINAL_JUDGMENT");
+    expect(html).toContain('data-tone="positive"');
+    expect(html).toContain("소스 확인 완료");
+  });
+
   it("renders legacy AI brief fallback states from the shared contract", () => {
     for (const [ruleId, rule] of Object.entries(aiBriefStateContract.rules)) {
       const detail: ReportJson = {

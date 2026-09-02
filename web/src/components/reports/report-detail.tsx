@@ -23,6 +23,7 @@ import {
 } from "./helpers";
 import type { ReportJson } from "./types";
 import { DecisionBoardDetail } from "./decision-board-detail";
+import { AiBriefDetail } from "./ai-brief-detail";
 import type { DecisionBoardEnvelopeV0 } from "@/lib/decision-board-schema";
 
 interface ReportDetailProps {
@@ -37,6 +38,7 @@ interface ReportDetailProps {
   aiBriefRows: ReportJson[];
   rawDetailJson: string;
   onToggleRaw: () => void;
+  reportKey?: string | null;
 }
 
 const MONEY_FORMATTER = new Intl.NumberFormat("en-US", {
@@ -238,6 +240,7 @@ export function ReportDetail({
   aiBriefRows,
   rawDetailJson,
   onToggleRaw,
+  reportKey,
 }: ReportDetailProps) {
   const [expandedBuyRowKey, setExpandedBuyRowKey] = useState<string | null>(
     null,
@@ -369,8 +372,14 @@ export function ReportDetail({
     >
       <div className={styles.detailHeaderRow}>
         <div>
-          <h2 className="panelTitle">Report Detail</h2>
-          <p className="subtle">구조화 보기 + Raw JSON</p>
+          <h2 className="panelTitle">
+            {isAiBriefReport ? "AI Brief" : "Report Detail"}
+          </h2>
+          <p className="subtle">
+            {isAiBriefReport
+              ? "수동 검토용 모델 요약"
+              : "구조화 보기 + Raw JSON"}
+          </p>
         </div>
         <button
           type="button"
@@ -380,7 +389,7 @@ export function ReportDetail({
           aria-pressed={showRaw}
           aria-controls="report-raw-json"
         >
-          {showRaw ? "Raw 숨기기" : "Raw 보기"}
+          {showRaw ? "Raw JSON 숨기기" : "Raw JSON 보기"}
         </button>
       </div>
 
@@ -412,7 +421,17 @@ export function ReportDetail({
           rawJson={rawDetailJson}
         />
       )}
-      {detail && !decisionBoardDetail && (
+      {detail && !decisionBoardDetail && isAiBriefReport && (
+        <AiBriefDetail
+          detail={detail}
+          summary={summary}
+          recommendations={aiBriefRows}
+          reportKey={reportKey}
+          showRaw={showRaw}
+          rawJson={rawDetailJson}
+        />
+      )}
+      {detail && !decisionBoardDetail && !isAiBriefReport && (
         <>
           <dl className={styles.metaGrid}>
             <div>

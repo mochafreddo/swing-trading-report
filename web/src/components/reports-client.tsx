@@ -88,6 +88,7 @@ export function ReportsClient({ initialState }: ReportsClientProps) {
           aiBriefRows={aiBriefRows}
           rawDetailJson={rawDetailJson}
           onToggleRaw={toggleShowRaw}
+          reportKey={selectedKey}
         />
       </div>
     </section>
