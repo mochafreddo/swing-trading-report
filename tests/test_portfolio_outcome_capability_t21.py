@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,100 @@ FIXTURE_PATH = (
     / "portfolio_mandate"
     / "portfolio-outcome-capability-t21.recorded.json"
 )
+
+
+def test_default_cli_reports_toss_plan_without_reading_fixture_or_writing_artifact(
+    tmp_path: Path,
+) -> None:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts/run_portfolio_outcome_capability_t21.py"
+    )
+    artifact = tmp_path / "must-not-exist.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--fixture",
+            "missing.json",
+            "--artifact",
+            str(artifact),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    readiness = json.loads(result.stdout)
+    assert readiness["execution_history_provider"] == "TOSS_SECURITIES"
+    assert readiness["provider_history_state"] == "NOT_EVALUATED"
+    assert (
+        readiness["websocket_history_recovery"]
+        == "UNSUPPORTED_DISCONNECTED_EVENTS_NOT_REPLAYED"
+    )
+    assert (
+        readiness["websocket_execution_granularity"]
+        == "ORDER_SNAPSHOT_WITHOUT_FILLED_AT"
+    )
+    assert readiness["file_import_required"] is False
+    assert readiness["history_input_mode"] == "TOSS_API_ORDER_AGGREGATE"
+    assert readiness["state"] == "READY_FOR_TOSS_ORDER_AGGREGATE_PROBE_APPROVAL"
+    assert readiness["proposed_budgets"] == {
+        "max_requests": 5,
+        "max_pages": 4,
+        "max_response_body_bytes": 1_048_576,
+        "max_elapsed_seconds": 30,
+        "page_size": 20,
+        "max_date_window_days": 30,
+    }
+    assert (
+        readiness["documented_execution_granularity"]
+        == "ORDER_AGGREGATE_NOT_INDIVIDUAL_FILL"
+    )
+    assert (
+        readiness["t15_mapping_state"]
+        == "BLOCKED_NO_VERIFIED_FILL_ID_OR_CORRECTION_LINK"
+    )
+    assert readiness["documented_history_reads"] == [
+        "GET /api/v1/orders",
+        "GET /api/v1/orders/{orderId}",
+    ]
+    assert readiness["allowed_live_requests"] == []
+    assert readiness["credential_usage_authorized"] is False
+    assert readiness["kis_probe_approval_applicable"] is False
+    assert readiness["holdings_are_execution_evidence"] is False
+    assert readiness["provider_calls"] == readiness["order_operations"] == 0
+    assert not artifact.exists()
+
+
+def test_explicit_replay_labels_historical_kis_evidence(tmp_path: Path) -> None:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts/run_portfolio_outcome_capability_t21.py"
+    )
+    artifact = tmp_path / "recorded.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--recorded-replay",
+            "--fixture",
+            str(FIXTURE_PATH.resolve()),
+            "--artifact",
+            str(artifact),
+        ],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    summary = json.loads(result.stdout)
+    assert summary["evidence_scope"] == "HISTORICAL_KIS_RECORDED_ONLY_NOT_TOSS"
+    assert summary["scenario_count"] == 14
+    assert summary["provider_calls"] == 0
+    assert (
+        json.loads(artifact.read_text())["evidence_scope"] == summary["evidence_scope"]
+    )
 
 
 def _fixture() -> dict[str, Any]:

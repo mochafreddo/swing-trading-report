@@ -544,9 +544,16 @@ T19는 public primary-source candidate manifest를 pure Python validator와 fake
 해시는 변경 감지 용도이며 사용자 신원 인증이나 production 권한을 부여하지 않는다.
 T20은 DSN을 입력받지 않고 `/private/tmp` 아래 새 PostgreSQL 17.11 cluster와 임시 DB만
 생성하여 기존 A1 migration/test suite, backup, restore와 checksum 검사를 한 명령으로 수행한다.
-T21은 recorded/redacted fixture만 처리하는 pure capability runner이며 provider transport나 credential
-interface를 포함하지 않는다. 세 package 모두 runtime writer, report route, scheduler, notification,
-provider client와 order path에 연결되지 않는다.
+T21의 실사용 체결내역 대상은 토스증권이며 KIS 시세 provider와 분리한다. 기본 CLI는 토스
+주문별 체결 결과 probe의 승인 대기 상태와 빈 live request allowlist를 출력한다. 개별 fill/정정
+lineage 미확인은 T15 정밀 분석 연결만 제한하며 주문 이력 GET 검증을 막지 않는다. 기존 KIS recorded/redacted
+fixture는 `--recorded-replay`로만 재생하며 토스 검증 증거로 취급하지 않는다. 기존 토스
+holdings adapter를 execution history로 대체하지 않는다. 별도 `toss_order_probe.py`는 기본 거부
+정책이며 명시적 토스 승인 후에만 process-memory credential과 고정 호스트의 토큰 POST 1회,
+CLOSED 주문 GET 최대 4회를 사용한다. 1 MiB 응답 본문·30초 제한, 재시도·리디렉션 금지와
+민감값을 배제한 요약을 적용하며 개별 fill을 생성하지 않는다. CLI 기본 실행과 테스트에서는
+실제 provider를 호출하지 않는다. 세 package 모두 runtime writer, report route, scheduler,
+notification 및 주문 생성·정정·취소 path에 연결되지 않는다.
 
 기대 결과, 실제 결과, 재현, 발견 결함, regression, exact approval과 외부 side-effect 수는
 [Portfolio Mandate T18–T21 local evidence](portfolio-dogfood-t18-t21.md)에 기록한다.

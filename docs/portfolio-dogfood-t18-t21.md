@@ -97,7 +97,12 @@ T20: `IMPLEMENTED_AND_USABLE`
 
 ## T21
 
-T21: `IMPLEMENTED_AND_USABLE_WITH_RECORDED_REDACTED_FIXTURES`
+T21: `LOCAL_PROBE_IMPLEMENTED · ONE_SHOT_ORDER_AGGREGATE_OBSERVED`
+
+실사용 체결내역 대상은 토스증권이다. KIS 시세 사용은 KIS 증권계좌 사용을 뜻하지 않는다.
+기존 KIS recorded package는 과거 회귀검사로 보존하며 토스 지원이나 실제 계좌 검증의 증거로
+사용하지 않는다. KIS one-shot 승인은 실행되지 않았고 토스 호출에 적용되지 않는다.
+아래 14개 scenario 결과는 기존 KIS 합성 검증 기록이다.
 
 - Data mode: `RECORDED_REDACTED · PROVIDER_FREE`이며 `provider_history_state=NOT_EVALUATED`다.
 - 기대 결과: provider endpoint, method, credential boundary, request/page/byte/time budget, 저장 metadata,
@@ -108,11 +113,110 @@ T21: `IMPLEMENTED_AND_USABLE_WITH_RECORDED_REDACTED_FIXTURES`
 - 저장 가능 metadata: scenario/result code, request/page/byte/time count, capability state와
   redacted fill identity hash만 허용한다. account ID/number, token, 수량, 가격, 손익, raw payload는
   contract와 recursive validator에서 금지한다.
-- 재현: `UV_CACHE_DIR=.uv-cache uv run python scripts/run_portfolio_outcome_capability_t21.py`.
+- 과거 회귀검사 재현: `UV_CACHE_DIR=.uv-cache uv run python scripts/run_portfolio_outcome_capability_t21.py --recorded-replay`.
 - Regression test: exact read endpoint/method, frozen budgets, privacy rejection, permanent order-operation
   prohibition, recorded result code를 `tests/test_portfolio_outcome_capability_t21.py`가 고정한다.
-- 남은 `NOT_EVALUATED`: KIS OAuth scope, history retention, real pagination cursor, partial fill,
+- 남은 `NOT_EVALUATED`: 토스 체결내역 접근 수단, 인증 권한, history retention, real pagination cursor, partial fill,
   correction/cancel, fill identity와 outage behavior.
+
+### 토스 기준 수정 계획
+
+저장소 `web/src/lib/toss/client.ts`는 `/oauth2/token`과 `/api/v1/holdings`를 호출하는
+보유목록 adapter만 구현한다. 이는 코드에 기재된 경로일 뿐 현재 provider의 공식 지원이나
+사용자 계정 접근 자격을 검증한 결과가 아니다. 체결내역 endpoint, pagination, fill identity
+mapping은 구현되어 있지 않다. 보유 수량이나 평균매입가 변화로 체결·정정·취소를 추정하지 않는다.
+기존 holdings sync는 별도 저장 경로를 가지므로 zero-write probe로 실행하지 않는다.
+
+2026-09-05 공개 문서 확인: [공식 가이드](https://developers.tossinvest.com/llms.txt)가 안내하는
+[OpenAPI 명세](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json) version `1.2.14`,
+응답 SHA-256 `a7b32ba754401d13fa649ba91eebd212420eb1afab28e9c2c0d6ea8d43055fed`를 인증 없이 확인했다.
+`GET /api/v1/orders`와 `GET /api/v1/orders/{orderId}`는 문서상 주문 이력 조회 경로다.
+`CLOSED`는 limit/cursor 페이지 처리와 KST 주문 생성일 기준 from/to를 지원하지만 `OPEN`은
+limit/cursor를 무시한다. 응답의 `OrderExecution`은 누적 체결량·평균가·최종 체결 시각이며,
+확인한 `Order`/`OrderExecution` schema에는 개별 fill ID나 이전/다음 정정 주문 연결 필드가 없다.
+`GET /api/v1/trades`는 Market Data로 분류되어 개인 계좌 체결 이력으로 사용하지 않는다.
+OAuth 명세의 scopes는 빈 객체이므로 read-only token 권한을 확인했다고 주장하지 않는다.
+실사용 계정 접근 자격, 수동 주문 포함 범위와 보존 기간도 아직 검증하지 않았다.
+
+개별 체결·정정 lineage 증거 부족은 T15 정밀 분석 연결만 제한한다. API로 주문별 체결 결과를
+조회·검증하는 단계의 차단 사유가 아니다. 주문 ID를 fill ID로 복제하거나 누적량 차이로
+synthetic fill을 만들지 않고도 주문별 결과를 검증할 수 있다. 문서상 GET 후보와 실제 허용된
+요청은 분리하며 기본 실행의 live allowlist는 계속 비어 있다.
+
+추가 확인: [공식 AsyncAPI 명세](https://openapi.tossinvest.com/openapi-docs/latest/asyncapi.json)
+version `1.2.2`, SHA-256 `130251057fd9535a3e276099f9166b445f8c51f505f30540758e4b209231282e`의
+`personal:order`는 국내·미국 주식의 주문 스냅샷을 전달한다. `execution.filledAt`은 없고
+개별 체결 식별자·정정 연결 필드도 확인되지 않았다. 문서의 무손실 보장은 연결 세션 내부에
+한정되며 끊긴 구간은 재전송하지 않는다. REST 재조회로 주문 상태를 맞추더라도 개별 fill
+lineage가 복원되는 것은 아니다. 웹소켓 연결이나 수집 daemon을 해결책으로 추가하지 않는다.
+
+이전 파일 import 제안은 실사용 흐름과 맞지 않아 철회했다. 거래내역 파일이나 열 이름은
+필수 입력이 아니며 API가 기본 경로다. 추가 공개 문서 확인은 credential 사용, 인증·계좌 API
+요청 또는 웹소켓 연결을 포함하지 않았다.
+
+1. 토스 전용 승인 후 종료 주문 목록의 접근·응답 형식·페이지 완결성을 one-shot 검증한다. 조회 성공과 계정의 전체 수동 주문 포함 보장은 구분한다.
+2. 주문별 누적 체결 결과는 그대로 검증하고, 부분체결·취소·정정은 관측된 주문 상태로만 요약한다. 개별 fill이나 정정 연결은 생성하지 않는다.
+3. T15 공통 계약은 유지하되 probe 응답을 억지로 매핑하지 않는다. 향후 정밀 분석은 개별 fill lineage 증거가 확보된 뒤 연결한다. 과거 보존 기간이나 앱 수동 주문 포함 범위는 단일 제한 조회만으로 확정하지 않는다.
+
+### 토스 one-shot 실행 계약
+
+- 입력: process 환경의 `TOSS_INVEST_CLIENT_ID`, `TOSS_INVEST_CLIENT_SECRET`, `TOSS_INVEST_ACCOUNT`와 명시적 from/to 날짜. `ACCOUNT`는 계좌번호가 아닌 기존 `accountSeq`여야 한다. 파일 자동 로드·계좌 목록 탐색·계좌 자동 선택은 하지 않는다. 값은 채팅·명령 인자에 넣지 않는다.
+- 요청: 고정 호스트 `openapi.tossinvest.com`의 `POST /oauth2/token` 1회와 `GET /api/v1/orders`만 사용한다. `status=CLOSED`, `limit=20`, `from`/`to`는 KST 주문 생성일 기준 양 끝 포함, 최대 30일이다. 커서는 직전 응답에서만 이어받아 URL 인코딩한다.
+- 상한: 최대 5 requests(토큰 포함), 4 history pages, 총 1,048,576 bytes의 소비한 응답 본문, 시작 후 30초. 응답 본문을 상한보다 더 읽지 않으며 Unix main-thread alarm으로 DNS·TLS·read 대기를 포함한 시간을 제한한다. 이 바이트 한도는 HTTP 헤더나 OS 네트워크 버퍼의 wire-byte 제한이 아니다.
+- 범위 제외: 주문 상세, OPEN 조회, accounts/holdings 조회, 웹소켓, 시세 호출, 주문 생성·정정·취소, 재시도, 리디렉션, proxy, token cache, DB, scheduler, notification. 토큰 재발급도 재시도하지 않는다.
+- 저장: raw payload와 계좌·토큰·주문 ID·종목·수량·가격·손익은 출력/저장하지 않는다. 요청·페이지·응답 본문 byte·경과 시간, 고정 result code와 capability state만 stdout으로 출력한다. CLI는 core dump를 금지하고 사용 credential을 자식 프로세스용 환경에서 제거한다. 비밀값의 Python 메모리 완전 소거를 보장하는 것은 아니다.
+- 성공: 완전한 페이지 체인과 유효한 주문별 결과는 `COMPLETE_ORDER_AGGREGATE`다. 빈 결과는 `COMPLETE_NO_ORDERS`로 구분한다. 둘 다 개별 fill lineage·보존 기간·수동 주문 포함 범위·read-only OAuth scope의 검증 완료를 뜻하지 않는다.
+- 중단: 401/403/429/5xx, redirect, timeout, malformed/중복 JSON, 알 수 없는 주문 상태, 중복 주문, cursor loop, 상한 도달 시 종료한다. 4페이지 뒤 continuation이 남으면 `INCOMPLETE_PAGE_BUDGET`이지 성공이 아니다. 실패 시 private exception text를 출력하지 않는다.
+
+실행은 별도 승인 후에만 `scripts/run_portfolio_outcome_capability_t21.py --toss-probe-approved --from-date YYYY-MM-DD --to-date YYYY-MM-DD`로 가능하다. 승인 플래그는 사용자 승인의 대체물이 아니며 이전 KIS 승인을 적용해서는 안 된다. 아래 토스 실제 실행 1회는 별도 승인을 받아 수행했으며 승인 재사용은 허용하지 않는다.
+
+기본 CLI는 `UV_CACHE_DIR=.uv-cache uv run python scripts/run_portfolio_outcome_capability_t21.py`다.
+토스 대상, `NOT_EVALUATED`, probe 승인 범위와 별도 T15 제한을 stdout으로만 출력한다. credential을
+읽거나 fixture/artifact를 열지 않으며 허용된 live request 목록은 비어 있다. 종료 코드 0은
+readiness 출력 성공일 뿐 provider 검증 성공이 아니다. T18/T19/T20, 기존 KIS 시세 경로,
+T15 계약, 스케줄과 운영 writer는 이 변경 범위에 포함하지 않는다.
+
+수정 검증: T21/T15/Outcome targeted pytest 70개 통과, 변경 Python 파일 Ruff와 mypy 통과,
+기본 CLI dogfood 및 `git diff --check` 통과. 새 토스 probe 테스트는 합성 응답과 fake HTTPS
+connection으로만 실행했으며 개별 fill ID 없는 성공, 빈 결과, 페이지·byte 한도, timeout,
+HTTP 실패, 민감값 비출력, 승인 없을 때 요청 0건을 검증했다. 기본 실행은 존재하지 않는
+fixture 경로를 주어도 readiness만 출력하고 artifact를 만들지 않는다. 명시적 replay는 14개
+과거 scenario를 재생하며 출력과 artifact 모두 `HISTORICAL_KIS_RECORDED_ONLY_NOT_TOSS`로
+표시된다. 전체 `just quality`는 Ruff/format/mypy와 pytest 3,591 passed, 25 skipped로
+통과했다. Web 코드는 변경하지 않아 `just ci-web`과 Docker 재빌드는 실행하지 않았다.
+위 로컬 구현 검증 시점에는 공개 문서 검색/GET만 수행했고 실제 인증 교환, 계좌 조회,
+주문 호출, credential 사용과 민감 데이터 저장은 모두 0건이었다. 이후 승인된 실제 검증은
+다음 기록으로 구분한다.
+
+### 승인된 토스 one-shot 실행 결과
+
+기록 시각: `2026-09-05T04:38:03Z` (실행 완료 후 기록 시각이며 요청 시작 시각은 아니다).
+사용자는 process-memory credential/accountSeq로 `2026-08-07`부터 `2026-09-05`까지 KST
+종료 주문을 최대 5요청·4페이지·응답 본문 1 MiB·30초 안에서 1회 검증하도록 승인했다.
+설정 파일을 실행하지 않고 승인된 세 입력만 메모리로 전달해 기존 probe 함수를 호출했다.
+core dump를 금지했고 raw 응답·credential·accountSeq·종목·주문 ID·수량·가격·손익을
+로그나 파일로 남기지 않았다. 이 기록은 실행기가 출력한 고정 결과 코드와 집계 metadata만 보존한다.
+
+| 항목 | 실제 결과 |
+|---|---|
+| result_code | `COMPLETE_ORDER_AGGREGATE` |
+| provider_history_state | `ORDER_AGGREGATE_OBSERVED` |
+| request_count | 2 (토큰 POST 1회, CLOSED 주문 GET 1회) |
+| page_count | 1 (후속 cursor 없음) |
+| response_byte_count | 1,456 (토큰 응답 포함 소비한 본문) |
+| elapsed_ms | 460 (probe 함수의 측정값) |
+| partial_fill_state | `NOT_OBSERVED` |
+| correction_cancel_state | `NOT_OBSERVED` |
+| order_operations / 재시도 | 0 / 0 |
+
+한도 내 조회·페이지 완결·주문별 누적 체결 결과의 형식 검증은 실제로 통과했다. 전체 계좌
+이력을 감사한 것은 아니며 `individual_fill_lineage`, `manual_order_coverage`,
+`retention_window`, `oauth_read_only_scope`는 계속 `NOT_EVALUATED`다. 부분체결·정정·취소가
+이 조회에서 관측되지 않았다는 결과도 해당 기능의 미지원이나 계좌 전체의 부재를 뜻하지 않는다.
+추가 조회·재실행·기간 확대·정기 수집·Outcome 연결·production 활성화는 수행하지 않았다.
+기본 CLI는 실행 이력을 저장하거나 이 승인을 재사용하지 않고 여전히 승인 전 readiness를 출력한다.
+이번 실행 후 변경은 이 sanitized 기록뿐이며 `git diff --check`로 확인했다. 코드 변경이 없어
+전체 품질 검사를 재실행하지 않았고 실제 provider 검증을 반복하지 않았다.
 
 ## Exact promotion boundaries
 
@@ -122,14 +226,14 @@ T21: `IMPLEMENTED_AND_USABLE_WITH_RECORDED_REDACTED_FIXTURES`
   운영 판단 연결과 활성화는 별도 승인 대상이다.
 - T20 live rehearsal: 대상 DB identity, migration window, backup/restore owner, RTO/RPO acceptance와
   rollback authority를 특정한 별도 승인. 현재 실행기는 live target을 받을 수 없다.
-- T21 live one-shot probe: KIS app key/secret과 account routing을 process memory에서만 사용해
-  `POST /oauth2/tokenP` 1회와 국내·해외 체결내역 `GET`만 총 8 request, 4 page, 1 MiB, 30초 내에서
-  수행하는 승인. 주문 생성·정정·취소 endpoint는 영구 금지하며 raw response와 민감값은 저장하지 않는다.
+- T21 live one-shot probe: 위 계약으로 승인된 1회 실행은 완료됐다. 추가 실행은 새 승인이 필요하다.
+  KIS 승인은 이전하지 않는다. 주문 생성·정정·취소는 영구 금지하며 raw response와 민감값은 저장하지 않는다.
 - production promotion: writer activation, scheduler/notification/owner 변경, provider 연결,
   기존·live DB write, 배포 또는 실제 advice 연결은 각각 별도 승인.
 
 ## External side effects
 
-- 실제 주문, provider call, live/existing DB write, notification, schedule/heartbeat, owner 변경: 각각 0건.
+- 기존 local-only checkpoint의 provider call은 0건이었다. 이후 승인된 토스 one-shot의 provider call은 총 2건(토큰 POST 1회, 종료 주문 GET 1회)이다.
+- 실제 주문, live/existing DB write, notification, schedule/heartbeat, owner 변경: 각각 0건.
 - local disposable PostgreSQL write와 local Docker rebuild는 production side effect가 아니다.
 - 실제 holding intent/horizon 추론과 Phase 6 PASS 주장: 0건.
