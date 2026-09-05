@@ -27,6 +27,13 @@ const fixturePath = resolve(
   "../tests/fixtures/portfolio_mandate/portfolio-mandate-a2-unclassified-preview.synthetic.json",
 );
 const fixtureDocument = readFileSync(fixturePath, "utf8");
+const privateV1FixtureDocument = readFileSync(
+  resolve(
+    process.cwd(),
+    "../tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json",
+  ),
+  "utf8",
+);
 
 function fileWithText(document: string): File {
   const file = new File([document], "synthetic-unclassified.json", {
@@ -100,6 +107,8 @@ function renderBoard() {
 describe("UnclassifiedQueuePreview", () => {
   let previousActEnvironment: boolean | undefined;
   let fetchSpy: ReturnType<typeof vi.fn>;
+  let storageSetItemSpy: ReturnType<typeof vi.spyOn>;
+  let indexedDbOpenSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     previousActEnvironment = (
@@ -109,7 +118,10 @@ describe("UnclassifiedQueuePreview", () => {
       globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
     fetchSpy = vi.fn();
+    indexedDbOpenSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
+    vi.stubGlobal("indexedDB", { open: indexedDbOpenSpy });
+    storageSetItemSpy = vi.spyOn(Storage.prototype, "setItem");
   });
 
   afterEach(() => {
@@ -172,6 +184,46 @@ describe("UnclassifiedQueuePreview", () => {
       /(?:^|\s)(BUY|HOLD|SELL|AVOID|NO_ACTION)(?:\s|$)/u,
     );
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(storageSetItemSpy).not.toHaveBeenCalled();
+    expect(indexedDbOpenSpy).not.toHaveBeenCalled();
+
+    board.unmount();
+  });
+
+  it("renders an explicitly selected eight-holding private v1 overlay without activating advice", async () => {
+    const board = renderBoard();
+
+    await board.choose(privateV1FixtureDocument);
+
+    expect(
+      board.container.querySelector(
+        '[aria-labelledby="today-board-title"] strong',
+      )?.textContent,
+    ).toBe("0");
+    expect(
+      board.container.querySelectorAll(
+        '[aria-label="Private portfolio mandate preview rows"] article',
+      ),
+    ).toHaveLength(8);
+    expect(board.container.textContent).toContain("5 CORE · 3 SATELLITE");
+    expect(board.container.textContent).toContain(
+      "PRIVATE DRAFT · NO ADVICE · NOT ACTIVE",
+    );
+    expect(board.container.textContent).toContain(
+      "Synthetic durable-demand thesis for parser and display verification.",
+    );
+    expect(board.container.textContent).toContain("ALL · 2 conditions");
+    expect(board.container.textContent).toContain("WARNING");
+    expect(board.container.textContent).toContain("FROZEN_CONCENTRATION");
+    expect(board.container.textContent).toContain(
+      "ALFA.NAS → BRAV.NYS → CHAR.NAS",
+    );
+    expect(board.container.textContent).toContain(
+      "Synthetic quarterly filing reference",
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(storageSetItemSpy).not.toHaveBeenCalled();
+    expect(indexedDbOpenSpy).not.toHaveBeenCalled();
 
     board.unmount();
   });
@@ -214,6 +266,35 @@ describe("UnclassifiedQueuePreview", () => {
     expect(board.container.textContent).toContain("Local preview rejected");
     expect(board.container.textContent).not.toContain("SYNTH1.NAS");
     expect(fetchSpy).not.toHaveBeenCalled();
+
+    board.unmount();
+  });
+
+  it("atomically removes a prior private preview and never echoes rejected input", async () => {
+    const invalid = JSON.parse(privateV1FixtureDocument) as Record<
+      string,
+      unknown
+    >;
+    const invalidHoldings = invalid.holdings as Array<Record<string, unknown>>;
+    const rawPrivateSentinel = "PRIVATE-RAW-SENTINEL-MUST-NOT-RENDER";
+    invalidHoldings[0].account_identifier = rawPrivateSentinel;
+    const board = renderBoard();
+    await board.choose(privateV1FixtureDocument);
+    expect(board.container.textContent).toContain("ALFA.NAS");
+
+    await board.choose(JSON.stringify(invalid));
+
+    expect(board.container.textContent).toContain("Local preview rejected");
+    expect(board.container.textContent).not.toContain("ALFA.NAS");
+    expect(board.container.textContent).not.toContain(rawPrivateSentinel);
+    expect(
+      board.container.querySelector(
+        '[aria-label="Private portfolio mandate preview rows"]',
+      ),
+    ).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(storageSetItemSpy).not.toHaveBeenCalled();
+    expect(indexedDbOpenSpy).not.toHaveBeenCalled();
 
     board.unmount();
   });
@@ -292,6 +373,27 @@ describe("UnclassifiedQueuePreview", () => {
 
     expect(board.container.textContent).toContain("SYNTH1.NAS");
     expect(board.container.textContent).not.toContain("OLDER1.NAS");
+
+    board.unmount();
+  });
+
+  it("allows the same file to be selected again after the file control is clicked", async () => {
+    const board = renderBoard();
+    const file = fileWithText(privateV1FixtureDocument);
+
+    await board.chooseFile(file);
+    await act(async () => {
+      board.input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await board.chooseFile(file);
+
+    expect(file.text).toHaveBeenCalledTimes(2);
+    expect(
+      board.container.querySelectorAll(
+        '[aria-label="Private portfolio mandate preview rows"] article',
+      ),
+    ).toHaveLength(8);
 
     board.unmount();
   });

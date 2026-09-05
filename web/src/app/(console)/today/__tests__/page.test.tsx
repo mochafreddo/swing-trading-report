@@ -1,4 +1,5 @@
-import { Suspense } from "react";
+import { Suspense, type ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -64,6 +65,22 @@ describe("TodayPage", () => {
 
   it("returns a Suspense boundary immediately", () => {
     expect(TodayPage().type).toBe(Suspense);
+  });
+
+  it("keeps the memory-only portfolio preview on the Today route", async () => {
+    hasValidAdminSession.mockResolvedValue(false);
+    const page = TodayPage();
+    const content = page.props.children as ReactElement<{
+      searchParams: Promise<Record<string, never>>;
+    }>;
+    const renderContent = content.type as (
+      props: typeof content.props,
+    ) => Promise<ReactElement>;
+
+    const html = renderToStaticMarkup(await renderContent(content.props));
+
+    expect(html).toContain('id="unclassified-preview-file"');
+    expect(html).toContain("NO UPLOAD · NO WRITE · NO ADVICE");
   });
 
   it("accepts one bounded dogfood query and rejects ambiguous input", () => {

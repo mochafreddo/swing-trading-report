@@ -1,0 +1,302 @@
+{
+  "schema_version": "portfolio-long-term-replay.t19",
+  "gate_state": "APPROVED_REPLAY_ONLY_NO_PRODUCTION_ADVICE",
+  "parser_version": "portfolio-long-term-replay-parser.v1",
+  "generated_at": "2026-09-04T16:24:04Z",
+  "frozen_action_set": [
+    "REVIEW_REQUIRED",
+    "THESIS_UNCHANGED",
+    "BLOCK_STALE",
+    "BLOCK_CONFLICT",
+    "BLOCK_INSUFFICIENT",
+    "PREDICATE_CANDIDATE"
+  ],
+  "cases": [
+    {
+      "case_id": "netflix-growth-counterexample-2021q4",
+      "case_type": "COUNTEREXAMPLE",
+      "issuer": { "cik": "0001065280", "legal_name": "Netflix, Inc." },
+      "instrument": { "ticker": "NFLX", "exchange_mic": "XNAS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/1065280/000106528022000035/ex991_q421.htm",
+        "accession_number": "0001065280-22-000035",
+        "published_at": "2022-01-20T16:01:51Z",
+        "reporting_period": "2021Q4",
+        "supporting_span": "Full year revenue of $30 billion grew 19% year over year while operating income of $6.2 billion rose 35% year over year.",
+        "content_sha256": "sha256:8e7cef36571c9b5432fd52f828a1bda6dc4a5e712caae2a8a02619198c49aa76",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "VALID",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "NOT_FULFILLED",
+      "expected_action_set": ["THESIS_UNCHANGED"],
+      "reason": "Growth evidence contradicts the candidate deterioration predicate."
+    },
+    {
+      "case_id": "netflix-softness-candidate-2023q1",
+      "case_type": "INSUFFICIENT_EVIDENCE",
+      "issuer": { "cik": "0001065280", "legal_name": "Netflix, Inc." },
+      "instrument": { "ticker": "NFLX", "exchange_mic": "XNAS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/1065280/000106528023000119/ex991_q123.htm",
+        "accession_number": "0001065280-23-000119",
+        "published_at": "2023-04-18T00:00:00Z",
+        "reporting_period": "2023Q1",
+        "supporting_span": "Paid membership dipped by 0.4M, which we believe is due to pull forward from Q4 (when we had a big quarter with 1.8M paid net adds) and ongoing macroeconomic softness.",
+        "content_sha256": "sha256:e603efdcc7d99c4e51b861c89ae661de3be7e1b103e45cf7da65c04ab083eea6",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "INSUFFICIENT",
+      "authority": "AI_RESEARCH",
+      "predicate_result": "CANDIDATE",
+      "expected_action_set": ["BLOCK_INSUFFICIENT"],
+      "reason": "A single explanatory statement cannot establish a durable predicate."
+    },
+    {
+      "case_id": "netflix-membership-unchanged-2022",
+      "case_type": "UNCHANGED_THESIS",
+      "issuer": { "cik": "0001065280", "legal_name": "Netflix, Inc." },
+      "instrument": { "ticker": "NFLX", "exchange_mic": "XNAS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/1065280/000106528023000035/nflx-20221231.htm",
+        "accession_number": "0001065280-23-000035",
+        "published_at": "2023-01-26T00:00:00Z",
+        "reporting_period": "FY2022",
+        "supporting_span": "Paid memberships at end of period | 230,747 | 221,844 | 203,663 | 4 | %",
+        "content_sha256": "sha256:8405da04de0eda031d3bf55441f05534b93072d10d88582f58ab15cdb505ca1e",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "VALID",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "NOT_FULFILLED",
+      "expected_action_set": ["THESIS_UNCHANGED"],
+      "reason": "Year-end membership evidence does not fulfill the frozen decline predicate."
+    },
+    {
+      "case_id": "netflix-net-adds-conflict-2022",
+      "case_type": "CONFLICTING_EVIDENCE",
+      "issuer": { "cik": "0001065280", "legal_name": "Netflix, Inc." },
+      "instrument": { "ticker": "NFLX", "exchange_mic": "XNAS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/1065280/000106528023000035/nflx-20221231.htm",
+        "accession_number": "0001065280-23-000035",
+        "published_at": "2023-01-26T00:00:00Z",
+        "reporting_period": "FY2022",
+        "supporting_span": "Paid net membership additions | 8,903 | 18,181 | 36,573 | (51) | %",
+        "content_sha256": "sha256:a5126ef00968d41b652411d56a37cd238b0d5a5761ab30da9dcff483d0b6545d",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "CONFLICTING",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "FULFILLED",
+      "expected_action_set": ["BLOCK_CONFLICT"],
+      "reason": "Net-add deterioration conflicts with positive ending membership evidence."
+    },
+    {
+      "case_id": "intel-dividend-invalidation-2024q2",
+      "case_type": "ACTUAL_INVALIDATION",
+      "issuer": { "cik": "0000050863", "legal_name": "Intel Corporation" },
+      "instrument": { "ticker": "INTC", "exchange_mic": "XNAS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/50863/000005086324000122/q224_earningsrelease.htm",
+        "accession_number": "0000050863-24-000122",
+        "published_at": "2024-08-01T00:00:00Z",
+        "reporting_period": "2024Q2",
+        "supporting_span": "Suspending dividend starting in the fourth quarter of 2024.",
+        "content_sha256": "sha256:7314f746be593bf044a65ee63b82dd60a172143bdc8aa46e07cb12d33fe38f4d",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "VALID",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "FULFILLED",
+      "expected_action_set": ["REVIEW_REQUIRED"],
+      "reason": "A frozen capital-return predicate is fulfilled, requiring human review rather than an order."
+    },
+    {
+      "case_id": "intel-headcount-ai-candidate-2024q2",
+      "case_type": "INSUFFICIENT_EVIDENCE",
+      "issuer": { "cik": "0000050863", "legal_name": "Intel Corporation" },
+      "instrument": { "ticker": "INTC", "exchange_mic": "XNAS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/50863/000005086324000122/q224_earningsrelease.htm",
+        "accession_number": "0000050863-24-000122",
+        "published_at": "2024-08-01T00:00:00Z",
+        "reporting_period": "2024Q2",
+        "supporting_span": "Intel expects to reduce headcount by greater than 15% with the majority completed by the end of 2024.",
+        "content_sha256": "sha256:d4777b205d4e88a90a1abcdcebb4c02501b0d0921f3ffb9d4e1346ceb9ee7200",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "VALID",
+      "authority": "AI_RESEARCH",
+      "predicate_result": "CANDIDATE",
+      "expected_action_set": ["PREDICATE_CANDIDATE"],
+      "reason": "AI may flag the event for review but cannot declare fulfillment."
+    },
+    {
+      "case_id": "boeing-rate-cap-invalidation-2024",
+      "case_type": "ACTUAL_INVALIDATION",
+      "issuer": { "cik": "0000012927", "legal_name": "The Boeing Company" },
+      "instrument": { "ticker": "BA", "exchange_mic": "XNYS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/12927/000001292725000015/ba-20241231.htm",
+        "accession_number": "0000012927-25-000015",
+        "published_at": "2025-02-03T00:00:00Z",
+        "reporting_period": "FY2024",
+        "supporting_span": "The FAA communicated it will not approve production rate increases beyond 38 per month.",
+        "content_sha256": "sha256:4ee085e91ad760402915ca1fa9a03ba4b309aa621b00e3fcd83e01131fd261b7",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "VALID",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "FULFILLED",
+      "expected_action_set": ["REVIEW_REQUIRED"],
+      "reason": "The frozen production-cap predicate is fulfilled and stops at human review."
+    },
+    {
+      "case_id": "boeing-quality-stale-2024",
+      "case_type": "STALE_EVIDENCE",
+      "issuer": { "cik": "0000012927", "legal_name": "The Boeing Company" },
+      "instrument": { "ticker": "BA", "exchange_mic": "XNYS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/12927/000001292725000015/ba-20241231.htm",
+        "accession_number": "0000012927-25-000015",
+        "published_at": "2025-02-03T00:00:00Z",
+        "reporting_period": "FY2024",
+        "supporting_span": "The FAA communicated findings from its investigation in February 2024 and identified multiple instances where Boeing and Spirit failed to comply with manufacturing quality control requirements.",
+        "content_sha256": "sha256:286b478e1b9fceb31543f447d5e410e921a5c7d2bd6cf72b9fd8413c33f3df50",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "STALE",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "FULFILLED",
+      "expected_action_set": ["BLOCK_STALE"],
+      "reason": "A later cadence cannot reuse this historical investigation span as current evidence."
+    },
+    {
+      "case_id": "nike-revenue-decline-invalidation-2025q3",
+      "case_type": "ACTUAL_INVALIDATION",
+      "issuer": { "cik": "0000320187", "legal_name": "NIKE, Inc." },
+      "instrument": { "ticker": "NKE", "exchange_mic": "XNYS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/320187/000032018725000011/q3fy25exhibit991er.htm",
+        "accession_number": "0000320187-25-000011",
+        "published_at": "2025-03-20T00:00:00Z",
+        "reporting_period": "FY2025Q3",
+        "supporting_span": "NIKE Brand revenues were $10.9 billion, down 9 percent on a reported basis.",
+        "content_sha256": "sha256:6489f3e69998ef6c5bf9b51c3492855987f86bcebcc5a48d89143b9d2489a202",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "VALID",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "FULFILLED",
+      "expected_action_set": ["REVIEW_REQUIRED"],
+      "reason": "The frozen revenue-decline predicate is fulfilled without producing directional advice."
+    },
+    {
+      "case_id": "nike-annual-conflict-2025",
+      "case_type": "CONFLICTING_EVIDENCE",
+      "issuer": { "cik": "0000320187", "legal_name": "NIKE, Inc." },
+      "instrument": { "ticker": "NKE", "exchange_mic": "XNYS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/320187/000032018725000047/nke-20250531.htm",
+        "accession_number": "0000320187-25-000047",
+        "published_at": "2025-07-24T00:00:00Z",
+        "reporting_period": "FY2025",
+        "supporting_span": "NIKE, Inc. Revenues for fiscal 2025 were $46.3 billion compared to $51.4 billion for fiscal 2024.",
+        "content_sha256": "sha256:ee2452b1d5c10797fa27b9563ddf8359166ec990f96d122082eb0df30231c48d",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "CONFLICTING",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "FULFILLED",
+      "expected_action_set": ["BLOCK_CONFLICT"],
+      "reason": "The annual observation conflicts with another period and requires evidence reconciliation."
+    },
+    {
+      "case_id": "bestbuy-sales-stale-2024",
+      "case_type": "STALE_EVIDENCE",
+      "issuer": { "cik": "0000764478", "legal_name": "Best Buy Co., Inc." },
+      "instrument": { "ticker": "BBY", "exchange_mic": "XNYS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/764478/000076447824000010/bby-20240203x10k.htm",
+        "accession_number": "0000764478-24-000010",
+        "published_at": "2024-03-14T00:00:00Z",
+        "reporting_period": "FY2024",
+        "supporting_span": "Our comparable sales declined 6.8% in fiscal 2024.",
+        "content_sha256": "sha256:b399c25766bb47bb0ad63aec81d6b2c55dd73974eb853b901b54d46840672986",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "STALE",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "FULFILLED",
+      "expected_action_set": ["BLOCK_STALE"],
+      "reason": "The older annual filing cannot establish a current cadence result."
+    },
+    {
+      "case_id": "disney-dtc-unchanged-2024",
+      "case_type": "UNCHANGED_THESIS",
+      "issuer": { "cik": "0001744489", "legal_name": "The Walt Disney Company" },
+      "instrument": { "ticker": "DIS", "exchange_mic": "XNYS" },
+      "source": {
+        "source_url": "https://www.sec.gov/Archives/edgar/data/1744489/000174448924000276/dis-20240928.htm",
+        "accession_number": "0001744489-24-000276",
+        "published_at": "2024-11-14T00:00:00Z",
+        "reporting_period": "FY2024",
+        "supporting_span": "The majority of Direct-to-Consumer revenue is derived from subscription fees and advertising.",
+        "content_sha256": "sha256:2cf1e660689793b11496beaff06bdd9748d1ff8e2e53c57ea96129a2f77ca19c",
+        "parser_version": "portfolio-long-term-replay-parser.v1"
+      },
+      "evidence_state": "VALID",
+      "authority": "DETERMINISTIC_PARSER",
+      "predicate_result": "NOT_FULFILLED",
+      "expected_action_set": ["THESIS_UNCHANGED"],
+      "reason": "The revenue-source observation leaves the frozen thesis unchanged."
+    }
+  ],
+  "cadences": [
+    {
+      "cadence_id": "historical-week-1",
+      "scheduled_for": "2026-09-07T00:00:00Z",
+      "case_ids": [
+        "netflix-growth-counterexample-2021q4",
+        "netflix-softness-candidate-2023q1",
+        "netflix-membership-unchanged-2022"
+      ]
+    },
+    {
+      "cadence_id": "historical-week-2",
+      "scheduled_for": "2026-09-14T00:00:00Z",
+      "case_ids": [
+        "netflix-net-adds-conflict-2022",
+        "intel-dividend-invalidation-2024q2",
+        "intel-headcount-ai-candidate-2024q2"
+      ]
+    },
+    {
+      "cadence_id": "historical-week-3",
+      "scheduled_for": "2026-09-21T00:00:00Z",
+      "case_ids": [
+        "boeing-rate-cap-invalidation-2024",
+        "boeing-quality-stale-2024",
+        "nike-revenue-decline-invalidation-2025q3"
+      ]
+    },
+    {
+      "cadence_id": "historical-week-4",
+      "scheduled_for": "2026-09-28T00:00:00Z",
+      "case_ids": [
+        "nike-annual-conflict-2025",
+        "bestbuy-sales-stale-2024",
+        "disney-dtc-unchanged-2024"
+      ]
+    }
+  ],
+  "approval_signature": {
+    "kind": "USER_ATTESTATION_SHA256",
+    "approved_by": "USER",
+    "recorded_at": "2026-09-05T03:46:19Z",
+    "approval_text": "T19의 12개 historical case, source/span 및 expected_action_set을 의미적으로 검토했으며 candidate manifest에 approval signature를 기록하는 것을 승인합니다. 이 승인은 production advice 연결을 포함하지 않습니다.",
+    "production_advice_authorized": false,
+    "sha256": "sha256:1bcc3ad18310543c1b01e65324e4d71dacc0e2ed7d772973e78d19ad07862a20"
+  }
+}

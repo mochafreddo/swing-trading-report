@@ -146,11 +146,15 @@ class StrictJsonScanner {
   }
 }
 
+export function parseStrictJsonText(text: string): unknown {
+  return new StrictJsonScanner(text).parse();
+}
+
 export function parseDecisionBoardJsonBytes(
   bytes: Uint8Array,
 ): Record<string, unknown> {
   const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  const value = new StrictJsonScanner(text).parse();
+  const value = parseStrictJsonText(text);
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new SyntaxError("Decision Board report must be a JSON object");
   }

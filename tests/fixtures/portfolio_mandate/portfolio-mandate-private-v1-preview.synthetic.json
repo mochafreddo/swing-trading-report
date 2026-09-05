@@ -1,0 +1,201 @@
+{
+  "schema_version": "portfolio-mandate-private.v1",
+  "data_mode": "PRIVATE_ZERO_WRITE",
+  "decision_date": "2026-09-03",
+  "review_state": {
+    "review_due": false,
+    "next_quarterly_review": "NEXT_OFFICIAL_FILING",
+    "next_annual_review_by": "2027-09-03",
+    "active_event_triggers": [],
+    "automation_created": false
+  },
+  "portfolio_policy": {
+    "target_ranges": {
+      "CORE": { "minimum_pct": 60, "maximum_pct": 80 },
+      "SATELLITE": { "minimum_pct": 20, "maximum_pct": 40 }
+    },
+    "concentration_thresholds_pct": {
+      "individual_warning": 18,
+      "individual_breach": 25,
+      "sector_warning": 35,
+      "sector_breach": 45
+    },
+    "normalization": {
+      "target_months": 12,
+      "primary_method": "NEW_CAPITAL_AND_DIVIDEND_REALLOCATION",
+      "review_frequency": "QUARTERLY"
+    },
+    "capital_deployment": {
+      "automatic_reinvestment": false,
+      "no_candidate_action": "HOLD_CASH",
+      "valuation_method": "NORMALIZED_EARNINGS_AND_FCF_YIELD_WITH_GROWTH_BALANCE_SHEET_HISTORY_AND_PEERS"
+    },
+    "valuation_queue": ["ALFA.NAS", "BRAV.NYS", "CHAR.NAS"],
+    "evidence_priority": ["SEC_FILING", "COMPANY_OFFICIAL", "REGULATOR_OFFICIAL"],
+    "prohibited_operations": ["ORDER_CREATE", "ORDER_MODIFY", "ORDER_CANCEL", "MANDATE_ACTIVATION", "EXTERNAL_WRITE"]
+  },
+  "holdings": [
+    {
+      "ticker": "ALFA.NAS",
+      "role": "CORE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic durable-demand thesis for parser and display verification.",
+      "review_cadence": {
+        "quarterly": "NEXT_OFFICIAL_FILING",
+        "annual_review_by": "2027-09-03",
+        "event_driven": ["GUIDANCE_CHANGE", "CAPITAL_ALLOCATION_CHANGE"]
+      },
+      "invalidation_policy": {
+        "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED",
+        "hard_triggers": [
+          {
+            "id": "DEMAND_AND_MARGIN",
+            "description": "Synthetic demand and margin evidence deteriorate together.",
+            "conditions": [
+              { "metric": "organic_growth", "operator": "<", "threshold": 0, "unit": "PERCENT", "period": "QUARTER" },
+              { "metric": "operating_margin", "operator": "<", "threshold": 10, "unit": "PERCENT", "period": "QUARTER" }
+            ]
+          }
+        ],
+        "deterioration_rule": {
+          "minimum_matches": 2,
+          "consecutive_periods": 2,
+          "period": "QUARTER",
+          "signals": [
+            { "id": "SHARE_LOSS", "description": "Synthetic market share declines." },
+            { "id": "CASH_CONVERSION", "description": "Synthetic cash conversion weakens." },
+            { "id": "BALANCE_SHEET", "description": "Synthetic leverage rises." }
+          ]
+        },
+        "special_review_rules": ["Review any restatement before interpreting the predicate."]
+      },
+      "concentration": {
+        "estimated_weight_pct": 19,
+        "estimate_as_of": "2026-09-03",
+        "estimate_is_execution_grade": false,
+        "individual_status": "WARNING",
+        "sector": "Synthetic Core",
+        "sector_status": "SECTOR_WARNING",
+        "sector_estimated_weight_pct": 36
+      },
+      "addition_policy": {
+        "status": "FROZEN_CONCENTRATION",
+        "automatic_orders": false,
+        "automatic_reinvestment": false,
+        "reasons": ["Synthetic concentration threshold reached."]
+      },
+      "evidence": [
+        {
+          "published_on": "2026-08-01",
+          "source_type": "SEC_FILING",
+          "title": "Synthetic quarterly filing reference",
+          "url": "https://example.com/filings/alfa-quarterly",
+          "baseline": { "organic_growth_pct": 8, "operating_margin_pct": 18 }
+        }
+      ]
+    },
+    {
+      "ticker": "BRAV.NYS",
+      "role": "CORE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic recurring-revenue thesis.",
+      "review_cadence": { "quarterly": "NEXT_OFFICIAL_FILING", "annual_review_by": "2027-09-03", "event_driven": ["GUIDANCE_CHANGE"] },
+      "invalidation_policy": {
+        "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED",
+        "hard_triggers": [{ "id": "RETENTION", "description": "Synthetic retention falls below the approved floor.", "condition_match": "ANY", "conditions": [{ "metric": "retention", "operator": "<", "threshold": 90, "unit": "PERCENT", "period": "QUARTER" }] }],
+        "deterioration_rule": { "minimum_matches": 2, "consecutive_periods": 2, "period": "QUARTER", "signals": [{ "id": "GROWTH", "description": "Synthetic growth slows." }, { "id": "MARGIN", "description": "Synthetic margin weakens." }] },
+        "special_review_rules": []
+      },
+      "concentration": { "estimated_weight_pct": 16, "estimate_as_of": "2026-09-03", "estimate_is_execution_grade": false, "individual_status": "PASS" },
+      "addition_policy": { "status": "FROZEN_PENDING_VALUATION", "automatic_orders": false, "automatic_reinvestment": false, "reasons": ["Synthetic valuation review is pending."] },
+      "evidence": [{ "published_on": "2026-08-02", "source_type": "COMPANY_OFFICIAL", "title": "Synthetic investor update", "url": "https://example.com/ir/brav-update", "baseline": { "retention_pct": 96 } }]
+    },
+    {
+      "ticker": "CHAR.NAS",
+      "role": "CORE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic pricing-power thesis.",
+      "review_cadence": { "quarterly": "NEXT_OFFICIAL_FILING", "annual_review_by": "2027-09-03", "event_driven": ["REGULATORY_CHANGE"] },
+      "invalidation_policy": {
+        "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED",
+        "hard_triggers": [{ "id": "PRICE_COST", "description": "Synthetic price-cost spread turns negative." }],
+        "deterioration_rule": { "minimum_matches": 2, "consecutive_periods": 2, "period": "QUARTER", "signals": [{ "id": "VOLUME", "description": "Synthetic volume declines." }, { "id": "MIX", "description": "Synthetic mix deteriorates." }] },
+        "special_review_rules": []
+      },
+      "concentration": { "estimated_weight_pct": 15, "estimate_as_of": "2026-09-03", "estimate_is_execution_grade": false, "individual_status": "PASS" },
+      "addition_policy": { "status": "FROZEN_VALUATION_NOT_PASSED", "automatic_orders": false, "automatic_reinvestment": false, "reasons": ["Synthetic valuation test did not pass."] },
+      "evidence": [{ "published_on": "2026-08-03", "source_type": "REGULATOR_OFFICIAL", "title": "Synthetic regulator reference", "url": "https://example.com/regulator/char", "baseline": { "status": "unchanged" } }]
+    },
+    {
+      "ticker": "DELT.NYS",
+      "role": "CORE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic balance-sheet thesis.",
+      "review_cadence": { "quarterly": "NEXT_OFFICIAL_FILING", "annual_review_by": "2027-09-03", "event_driven": ["CREDIT_RATING_CHANGE"] },
+      "invalidation_policy": { "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED", "hard_triggers": [{ "id": "RATING", "description": "Synthetic rating falls below the approved level." }], "deterioration_rule": { "minimum_matches": 2, "consecutive_periods": 2, "period": "QUARTER", "signals": [{ "id": "LEVERAGE", "description": "Synthetic leverage rises." }, { "id": "COVERAGE", "description": "Synthetic coverage weakens." }] }, "special_review_rules": [] },
+      "concentration": { "estimated_weight_pct": 13, "estimate_as_of": "2026-09-03", "estimate_is_execution_grade": false, "individual_status": "PASS" },
+      "addition_policy": { "status": "FROZEN_PENDING_VALUATION", "automatic_orders": false, "automatic_reinvestment": false, "reasons": ["Synthetic valuation review is pending."] },
+      "evidence": [{ "published_on": "2026-08-04", "source_type": "SEC_FILING", "title": "Synthetic annual filing reference", "url": "https://example.com/filings/delt-annual", "baseline": { "net_leverage": 1.5 } }]
+    },
+    {
+      "ticker": "ECHO.NAS",
+      "role": "CORE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic installed-base thesis.",
+      "review_cadence": { "quarterly": "NEXT_OFFICIAL_FILING", "annual_review_by": "2027-09-03", "event_driven": ["PRODUCT_RECALL"] },
+      "invalidation_policy": { "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED", "hard_triggers": [{ "id": "INSTALLED_BASE", "description": "Synthetic installed base contracts." }], "deterioration_rule": { "minimum_matches": 2, "consecutive_periods": 2, "period": "QUARTER", "signals": [{ "id": "ATTACH", "description": "Synthetic attach rate declines." }, { "id": "CHURN", "description": "Synthetic churn rises." }] }, "special_review_rules": [] },
+      "concentration": { "estimated_weight_pct": 12, "estimate_as_of": "2026-09-03", "estimate_is_execution_grade": false, "individual_status": "PASS" },
+      "addition_policy": { "status": "FROZEN_PENDING_VALUATION", "automatic_orders": false, "automatic_reinvestment": false, "reasons": ["Synthetic valuation review is pending."] },
+      "evidence": [{ "published_on": "2026-08-05", "source_type": "COMPANY_OFFICIAL", "title": "Synthetic product update", "url": "https://example.com/ir/echo-product", "baseline": { "installed_base_growth": true } }]
+    },
+    {
+      "ticker": "FOXT.NYS",
+      "role": "SATELLITE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic optionality thesis.",
+      "review_cadence": { "quarterly": "NEXT_OFFICIAL_FILING", "annual_review_by": "2027-09-03", "event_driven": ["MILESTONE_CHANGE"] },
+      "invalidation_policy": { "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED", "hard_triggers": [{ "id": "MILESTONE", "description": "Synthetic milestone is missed." }], "deterioration_rule": { "minimum_matches": 2, "consecutive_periods": 2, "period": "QUARTER", "signals": [{ "id": "CASH", "description": "Synthetic cash runway shortens." }, { "id": "TIMELINE", "description": "Synthetic timeline slips." }] }, "special_review_rules": [] },
+      "concentration": { "estimated_weight_pct": 9, "estimate_as_of": "2026-09-03", "estimate_is_execution_grade": false, "individual_status": "PASS" },
+      "addition_policy": { "status": "FROZEN_PENDING_VALUATION", "automatic_orders": false, "automatic_reinvestment": false, "reasons": ["Synthetic milestone review is pending."] },
+      "evidence": [{ "published_on": "2026-08-06", "source_type": "SEC_FILING", "title": "Synthetic current report", "url": "https://example.com/filings/foxt-current", "baseline": { "milestone": "on_track" } }]
+    },
+    {
+      "ticker": "GOLF.NAS",
+      "role": "SATELLITE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic category-expansion thesis.",
+      "review_cadence": { "quarterly": "NEXT_OFFICIAL_FILING", "annual_review_by": "2027-09-03", "event_driven": ["CHANNEL_CHANGE"] },
+      "invalidation_policy": { "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED", "hard_triggers": [{ "id": "CATEGORY", "description": "Synthetic category expansion reverses." }], "deterioration_rule": { "minimum_matches": 2, "consecutive_periods": 2, "period": "QUARTER", "signals": [{ "id": "CHANNEL", "description": "Synthetic channel sell-through weakens." }, { "id": "INVENTORY", "description": "Synthetic inventory rises." }] }, "special_review_rules": [] },
+      "concentration": { "estimated_weight_pct": 8, "estimate_as_of": "2026-09-03", "estimate_is_execution_grade": false, "individual_status": "PASS" },
+      "addition_policy": { "status": "FROZEN_PENDING_VALUATION", "automatic_orders": false, "automatic_reinvestment": false, "reasons": ["Synthetic valuation review is pending."] },
+      "evidence": [{ "published_on": "2026-08-07", "source_type": "COMPANY_OFFICIAL", "title": "Synthetic channel update", "url": "https://example.com/ir/golf-channel", "baseline": { "sell_through": "stable" } }]
+    },
+    {
+      "ticker": "HOTL.NYS",
+      "role": "SATELLITE",
+      "classification_state": "ACTIVE",
+      "approval_state": "APPROVED",
+      "horizon": "LONG_TERM",
+      "thesis": "Synthetic turnaround thesis.",
+      "review_cadence": { "quarterly": "NEXT_OFFICIAL_FILING", "annual_review_by": "2027-09-03", "event_driven": ["MANAGEMENT_CHANGE"] },
+      "invalidation_policy": { "outcome": "THESIS_INVALIDATED_REVIEW_REQUIRED", "hard_triggers": [{ "id": "TURNAROUND", "description": "Synthetic turnaround milestones reverse." }], "deterioration_rule": { "minimum_matches": 2, "consecutive_periods": 2, "period": "QUARTER", "signals": [{ "id": "COST", "description": "Synthetic cost savings miss." }, { "id": "DEMAND", "description": "Synthetic demand weakens." }] }, "special_review_rules": [] },
+      "concentration": { "estimated_weight_pct": 8, "estimate_as_of": "2026-09-03", "estimate_is_execution_grade": false, "individual_status": "PASS" },
+      "addition_policy": { "status": "FROZEN_VALUATION_NOT_PASSED", "automatic_orders": false, "automatic_reinvestment": false, "reasons": ["Synthetic valuation test did not pass."] },
+      "evidence": [{ "published_on": "2026-08-08", "source_type": "REGULATOR_OFFICIAL", "title": "Synthetic official notice", "url": "https://example.com/regulator/hotl", "baseline": { "notice": "none" } }]
+    }
+  ]
+}

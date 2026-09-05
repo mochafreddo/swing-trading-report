@@ -533,6 +533,24 @@ production promotion은 포함하지 않는다. 세부 계약은
 T13–T16의 build, local journey, 발견 결함, regression과 남은 `NOT_EVALUATED` 항목은
 [Portfolio Mandate T17 dogfood evidence](portfolio-dogfood-t17.md)에 package별로 기록한다.
 
+### Portfolio Mandate T18–T21 local packages
+
+T18은 기존 `/today` client component 안에서만 private v1 파일을 읽는다. Strict JSON parser와
+Zod validator를 통과한 값만 React state에 두며 network, Web Storage, IndexedDB 또는 server
+route를 사용하지 않는다. Clear, refresh, navigation은 private state를 폐기한다.
+
+T19는 public primary-source candidate manifest를 pure Python validator와 fake-clock replay로
+처리한다. 승인 시 사용자 승인 기록과 전체 manifest를 SHA-256으로 묶고 replay 전마다 검증한다.
+해시는 변경 감지 용도이며 사용자 신원 인증이나 production 권한을 부여하지 않는다.
+T20은 DSN을 입력받지 않고 `/private/tmp` 아래 새 PostgreSQL 17.11 cluster와 임시 DB만
+생성하여 기존 A1 migration/test suite, backup, restore와 checksum 검사를 한 명령으로 수행한다.
+T21은 recorded/redacted fixture만 처리하는 pure capability runner이며 provider transport나 credential
+interface를 포함하지 않는다. 세 package 모두 runtime writer, report route, scheduler, notification,
+provider client와 order path에 연결되지 않는다.
+
+기대 결과, 실제 결과, 재현, 발견 결함, regression, exact approval과 외부 side-effect 수는
+[Portfolio Mandate T18–T21 local evidence](portfolio-dogfood-t18-t21.md)에 기록한다.
+
 - 제품 방향/backlog: `docs/PRD.md`
 - 현재 계약(contract): `docs/spec-v1.1.md`
 - 백로그/전달 이력: `docs/spec-v1.3.md`

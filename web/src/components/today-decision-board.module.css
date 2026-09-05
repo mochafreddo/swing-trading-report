@@ -448,6 +448,13 @@
   margin-top: var(--space-5);
 }
 
+.privateMandateGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
 .longTermGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -630,6 +637,65 @@
   background: color-mix(in srgb, var(--warn) 6%, var(--panel));
 }
 
+.privateMandateCard {
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--warn) 42%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 4%, var(--panel));
+}
+
+.privateMandateCard h3,
+.privateMandateCard h4 {
+  color: var(--ink);
+  font-family: var(--font-display);
+}
+
+.privateMandateCard h3 {
+  margin: var(--space-4) 0 0;
+}
+
+.privateMandateCard h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 0.9rem;
+}
+
+.privateMandateCard p,
+.privateMandateCard ul {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+
+.privateMandateCard ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.privateMandateCard li,
+.privateMandateCard a {
+  overflow-wrap: anywhere;
+}
+
+.privateMandateCard small {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.privateMandateState {
+  margin: 0;
+  color: var(--warn);
+  font-family: var(--font-mono);
+}
+
+.privateEvidenceList a {
+  color: var(--accent-soft);
+}
+
 .unclassifiedCard h3,
 .unclassifiedCard h4 {
   color: var(--ink);
@@ -680,6 +746,7 @@
   .holdGrid,
   .historicalGrid,
   .unclassifiedGrid,
+  .privateMandateGrid,
   .longTermGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -707,6 +774,7 @@
   .holdGrid,
   .historicalGrid,
   .unclassifiedGrid,
+  .privateMandateGrid,
   .longTermGrid {
     grid-template-columns: 1fr;
   }

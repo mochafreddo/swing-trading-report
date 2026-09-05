@@ -25,6 +25,8 @@ const holdingKey =
   ".json";
 const unclassifiedFixturePath =
   "../tests/fixtures/portfolio_mandate/portfolio-mandate-a2-unclassified-preview.synthetic.json";
+const privateMandateFixturePath =
+  "../tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json";
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const layout = await page.evaluate(() => ({
@@ -233,7 +235,7 @@ test("fixture-only /today Unclassified Queue journey", async ({
   await input.setInputFiles(unclassifiedFixturePath);
 
   await expect(queue.getByRole("status")).toContainText(
-    "Local preview ready: 5 unclassified rows",
+    "Local preview ready: 5 validated rows",
   );
   await expect(
     queue.locator('[aria-label="Unclassified local preview rows"] article'),
@@ -255,7 +257,7 @@ test("fixture-only /today Unclassified Queue journey", async ({
     buffer: Buffer.from('{"schema_version":'),
   });
   await expect(queue.getByRole("alert")).toContainText(
-    "not valid unclassified queue JSON",
+    "not valid local preview JSON",
   );
   await expect(
     queue.locator('[aria-label="Unclassified local preview rows"] article'),
@@ -274,6 +276,84 @@ test("fixture-only /today Unclassified Queue journey", async ({
     queue.locator('[aria-label="Unclassified local preview rows"] article'),
   ).toHaveCount(0);
   await expect(input).toHaveValue("");
+  expect(unexpectedRequests).toEqual([]);
+});
+
+test("fixture-only /today private mandate memory-only journey", async ({
+  context,
+  page,
+}) => {
+  const unexpectedRequests = await configureFixtureBoundary(context, page);
+
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 768, height: 1024 },
+    { width: 1280, height: 720 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/today");
+    const boardSummary = page.getByRole("region", {
+      name: "Today's Investment Actions",
+    });
+    const queue = page.getByRole("region", { name: "Unclassified Queue" });
+    const input = queue.locator("#unclassified-preview-file");
+
+    await input.focus();
+    await expect(input).toBeFocused();
+    await input.setInputFiles(privateMandateFixturePath);
+    await expect(queue.getByRole("status")).toContainText(
+      "Local preview ready: 8 validated rows",
+    );
+    await expect(
+      queue.locator(
+        '[aria-label="Private portfolio mandate preview rows"] article',
+      ),
+    ).toHaveCount(8);
+    await expect(
+      queue.getByText("PRIVATE DRAFT · NO ADVICE · NOT ACTIVE"),
+    ).toHaveCount(8);
+    await expect(queue).toContainText("5 CORE · 3 SATELLITE");
+    await expect(boardSummary.locator("strong")).toHaveText("0");
+    await expect(
+      queue.locator('[aria-label="Private portfolio mandate preview rows"] a'),
+    ).toHaveCount(8);
+    await expectNoHorizontalOverflow(page);
+    await expect(
+      queue.getByRole("button", {
+        name: /approve|order|notify|buy|hold|sell|avoid/iu,
+      }),
+    ).toHaveCount(0);
+
+    await input.setInputFiles(privateMandateFixturePath);
+    await expect(
+      queue.locator(
+        '[aria-label="Private portfolio mandate preview rows"] article',
+      ),
+    ).toHaveCount(8);
+    await queue.getByRole("button", { name: "Clear local preview" }).click();
+    await expect(
+      queue.locator(
+        '[aria-label="Private portfolio mandate preview rows"] article',
+      ),
+    ).toHaveCount(0);
+    await expect(boardSummary.locator("strong")).toHaveText("0");
+
+    await input.setInputFiles(privateMandateFixturePath);
+    await page.reload();
+    await expect(
+      page.locator(
+        '[aria-label="Private portfolio mandate preview rows"] article',
+      ),
+    ).toHaveCount(0);
+    await page.goto("/reports");
+    await page.goto("/today");
+    await expect(
+      page.locator(
+        '[aria-label="Private portfolio mandate preview rows"] article',
+      ),
+    ).toHaveCount(0);
+  }
+
   expect(unexpectedRequests).toEqual([]);
 });
 

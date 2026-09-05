@@ -658,6 +658,21 @@ mandate의 review cadence가 due일 때 current primary evidence를 평가한다
 provider, DB, order, alert와 연결되지 않으므로 production LONG_TERM action authority가
 아니다. 실제 5종목 mandate 승인과 방향성 조언 활성화는 별도 promotion gate로 남는다.
 
+### 7.5 LONG_TERM T19 historical replay candidate
+
+T19는 public SEC 원문 12건과 fake clock weekly cadence 4개를 고정한 provider-free replay다.
+Source identity는 CIK/accession URL, publication timestamp, reporting period, supporting span hash와
+parser version으로 묶는다. Day precision filing date는 UTC 자정으로 정규화하며 SEC accepted
+timestamp라고 간주하지 않는다.
+
+결과 action set은 `REVIEW_REQUIRED`, `THESIS_UNCHANGED`, `BLOCK_STALE`, `BLOCK_CONFLICT`,
+`BLOCK_INSUFFICIENT`, `PREDICATE_CANDIDATE`로 제한한다. Stale/conflicting/insufficient evidence가
+우선 차단되며 deterministic predicate fulfillment도 자동 SELL이 아닌 사람 review만 요구한다.
+AI research는 candidate만 만들고 방향성 action 권한을 갖지 않는다. 미승인 manifest는 null 서명의
+`CANDIDATE_NOT_APPROVED_NO_PRODUCTION_ADVICE` 상태다. 2026-09-05 사용자 semantic review 승인과
+전체 manifest에 결합된 SHA-256 승인 기록을 반영한 현재 상태는
+`APPROVED_REPLAY_ONLY_NO_PRODUCTION_ADVICE`다. 이 승인은 운영 판단 연결이나 활성화를 허용하지 않는다.
+
 ## 8. 운영/재현성 권장 사항
 
 - 같은 날짜 리포트라도 “실행 시각(장중/장후)”에 따라 평가 캔들이 달라질 수 있으므로,
