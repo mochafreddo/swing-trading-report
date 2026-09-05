@@ -1,5 +1,44 @@
 # Changelog
 
+## [1.40.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.39.0...v1.40.0) (2026-09-05)
+
+
+### Features
+
+* **decision-board:** shadow 평가 대시보드를 추가한다 ([ec16157](https://github.com/mochafreddo/swing-trading-report/commit/ec161572a7a8e869dc9b87cae95db671408db178))
+* **mandate:** LONG_TERM 합성 정책을 Today에 연결한다 ([800bccd](https://github.com/mochafreddo/swing-trading-report/commit/800bccde3f1a9bf1019e10f8324b69b0f7be9c28))
+* **mandate:** Outcome 합성 계약을 추가한다 ([e08f6e5](https://github.com/mochafreddo/swing-trading-report/commit/e08f6e5ae2829c2c65ec90df5b829583c0b657c4))
+* **mandate:** Portfolio Mandate A1 계약을 추가한다 ([87442e9](https://github.com/mochafreddo/swing-trading-report/commit/87442e9d40715011d49b3581c771b20c22e43626))
+* **mandate:** 일회용 영속성 리허설을 추가한다 ([aba5637](https://github.com/mochafreddo/swing-trading-report/commit/aba5637c180ee196ccc57252262e44aaa7d98f12))
+* **outcome:** provider-free history adapter를 추가한다 ([54fc984](https://github.com/mochafreddo/swing-trading-report/commit/54fc9844dcd66e1b1aa37fbaa64e6793c9e7018b))
+* **portfolio:** T18–T21 로컬 검증 패키지와 T19 승인 기록 추가 ([46f4b0b](https://github.com/mochafreddo/swing-trading-report/commit/46f4b0b83c0082b0ee7afded5b4d30e3c728a5df))
+* **portfolio:** 토스 주문 결과 probe와 실제 검증 기록 추가 ([f9a7473](https://github.com/mochafreddo/swing-trading-report/commit/f9a7473a5b7d4fa3f3fc614d13e24a14a81f498f))
+* **web:** AI 브리프 리포트 가독성을 개선한다 ([de8b0aa](https://github.com/mochafreddo/swing-trading-report/commit/de8b0aa3355c3d091d05e93843690563633b6cb5))
+* **web:** Mandate Evidence Outcome dogfood를 추가한다 ([a010c9f](https://github.com/mochafreddo/swing-trading-report/commit/a010c9f86fbf4759743a1d5efaa0f400f4f8c2c7))
+* **web:** 미분류 보유목록 미리보기를 추가한다 ([729d39d](https://github.com/mochafreddo/swing-trading-report/commit/729d39d88a8b02537a0492ff88bda7e0c35e2a46))
+* **web:** 오늘의 의사결정 보드를 추가한다 ([01353a8](https://github.com/mochafreddo/swing-trading-report/commit/01353a87f9b670b6ecb8c1d638819685c9e1167a))
+
+
+### Bug Fixes
+
+* **db:** BrokerSnapshot 삭제 권한을 회수한다 ([96a0c5e](https://github.com/mochafreddo/swing-trading-report/commit/96a0c5e166954458c5c959cc92b7d79e202bb9dc))
+* **decision-board:** journal terminal 출력을 격리한다 ([bb68f6a](https://github.com/mochafreddo/swing-trading-report/commit/bb68f6a01f2daa5230e845c9c261a653b030879f))
+* **decision-board:** journal terminal 출력을 격리한다 ([826812d](https://github.com/mochafreddo/swing-trading-report/commit/826812d7ed566bad1b520f667bae399fa07a37b0))
+* **decision-board:** snapshot read 일시 오류를 재시도한다 ([3c33ec4](https://github.com/mochafreddo/swing-trading-report/commit/3c33ec43dd3289b4e71e613a45530d4607e7d17b))
+* **docs:** Portfolio 문서 상태 메타를 정규화한다 ([3527ce4](https://github.com/mochafreddo/swing-trading-report/commit/3527ce4a28a333e37ac196e68fbea1b18f4e5815))
+* **mandate:** local-only 리뷰 경계를 닫는다 ([01d0830](https://github.com/mochafreddo/swing-trading-report/commit/01d0830fe944a7f6c831fd64f2e6904e08073811))
+* **web:** Today 모바일 수평 오버플로를 막는다 ([04b33ad](https://github.com/mochafreddo/swing-trading-report/commit/04b33ada30a688b9e6e88e3c7f61520e10d2c198))
+
+
+### Documentation
+
+* **decision-board:** shadow 평가 운영 경계를 갱신한다 ([fa8c034](https://github.com/mochafreddo/swing-trading-report/commit/fa8c03448f1fb3bac2303ba421c4d20f72106fbd))
+* **decision-board:** snapshot 장애 진단을 보강한다 ([71f3443](https://github.com/mochafreddo/swing-trading-report/commit/71f34439eea9fddccdb5a021828b57f8bc6881d0))
+* **mandate:** T17 dogfood 증거를 기록한다 ([ac31a45](https://github.com/mochafreddo/swing-trading-report/commit/ac31a45887feea3cf8f747390b9fbc1aa11e89ce))
+* **mandate:** 리뷰 보정 증거를 기록한다 ([727488e](https://github.com/mochafreddo/swing-trading-report/commit/727488e2285641998d44b1684cb60416fe2ed71b))
+* Markdown 문서를 soft wrap으로 정리 ([35b761a](https://github.com/mochafreddo/swing-trading-report/commit/35b761a8fcc75c5b27f2167846f7464aaf411459))
+* **web:** Today 보드 사용 경계를 문서화한다 ([ff8e1a9](https://github.com/mochafreddo/swing-trading-report/commit/ff8e1a99fca737c8c97ccf712fda441274e49685))
+
 ## [1.39.0](https://github.com/mochafreddo/swing-trading-report/compare/v1.38.0...v1.39.0) (2026-08-20)
 
 
