@@ -2,7 +2,7 @@
   "name": "sab-web",
   "version": "1.39.0",
   "private": true,
-  "packageManager": "pnpm@11.1.2",
+  "packageManager": "pnpm@11.23.0",
   "scripts": {
     "dev": "node scripts/validate-env.mjs && node scripts/run-next.mjs dev",
     "build": "node scripts/validate-env.mjs && node scripts/run-next.mjs build",
@@ -19,22 +19,22 @@
     "test:e2e:decision-board": "playwright test --config playwright.decision-board.config.ts"
   },
   "dependencies": {
-    "next": "16.2.11",
+    "next": "16.3.2",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "1.61.1",
+    "@playwright/test": "1.62.1",
     "@types/node": "25.9.4",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitest/coverage-v8": "4.1.9",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.11",
+    "eslint-config-next": "16.3.2",
     "jsdom": "29.1.1",
-    "knip": "6.23.0",
+    "knip": "6.32.2",
     "prettier": "3.9.4",
     "typescript": "6.0.3",
     "vitest": "4.1.9"
