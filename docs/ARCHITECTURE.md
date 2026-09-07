@@ -506,6 +506,15 @@ adapter, report route, notification owner, automation 또는 deploy 경로에도
 않았다. 세부 계약은 [Portfolio Mandate A1 contract](portfolio-mandate-a1-contract.md)를
 따른다.
 
+`review_projection.py`는 기존 A1 validator를 재사용하는 local-only read projection이다.
+exact mandate version, active allocation/slice, clock 이전 evidence seal과 authority correction을
+연결하고 rebase·미승인·effective window·evidence 부족을 표시한다. A1 watermark에 freshness
+timestamp가 없어 실제 advice는 항상 false이며 action은 null이다. CLI가 고정 합성 입력에서
+생성한 strict Web fixture를 Today의 독립 A1 상세 검토에 표시한다. 선택한 T14 scenario와
+별도인 snapshot이며 private 원문·수량·actor는 반환하지 않는다. 실제 atomic read RPC,
+private composite policy 변환, 전체 DecisionRun/Outcome/outbox 연결은 아직 구현 과제다.
+구현 및 승인 의존성은 [계획 대조 기록](portfolio-goal-reconciliation-20260907.md)에 둔다.
+
 ### Portfolio Outcome T15 provider-free adapter
 
 T15 `outcome_history` adapter는 `RECORDED` 또는 `REDACTED_IMPORT` page envelope를 strict
@@ -552,8 +561,27 @@ holdings adapter를 execution history로 대체하지 않는다. 별도 `toss_or
 정책이며 명시적 토스 승인 후에만 process-memory credential과 고정 호스트의 토큰 POST 1회,
 CLOSED 주문 GET 최대 4회를 사용한다. 1 MiB 응답 본문·30초 제한, 재시도·리디렉션 금지와
 민감값을 배제한 요약을 적용하며 개별 fill을 생성하지 않는다. CLI 기본 실행과 테스트에서는
-실제 provider를 호출하지 않는다. 세 package 모두 runtime writer, report route, scheduler,
+실제 provider를 호출하지 않는다. 수량과 non-null 주문 금액·체결 금액은 길이가 제한된 ASCII
+decimal string으로 검증하며, 잘못된 `orderAmount`로 수량 검사를 우회할 수 없다.
+세 package 모두 runtime writer, report route, scheduler,
 notification 및 주문 생성·정정·취소 path에 연결되지 않는다.
+
+`/today`의 `OrderHistoryPreview`는 별도의 완전 합성 fixture만 사용하는 client component다.
+사용자 submit 시 pure `adaptTossOrderHistory()`가 strict JSON, decimal string, 날짜 범위,
+order identity와 cursor chain을 검증하고 최소 표시 필드만 React state로 반환한다. KST 주문
+생성일 기준 최대 30일을 필터링하며, 페이지 미완결·중복·응답 오류는 모든 row를 폐기한다.
+기간·시나리오 변경, Clear와 remount도 이전 결과를 제거한다. 이 화면은 실제 probe payload를
+받거나 provider route를 호출하지 않으며 credential, 파일 입력, persistence와 advice 연결이 없다.
+
+별도 승인된 실제 화면 검증은 `scripts/run_toss_order_view_once.py`와 정적
+`scripts/toss_order_view.html`을 사용한다. 기본 CLI는 합성 모드만 허용하고, 실제 모드는 승인된
+in-memory caller만 연결한다. 임시 서버는 임의의 loopback 포트에 바인딩하고 새 비공개 브라우저의
+일회용 HttpOnly/SameSite session, exact Host/Origin과 고정 요청 형식을 검증한다. Credential은
+브라우저로 보내지 않으며 probe의 최소 표시 projection만 완결된 성공 응답에서 전달한다.
+단일 request owner가 호출 전 latch를 소비하므로 중복 클릭·실패·새로고침은 재실행하지 못한다.
+승인된 token POST와 CLOSED 주문 GET만 기존 byte/page/time budget 안에서 실행하고 서버를 닫는다.
+응답은 no-store이며 화면 이동·Clear·15분 만료는 브라우저 row를 제거한다. 외부 resource·telemetry·
+raw error 출력은 없고, 운영 Next route·Docker·writer·scheduler·advice에는 연결하지 않는다.
 
 기대 결과, 실제 결과, 재현, 발견 결함, regression, exact approval과 외부 side-effect 수는
 [Portfolio Mandate T18–T21 local evidence](portfolio-dogfood-t18-t21.md)에 기록한다.

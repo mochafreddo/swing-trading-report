@@ -218,6 +218,161 @@ core dump를 금지했고 raw 응답·credential·accountSeq·종목·주문 ID�
 이번 실행 후 변경은 이 sanitized 기록뿐이며 `git diff --check`로 확인했다. 코드 변경이 없어
 전체 품질 검사를 재실행하지 않았고 실제 provider 검증을 반복하지 않았다.
 
+### 주문별 체결 결과 합성 미리보기
+
+상태: `IMPLEMENTED_AND_USABLE` (local synthetic journey). 실제 API 화면 연결과 T15 개별
+fill 분석은 이 결과에 포함되지 않는다. 앞선 one-shot 승인과 실제 관측 기록은 재사용하거나 변경하지 않는다.
+
+- `web/src/lib/toss/order-history.ts`는 전송·저장 없는 memory adapter다. Strict JSON,
+  최대 4페이지·20주문/페이지·입력 1 MiB, cursor chain과 중복 주문 검증 후 표시용 필드만 반환한다.
+  이 입력 제한은 합성 envelope 전체 기준이며 실제 probe의 응답 본문 budget과 별도다.
+- `/today`에서 명시적 합성 조회, KST 주문 생성일 필터(최대 30일), 정상·빈 결과·페이지 미완결·응답 오류를
+  재현한다. 기간·시나리오 변경, Clear·refresh·remount는 이전 row를 제거한다. Decimal string을 그대로
+  표시하고 개별 fill이나 정정 연결을 추정하지 않는다.
+- 합성 fixture는 3개 주문·2페이지이며 실제 계좌 값을 사용하지 않는다. Python의 기존 `_aggregate`
+  validator로 같은 fixture를 교차 검증한다. 원시 주문 ID와 추가 account field는 표시 모델에 남지 않는다.
+- 입력 label, fieldset, 오류 focus와 상태 알림, 48px controls를 적용했다. 좁은 화면의 표만 가로로
+  스크롤되며 전체 페이지에는 가로 넘침이 없다. 실제 API route·파일 import·storage·advice 연결은 없다.
+
+검증(2026-09-05): Python 대상 테스트 29개, Web 전체 Vitest 919개 및 coverage gate,
+lint·format·typecheck, Next build와 fixture-only Playwright 전체 5개 journey를 통과했다.
+새 journey는 Chromium의 375·768·1280px에서 페이지 identity, 표시 내용, 키보드 submit,
+날짜 변경, 오류 focus, empty/incomplete/error, refresh를 확인했다. 새 화면 journey의 console error,
+page error와 금지된 요청은 0건이었다. 375·1280px screenshot은 육안으로 확인했다.
+
+발견한 회귀: 기존 Unclassified Queue 테스트가 board 전체 버튼을 수집해 새 합성 조회 버튼을
+잘못 실패 처리했다. 해당 section으로 selector를 좁힌 뒤 전체 919개 테스트로 확인했다.
+조회 전 상태 문구도 실제 probe의 관측 상태를 덮어쓰는 듯한 `NOT_EVALUATED` 대신 이 화면의
+실제 API 미연결 상태를 명시하도록 바꿨다.
+
+이번 추가 변경은 Web와 합성 fixture 교차 테스트뿐이므로 Python 전체 `just quality`는 직전
+push gate 결과를 유지하고 대상 pytest·Ruff로 검증했다. `just ci-web` 일괄 레시피 대신 설치를
+생략한 lint·format·typecheck·coverage·build를 실행했다. Build와 Playwright는 root `.env`를
+읽는 wrapper를 우회하고 고정 CI/loopback placeholder만 사용했다. Docker rebuild와 실제 계좌
+화면 검증은 하지 않았다. 새 provider 호출, credential 사용, 실제 주문, live DB write와 배포는 0건이다.
+
+### 주문 금액 검증 경계 회귀 수정
+
+후속 검토에서 Python probe가 `orderAmount`의 타입·숫자 형식을 검사하지 않은 채 non-null만으로
+금액 주문으로 간주하는 결함을 재현했다. 합성 `orderAmount=true`, 주문량보다 큰 누적 체결량도
+`COMPLETE_ORDER_AGGREGATE`로 처리됐다. 또한 Python의 `\d`가 유니코드 숫자를 허용해 Web의
+ASCII decimal string 검증과 달랐다. 실제 계좌에서 이 입력이 관측됐다는 뜻은 아니다.
+
+기존 `_number()`를 ASCII 숫자로 제한하고 non-null `orderAmount`도 같은 함수로 검증한다.
+새 공통 합성 fixture 14개를 Python과 Web이 모두 읽으며 boolean/object/number/음수/지수 표기,
+유니코드 숫자와 정상 decimal string을 검사한다. 수정 전 Python 11개 실패를 확인했고, 수정 후
+Python 대상 44개와 Web adapter 22개가 통과했다. Web runtime 코드는 변경하지 않았다.
+Default CLI의 `allowed_live_requests=[]`, `provider_calls=0`, `credential_usage_authorized=false`도
+재확인했다. 이전 실제 one-shot 기록은 원시 응답을 보존하지 않아 이 변경으로 재검증할 수 없으며,
+과거 결과를 재분류하거나 실제 조회를 반복하지 않았다.
+
+후속 검증: `just quality` 통과(Ruff·format·mypy 및 pytest 3,607 통과, 25 skip).
+Skip은 opt-in disposable PostgreSQL integration이며 이번 숫자 검증 변경에는 실행하지 않았다.
+외부 calendar dependency의 NumPy timedelta deprecation warning은 남아 있다. Web 전체 933개와
+coverage gate·lint·format·typecheck도 통과했다. 이번 변경에는 UI/runtime Web 수정이 없어
+build·브라우저 journey·Docker rebuild를 반복하지 않았다. 실제 provider 호출·credential 사용·
+주문·live DB write·배포·추가 commit/push는 0건이다.
+
+### 실제 화면 검증의 별도 승인 범위
+
+남은 실제 사용 단계는 파일 import가 아니라 토스 API의 종료 주문 결과를 로컬 화면에 전달하는
+읽기 전용 연결이다. 기존 one-shot은 sanitized metadata만 반환했으므로 실제 주문의 종목·방향·
+상태·시각·누적 체결량·평균 체결가를 브라우저로 전달하는 데까지 승인을 확대하지 않는다.
+개별 fill ID 미확인은 주문별 결과 표시의 선행 조건이 아니다.
+
+다음 승인 단위는 기본 비활성인 로컬 연결 구현과 아래 조건의 수동 조회 1회다. Credential과
+accountSeq는 서버 process memory에만 두고 브라우저에 보내지 않는다. 표시 필드만 인증된 로컬
+브라우저 메모리로 전달하며 캐시·파일·DB·로그·스크린샷에 저장하지 않는다. 기존 readiness와
+합성 UI는 실제 응답을 수신하거나 재조회할 권한을 스스로 얻지 않는다.
+
+승인 요청 문구: “`2026-08-07~2026-09-05(KST)` 토스 종료 주문을 인증된 로컬 화면에 1회
+표시하는 연결 구현·검증을 승인합니다. Credential/accountSeq는 서버 process memory에서만,
+표시 필드는 브라우저 메모리에서만 사용합니다. 토큰 POST 1회와 종료 주문 GET만 최대
+5요청·4페이지·응답 본문 1 MiB·30초로 제한합니다. 재시도·자동 재조회·raw 또는 민감 데이터
+저장·주문 변경·production 배포와 advice 연결은 승인하지 않습니다.”
+
+위 범위는 2026-09-05 사용자가 별도로 승인했으며, 아래 실행으로 1회 조회 승인은 소비됐다.
+
+### 승인된 실제 로컬 화면 연결과 조회
+
+상태: `IMPLEMENTED_AND_USABLE · APPROVED_ONE_SHOT_DISPLAY_CONFIRMED`.
+기록 시각: `2026-09-05T05:34:31Z` (실행 완료 후 기록 시각).
+운영 `/today`나 Docker를 배포하지 않고 별도 loopback 임시 서버와 새 비공개 Chrome context를
+사용했다. 기존 token/CLOSED-order probe에 최소 표시 projection collector를 추가하되, 기본
+capability summary에는 실제 row를 넣지 않는다. 날짜·페이지 검증이 끝난 성공에서만 화면용
+종목·방향·상태·KST 생성 시각·누적 체결량·평균 체결가를 전달하며 account/order/fill ID는 제외한다.
+
+인증은 서버에서 생성한 일회용 session을 IPC로 browser controller에 전달하고 HttpOnly cookie로
+설정한다. 토스 credential/accountSeq는 이 IPC나 브라우저로 보내지 않는다. 서버는 exact Host,
+Origin, request body/method와 cookie를 검증하며 query latch를 호출 전에 소비한다. 응답 no-store,
+CSP, textContent rendering과 무로그 handler를 적용했고, 임시 server는 조회 응답 후 닫힌다.
+Clear/pagehide/15분 만료는 row를 제거하며 지우는 동안 도착하는 응답도 폐기한다. Provider retry,
+자동 조회와 Web Storage/IndexedDB·DB·파일·telemetry·screenshot/trace/video로의 실제 데이터 저장은 없다.
+
+사전 검증: 새 화면/HTTP 계약과 probe 대상 pytest 63개, Web 전체 933개, lint·format·typecheck,
+`just quality`(3,626 pass, 25 opt-in PostgreSQL skip) 통과. 기존 calendar dependency의
+deprecation warning은 남아 있다. Next 운영 route를 바꾸지 않아 Next build와 Docker rebuild는
+반복하지 않았다. 합성 화면은 `pnpm --dir web exec playwright test --config playwright.toss-order-view.config.ts`
+3개 journey로 375·768·1280px, 정상 표시, no-store, no-storage, 오류, 조회 중 Clear, refresh와
+자동 재조회 부재를 검증했다. URL·제목·비어 있지 않은 화면·오류 overlay 부재와 console/page error
+0건을 확인했다. Screenshot은 합성 데이터만 `/private/tmp`에 촬영해 육안 검토했다.
+
+브라우저 dogfood에서 기본 headless Chromium binary가 없어 초기 검사가 실패했다. 설치 대신
+저장소의 기존 macOS Chrome channel을 적용하고 새 비공개 context로 검증을 통과했다. 같은
+실행 경로를 `--synthetic`으로 열어 명시적 QUERY → `DISPLAY_CONFIRMED` → 서버 종료 → 브라우저
+종료까지 재현한 뒤에만 실제 입력을 사용했다. 사용자 수동 클릭이 먼저 실행된 경우 controller가
+다시 클릭하지 않도록 disabled 상태도 확인한다.
+
+실제 실행은 승인된 세 값만 설정 파일에서 선택해 서버 메모리로 읽었으며 설정 파일을 실행하지
+않았다. Core dump를 비활성화하고 credential을 다른 child 환경에 전달하지 않았다. 화면 준비 뒤
+승인된 에이전트가 QUERY를 한 번 전달했고, 아래 고정 metadata와 표시 상태만 확인했다.
+
+| 항목 | 실제 결과 |
+|---|---|
+| result_code | `COMPLETE_ORDER_AGGREGATE` |
+| provider_history_state | `ORDER_AGGREGATE_OBSERVED` |
+| request_count / page_count | 2 (토큰 POST 1회 + CLOSED 주문 GET 1회) / 1 |
+| response_byte_count / elapsed_ms | 1,456 / 424 |
+| 화면 표시 / 서버 상태 | `DISPLAY_CONFIRMED` / `LOCAL_SERVER_CLOSED` |
+| partial_fill_state / correction_cancel_state | `NOT_OBSERVED` / `NOT_OBSERVED` |
+| order_operations / 재시도 | 0 / 0 |
+
+실제 표의 내용은 모델에 읽어들이거나 스크린샷·trace·로그·파일에 남기지 않았다. 결과는 표시
+확인 당시 브라우저 메모리에만 있었으며 새로고침·Clear·화면 이동 후 복원하지 않는다. 실제 화면의
+육안 검사와 Clear는 결과를 사용자에게 남겨두기 위해 수행하지 않았고, 해당 동작은 합성 journey로
+검증했다. `individual_fill_lineage`, `manual_order_coverage`, `retention_window`,
+`oauth_read_only_scope`는 계속 `NOT_EVALUATED`다. 추가 조회·상시 연결·production 배포·advice
+연결은 수행하지 않았으며 이번 승인을 재사용하지 않는다.
+
+실행에 사용한 machine-local bootstrap은 조회 완료 후 제거했으며, 코드에는 실제 credential이나
+개인 설정 경로를 추가하지 않았다. 해당 실행 시점에는 구현과 검증 기록이 미커밋 WIP였으며,
+아래 후속 대조에서 검토한 뒤 로컬 커밋 대상으로 정리했다. push는 포함하지 않았다.
+
+### 2026-09-07 후속 대조와 복구 검증
+
+실제 private v1 승인 상태가 `PRIVATE DRAFT`로 표시되던 혼동을 수정했다. 화면은 문서의
+`APPROVED · ACTIVE · LONG_TERM`을 보존하고 production advice 미연결을 별도로 표시한다.
+원문은 변경하지 않았으며 현재 브라우저 회귀는 합성 8종목 fixture만 사용했다.
+
+T20의 기존 `--no-privileges` dump/restore는 권한을 버리고도 schema/data 검사만 통과할 수
+있었다. 유효 table/function 권한, owner, RLS, security-definer와 function config checksum을
+추가해 `restored checksum mismatch: security`를 재현했다. GRANT/REVOKE를 보존한 새 실행은
+PostgreSQL 17.11에서 A1 SQL 계약 23개, schema/journal/projection/security checksum 일치,
+RTO 0.078초, journal RPO 0과 해당 임시 cluster 종료/정리를 확인했다. 기존 0.072초 기록은
+당시 검증 범위로 보존한다. 새 evidence는 `tmp/goal-t20-restore-20260906.local.json`이다.
+
+같은 goal에서 T13 승인·실제 predicate 비교 경계와 독립 A1 version/slice/evidence 검토
+projection도 보강했다. 전체 Python 3,636 pass/25 skip, Web 942개·coverage·lint·format·
+typecheck·build, Today/Reports 합성 E2E 5개와 별도 주문 화면 합성 E2E 3개를 통과했다.
+기본 Python에서 skip한 A1 23개는 별도 T20에서 실행했으며 broker snapshot DB 2개는 변경
+범위 밖이라 실행하지 않았다. 문구 수정 뒤 A1 component 6개와 responsive journey 1개도
+통과했다. 실제 provider/credential 재사용이나 운영 배포는 하지 않았다.
+
+실제 integration 부족분, 8종목과 기존 5종목 gate, 수동 UX, v5 및 승인별 다음 작업은
+[계획 대조 기록](portfolio-goal-reconciliation-20260907.md)을 따른다. 운영 연결은 단순히
+승인만 남은 상태가 아니다. atomic read와 private composite policy 및 전체 persistence
+경로의 구현이 남았으며 신규 migration 작성도 별도 승인 대상이다.
+
 ## Exact promotion boundaries
 
 다음은 이 checkpoint에 포함되지 않았고 각각 별도 명시 승인이 필요하다.
@@ -233,7 +388,8 @@ core dump를 금지했고 raw 응답·credential·accountSeq·종목·주문 ID�
 
 ## External side effects
 
-- 기존 local-only checkpoint의 provider call은 0건이었다. 이후 승인된 토스 one-shot의 provider call은 총 2건(토큰 POST 1회, 종료 주문 GET 1회)이다.
+- 기존 local-only checkpoint의 provider call은 0건이었다. 승인된 최초 토스 probe는 2건,
+  별도 승인된 실제 화면 검증은 추가 2건(각 토큰 POST 1회, 종료 주문 GET 1회)으로 누적 4건이다.
 - 실제 주문, live/existing DB write, notification, schedule/heartbeat, owner 변경: 각각 0건.
 - local disposable PostgreSQL write와 local Docker rebuild는 production side effect가 아니다.
 - 실제 holding intent/horizon 추론과 Phase 6 PASS 주장: 0건.

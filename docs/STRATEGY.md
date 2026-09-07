@@ -647,16 +647,23 @@ mandate의 review cadence가 due일 때 current primary evidence를 평가한다
 
 정책 우선순위는 다음과 같다.
 
-1. `UNCLASSIFIED`는 `NO_ADVICE`다.
+1. `UNCLASSIFIED` 또는 미승인·LONG_TERM이 아닌 mandate는 `NO_ADVICE`다.
 2. cadence/event가 due가 아니면 `NOT_DUE`다.
-3. stale evidence, conflicting evidence, concentration breach는 `REVIEW`다.
-4. AI research predicate candidate는 `REVIEW`이며 방향성 action을 만들지 않는다.
+3. stale·conflicting evidence, 미래 filing, concentration breach는 `REVIEW`다.
+4. AI research 또는 CANDIDATE predicate는 `REVIEW`이며 방향성 action을 만들지 않는다.
 5. deterministic parser 또는 user authority가 승인된 typed predicate를 충족하면
    합성 `SELL`, 충족하지 않으면 합성 `HOLD`다.
 
+관측값과 승인된 threshold는 정확한 decimal로 비교하며 predicate 라벨만 믿지 않는다.
+primary/VALID, parser provenance, filing·predicate의 unit/period가 승인 정의와 맞지 않거나
+실제 비교 결과와 라벨이 다르면 `PREDICATE_INPUT_MISMATCH · REVIEW`다.
+
 모든 결과는 Today에서 `LOCAL_ONLY · NOT ACTIVE`로 표시한다. 실제 holding,
 provider, DB, order, alert와 연결되지 않으므로 production LONG_TERM action authority가
-아니다. 실제 5종목 mandate 승인과 방향성 조언 활성화는 별도 promotion gate로 남는다.
+아니다. 실제 private 8종목의 기존 승인 정보는 보존하지만 그 composite invalidation의
+`THESIS_INVALIDATED_REVIEW_REQUIRED`를 이 합성 SELL 정책으로 변환하지 않는다.
+기존 최소 5종목 gate와 실제 8종목 cohort의 정합성 및 방향성 조언 활성화는 별도 조건이다.
+현재 대조와 재개 조건은 [계획 대조 기록](portfolio-goal-reconciliation-20260907.md)에 둔다.
 
 ### 7.5 LONG_TERM T19 historical replay candidate
 
@@ -681,6 +688,15 @@ AI research는 candidate만 만들고 방향성 action 권한을 갖지 않는�
 추정하지 않는다. T15 정밀 분석 연결, 보존 기간과 수동 주문 포함 범위는 별도 증거가 필요하다.
 빈 이력과 조회 실패는 구분하며 페이지 미완결은 성공으로 처리하지 않는다. Probe 결과는
 방향성 조언이나 주문 권한을 만들지 않는다.
+
+`/today`의 합성 미리보기는 주문 생성일을 KST로 변환해 최대 30일(양 끝 포함)을 필터링한다.
+표의 매수·매도는 합성 주문의 과거 방향 표시이며 추천이나 action count에 반영하지 않는다.
+누적 체결량과 평균 체결가는 decimal string을 보존하며, 개별 fill·정정 lineage·손익을 생성하지
+않는다. 이 화면의 조회 완료는 합성 페이지 검증만 뜻하며 실제 계좌나 provider capability의 증거가 아니다.
+
+별도 승인으로 실행하는 임시 로컬 1회 조회 화면도 주문별 누적 결과만 표시한다. 전체 계좌 이력의
+완전성이나 수동 주문 포함 범위를 보증하지 않으며 T15 개별 fill, 정정 lineage, 손익 또는 advice에
+연결하지 않는다. 조회가 실패하거나 페이지가 미완결이면 부분 결과를 표시하지 않고 재시도하지 않는다.
 
 ## 8. 운영/재현성 권장 사항
 
