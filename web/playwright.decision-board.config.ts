@@ -37,6 +37,7 @@ export default defineConfig({
       port: webPort,
       reuseExistingServer: false,
       env: {
+        SAB_SKIP_ROOT_ENV: "1",
         SAB_BASIC_AUTH_USER: "fixture-admin",
         SAB_BASIC_AUTH_PASS: "fixture-password",
         SAB_SESSION_SECRET: "fixture-session-secret-at-least-32-bytes",

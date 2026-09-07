@@ -10,6 +10,10 @@ export function loadRootEnv(options = {}) {
   const env = options.env ?? process.env;
   const override = options.override === true;
 
+  if (env.SAB_SKIP_ROOT_ENV === "1") {
+    return { loaded: false, path: envPath, keys: [] };
+  }
+
   let contents;
   try {
     contents = fs.readFileSync(envPath, "utf8");

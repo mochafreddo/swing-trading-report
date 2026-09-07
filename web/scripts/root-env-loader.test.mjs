@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadRootEnv, parseEnvLine } from "./root-env-loader.mjs";
 
@@ -24,6 +24,20 @@ afterEach(() => {
 });
 
 describe("parseEnvLine", () => {
+  it("does not read the root env file during explicitly isolated verification", () => {
+    const read = vi.spyOn(fs, "readFileSync");
+    const env = {
+      SAB_SKIP_ROOT_ENV: "1",
+      SUPABASE_URL: "http://127.0.0.1:43118",
+    };
+    try {
+      expect(loadRootEnv({ env })).toMatchObject({ loaded: false, keys: [] });
+      expect(read).not.toHaveBeenCalled();
+      expect(env.SUPABASE_URL).toBe("http://127.0.0.1:43118");
+    } finally {
+      read.mockRestore();
+    }
+  });
   it("parses plain and exported assignments", () => {
     expect(parseEnvLine("SUPABASE_URL=https://example.supabase.co")).toEqual([
       "SUPABASE_URL",
