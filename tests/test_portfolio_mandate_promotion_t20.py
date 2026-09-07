@@ -151,6 +151,7 @@ def test_t20_evidence_has_restore_rto_rpo_and_no_activation_claim() -> None:
         schema_checksum="sha256:" + "c" * 64,
         journal_checksum="sha256:" + "d" * 64,
         projection_checksum="sha256:" + "e" * 64,
+        security_checksum="sha256:" + "f" * 64,
         restore_seconds=1.25,
         cluster_stopped=True,
         temporary_directory_removed=True,
@@ -161,6 +162,8 @@ def test_t20_evidence_has_restore_rto_rpo_and_no_activation_claim() -> None:
     assert evidence["target_schema_version"] == "portfolio-mandate.a1"
     assert evidence["rto"]["target_seconds"] == 1800
     assert evidence["rto"]["measured_seconds"] == 1.25
+    assert evidence["security_checksum"] == "sha256:" + "f" * 64
+    assert evidence["restore_permissions_verified"] is True
     assert evidence["journal_rpo"] == 0
     assert evidence["production_activation"] is False
     assert evidence["live_db_writes"] == 0

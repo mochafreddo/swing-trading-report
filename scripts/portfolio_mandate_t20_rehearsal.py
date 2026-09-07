@@ -106,6 +106,7 @@ def _build_evidence(
     schema_checksum: str,
     journal_checksum: str,
     projection_checksum: str,
+    security_checksum: str,
     restore_seconds: float,
     cluster_stopped: bool,
     temporary_directory_removed: bool,
@@ -130,6 +131,8 @@ def _build_evidence(
         "schema_checksum": schema_checksum,
         "journal_checksum": journal_checksum,
         "projection_checksum": projection_checksum,
+        "security_checksum": security_checksum,
+        "restore_permissions_verified": True,
         "write_owner": target.session_user,
         "rollback_compatible_app_revision": app_revision,
         "operations": [
@@ -316,7 +319,6 @@ def _dump_payload(
         _binary("pg_dump"),
         _database_dsn(target, database),
         "--no-owner",
-        "--no-privileges",
     ]
     if schema_only:
         command.append("--schema-only")
@@ -350,6 +352,50 @@ def _table_checksum(
         database=database,
     ).encode()
     return _sha256_bytes(payload)
+
+
+def _security_checksum(
+    target: RehearsalTarget, *, environment: Mapping[str, str], database: str
+) -> str:
+    """Compare effective A1 permissions, ownership and RLS after restore."""
+    _verify_identity(target, environment=environment, database=database)
+    payload = _psql(
+        target,
+        """
+        select coalesce(jsonb_agg(row_data order by row_data::text)::text, '[]')
+        from (
+          select jsonb_build_array(
+            'table', c.relname, pg_get_userbyid(c.relowner),
+            c.relrowsecurity, c.relforcerowsecurity, r.rolname, privilege,
+            has_table_privilege(r.oid, c.oid, privilege)
+          ) as row_data
+          from pg_class c join pg_namespace n on n.oid = c.relnamespace
+          cross join pg_roles r
+          cross join unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE',
+                                  'REFERENCES','TRIGGER']) privilege
+          where n.nspname = 'public' and c.relkind = 'r'
+            and c.relname like 'portfolio_mandate_%'
+            and r.rolname in ('anon','authenticated','service_role',
+                             'portfolio_mandate_candidate_submitter_a1')
+          union all
+          select jsonb_build_array(
+            'function', p.proname, pg_get_function_identity_arguments(p.oid),
+            pg_get_userbyid(p.proowner), p.prosecdef, p.proconfig, r.rolname,
+            has_function_privilege(r.oid, p.oid, 'EXECUTE')
+          )
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          cross join pg_roles r
+          where n.nspname = 'public' and p.proname like '%_a1'
+            and r.rolname in ('anon','authenticated','service_role',
+                             'portfolio_mandate_candidate_submitter_a1')
+        ) permissions;
+        """,
+        environment=environment,
+        database=database,
+    )
+    if payload == "[]" or not payload:
+        raise RehearsalError("A1 security inventory is empty")
+    return _sha256_bytes(payload.encode())
 
 
 def _write_evidence(path: Path, evidence: Mapping[str, Any]) -> None:
@@ -457,7 +503,6 @@ def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
                 target.dsn,
                 "--format=custom",
                 "--no-owner",
-                "--no-privileges",
                 "--file",
                 str(backup_path),
             ],
@@ -505,7 +550,6 @@ def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
                 _binary("pg_restore"),
                 "--exit-on-error",
                 "--no-owner",
-                "--no-privileges",
                 "--dbname",
                 _database_dsn(target, restore_database),
                 str(backup_path),
@@ -536,10 +580,17 @@ def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
             environment=environment,
             database=restore_database,
         )
+        security_checksum = _security_checksum(
+            target, environment=environment, database=target.database
+        )
         checksum_matches = {
             "schema": restored_schema_checksum == schema_checksum,
             "journal": restored_journal_checksum == journal_checksum,
             "projection": restored_projection_checksum == projection_checksum,
+            "security": _security_checksum(
+                target, environment=environment, database=restore_database
+            )
+            == security_checksum,
         }
         if not all(checksum_matches.values()):
             failed = ", ".join(
@@ -601,6 +652,7 @@ def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
             "journal_checksum": journal_checksum,
             "projection_checksum": projection_checksum,
             "restore_seconds": restore_seconds,
+            "security_checksum": security_checksum,
         }
     finally:
         if started:
