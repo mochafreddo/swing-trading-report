@@ -45,12 +45,15 @@ def test_t20_subprocess_environment_discards_all_inherited_pg_routing() -> None:
             "PGHOST": "production.example.com",
             "PGSERVICE": "production",
             "PORTFOLIO_MANDATE_A1_TEST_DSN": "unsafe",
+            "PORTFOLIO_REVIEW_R1_REHEARSAL": "1",
         }
     )
 
     assert "PGHOST" not in environment
     assert "PGSERVICE" not in environment
     assert "PORTFOLIO_MANDATE_A1_TEST_DSN" not in environment
+    assert "PORTFOLIO_REVIEW_R1_REHEARSAL" not in environment
+    assert environment["LC_ALL"] == "C"
 
 
 def test_t20_blank_state_rejects_every_rehearsal_role_collision(

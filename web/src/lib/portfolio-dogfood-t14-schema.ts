@@ -255,3 +255,58 @@ export function parsePortfolioDogfoodT14Source(
     ? { state: "READY", fixture: parsed.data }
     : { state: "INVALID", issueCode: "FIXTURE_CONTRACT_INVALID" };
 }
+
+export const portfolioReviewR1Schema = z
+  .object({
+    schema_version: z.literal("portfolio-review.r1"),
+    mode: z.literal("LOCAL_ONLY"),
+    advice_enabled: z.literal(false),
+    as_of: z.string().datetime({ offset: true }),
+    review_period: z.string().regex(/^[0-9]{4}Q[1-4]$/),
+    rows: z
+      .array(
+        z
+          .object({
+            mandate_version_id: z.string().uuid(),
+            instrument_id: z.string().uuid(),
+            status: z.enum([
+              "BLOCKED",
+              "REVIEW_REQUIRED",
+              "THESIS_INVALIDATED_REVIEW_REQUIRED",
+              "NO_TRIGGER_OBSERVED",
+            ]),
+            action: z.null(),
+            issue_codes: z.array(
+              z.enum([
+                "ALLOCATION_REBASE_REQUIRED",
+                "ANNUAL_REVIEW_DUE",
+                "BROKER_STALE_OR_MISSING",
+                "CONDITION_MAPPING_REQUIRED",
+                "EVIDENCE_STALE_OR_MISMATCHED",
+                "MANDATE_NOT_ACTIVE",
+                "MANDATE_OUTSIDE_EFFECTIVE_WINDOW",
+                "OBSERVATION_MISSING_OR_CONFLICTED",
+                "PERIOD_MAPPING_REQUIRED",
+                "POLICY_MISSING",
+                "POLICY_NOT_VISIBLE",
+                "SLICE_INELIGIBLE",
+                "SPECIAL_RULE_REQUIRES_REVIEW",
+                "UNSTRUCTURED_RULE_REQUIRES_REVIEW",
+              ]),
+            ),
+            matched_hard_trigger_count: z.number().int().nonnegative(),
+            deterioration_confirmed: z.boolean(),
+            current_observation_count: z.number().int().nonnegative(),
+            superseded_observation_count: z.number().int().nonnegative(),
+          })
+          .strict(),
+      )
+      .max(100),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      new Set(value.rows.map((row) => row.mandate_version_id)).size ===
+      value.rows.length,
+    "Duplicate mandate version",
+  );

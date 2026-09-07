@@ -8,9 +8,12 @@ import { describe, expect, it } from "vitest";
 import { MandateEvidenceOutcomeDogfood } from "@/components/mandate-evidence-outcome-dogfood";
 import {
   mandateReviewProjectionSchema,
+  portfolioReviewR1Schema,
   parsePortfolioDogfoodT14Source,
 } from "@/lib/portfolio-dogfood-t14-schema";
 import reviewFixture from "../../../fixtures/portfolio-mandate-review.a1.synthetic.json";
+
+import compositeFixture from "../../../fixtures/portfolio-review.r1.synthetic.json";
 
 const fixturePath = fileURLToPath(
   new URL(
@@ -31,6 +34,34 @@ function renderScenario(selectedScenarioId: string) {
 }
 
 describe("MandateEvidenceOutcomeDogfood", () => {
+  it("renders the SQL composite projection and rejects private fields or advice", () => {
+    expect(portfolioReviewR1Schema.safeParse(compositeFixture).success).toBe(
+      true,
+    );
+    const html = renderScenario("corrected-lineage");
+    expect(html).toContain("Long-term composite review");
+    expect(html).toContain("THESIS INVALIDATED REVIEW REQUIRED");
+    for (const row of compositeFixture.rows)
+      expect(html).toContain(row.mandate_version_id);
+    for (const change of [
+      { action: "SELL" },
+      { holding_document: "PRIVATE_SENTINEL" },
+      { issue_codes: ["UNRECOGNIZED"] },
+    ]) {
+      expect(
+        portfolioReviewR1Schema.safeParse({
+          ...compositeFixture,
+          rows: [{ ...compositeFixture.rows[0], ...change }],
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      portfolioReviewR1Schema.safeParse({
+        ...compositeFixture,
+        advice_enabled: true,
+      }).success,
+    ).toBe(false);
+  });
   it("uses the Python A1 projection while refusing active advice and private fields", () => {
     expect(mandateReviewProjectionSchema.safeParse(reviewFixture).success).toBe(
       true,

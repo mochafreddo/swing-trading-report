@@ -1,6 +1,6 @@
 # Portfolio Mandate 계획 대조 및 재개 조건
 
-상태: `LOCAL_ONLY` 구현·검증 완료, 운영 전환 미완료. 기준일: 2026-09-07.
+상태: Accepted · `LOCAL_ONLY` 구현·검증 완료, 운영 전환 미완료. 기준일: 2026-09-08.
 
 2026-08-06 design 및 engineering test plan을 코드, 작업 트리, T17/T18–T21 기록과 현재 승인 증거에 대조했다. T1–T21을 다시 구현하지 않았다. 기존 주문 화면 WIP를 검토하고 아래 결함 수정과 A1 검토 projection을 추가했다. 과거 실사용 기록은 이번 합성 검증과 구분한다. 각 파일의 최종 변경은 Git 이력으로 확인한다.
 
@@ -16,7 +16,7 @@
 | A1 검토 연결 | exact mandate version → active allocation/slice → visible evidence seal → correction을 반영한 authority event를 연결한다. 최신 draft가 기존 승인을 대체하지 않는다. | `scripts/replay_portfolio_mandate_review.py`, `review_projection.py`, 공유 출력 fixture, Today의 Mandate → Evidence → Outcome 안 **A1 version → slice → evidence review** |
 | T20 복구 | 기존 dump의 `--no-privileges` 때문에 권한 손실이 검출되지 않던 결함을 재현했다. GRANT/REVOKE를 보존하고 table/function 유효 권한·owner·RLS·security-definer를 source/restore 간 비교한다. | 폐기형 PostgreSQL 17.11에서 수정 전 `restored checksum mismatch: security`, 수정 후 schema/journal/projection/security 일치. RTO 0.078초, journal RPO 0, 해당 cluster 종료 및 임시 디렉터리 제거 확인 |
 
-A1 검토 projection은 전체 A1 validator를 재사용하며 실패 메시지에 입력값을 넣지 않는다. 승인·만료와 evidence seal/event 시각에는 주입된 clock을 적용한다. 원문 thesis, account hash, actor, 수량, source span은 출력하지 않는다. A1 watermark에는 freshness timestamp가 없으므로 모든 row가 `BROKER_FRESHNESS_UNPROVEN`, `PRODUCTION_ADVICE_NOT_CONNECTED`, `action=null`을 유지한다. **이 화면은 합성 snapshot의 검토용 연결이며 실제 DB read RPC나 private 8종목 policy 변환기가 아니다.**
+A1 검토 projection은 전체 A1 validator를 재사용하며 실패 메시지에 입력값을 넣지 않는다. 승인·만료와 evidence seal/event 시각에는 주입된 clock을 적용한다. 원문 thesis, account hash, actor, 수량, source span은 출력하지 않는다. A1 합성 JSON watermark에는 freshness timestamp가 없으므로 모든 row가 `BROKER_FRESHNESS_UNPROVEN`, `PRODUCTION_ADVICE_NOT_CONNECTED`, `action=null`을 유지한다. **이 화면은 합성 snapshot의 검토용 연결이며 실제 DB read RPC나 private 8종목 policy 변환기가 아니다.**
 
 안전한 CLI 재현은 저장소의 기존 Python 환경에서 다음과 같다. 첫 두 명령에는 provider/credential/DB 접근이 없다. 폐기형 복구 실행은 PostgreSQL 17.11의 설치된 도구가 PATH에 있어야 하며 기존 DB를 입력받지 않는다.
 
@@ -28,15 +28,15 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/portfolio_mandate_t20_rehearsal.py
 
 ## 남은 요구사항과 완료 조건
 
-아래 분류에서 “별도 승인 필요”는 구현이 이미 전부 있다는 뜻이 아니다. 빠진 integration은 별도 열에 명시한다. 관련된 신규 migration 작성은 이번 요청의 승인 범위 밖이므로 SQL을 생성하지 않았다.
+아래 분류에서 “별도 승인 필요”는 구현이 이미 전부 있다는 뜻이 아니다. 빠진 integration은 별도 열에 명시한다. 2026-09-07에는 신규 migration 작성 승인이 없어 SQL을 생성하지 않았다. 2026-09-08 후속 승인으로 8종목 review-only R1을 구현했다. 아래 R1 관련 상태가 이전 승인 대기 기록을 대체한다.
 
 | 분류·항목 | 기대하는 사용자 결과와 현재 빠진 동작 | 관련 파일·최소 검증 | 완료 조건 |
 | --- | --- | --- | --- |
 | 완료 및 근거 확인: T1–T17 | 기존 US SWING, local LONG_TERM, Outcome seam, persistence prototype을 유지한다. 운영 완성과 동일시하지 않는다. | `docs/portfolio-dogfood-t17.md`, 기존 계약·runner·UI 및 이번 전체 gate | 기존 기능 회귀 없음, 신규 로컬 수정 검증 |
 | 완료 및 근거 확인: T18–T21 | private preview, 승인된 12사례/4회 fake cadence replay, 폐기형 복구, 주문 누적 결과 관측을 구분한다. | `docs/portfolio-dogfood-t18-t21.md`, T19 signed manifest, T20 재실행 | 과거 기록 보존 및 새 검증 결과 별도 기록 |
-| 사용자 입력 필요: 8종목과 5종목 gate | 실제 private 8종목 모두 승인된 LONG_TERM이다. 기존 계획의 실제 5종목 gate cohort 및 expected action에는 아직 연결되지 않았다. | private v1 원문/schema, T19 replay, `portfolio-mandate-a1-contract.md` | 기존 8개 승인 정보를 보존한 새 gate scope와 사전 expected action 승인. 기존 gate를 덮어쓰지 않음 |
-| 사용자 입력 + 별도 승인 필요: 실제 policy 연결 | private composite invalidation의 결과는 `THESIS_INVALIDATED_REVIEW_REQUIRED`다. scalar A1/T13 SELL 조건으로 손실 없이 변환되지 않는다. 관측 metric/기간/기준값·복합 조건 provenance와 review-only 효과를 표현할 구현이 남았다. | `long_term.py`, `review_projection.py`, private schema, A1 contract. 복합 ALL/ANY·분기/결측/반례·수정 event의 shared fixture부터 검증 | review-only 의미와 gate cohort 확정 → 필요한 계약 및 migration 작성 승인 → 손실 없는 adapter/policy 구현. 실제 advice 활성화는 별도 |
-| 별도 승인 필요: 실제 일관된 읽기 | Today가 실제 승인 version·slice·evidence·policy를 같은 snapshot으로 읽고 stale/mismatch를 차단해야 한다. 현재 A1에는 freshness가 봉인된 atomic read RPC가 없고 local projection만 있다. | `supabase/migrations/`, `sab/portfolio_mandate/`, Web server data boundary. 같은 transaction의 revision/digest/freshness·권한·race 검증 | 새 migration 작성 승인 후 RPC와 typed adapter 구현·폐기형 검증. production DB apply/credential/route 연결은 별도 |
+| 완료 및 입력 필요: 8종목 gate | 기존 승인 8종목 전체 review-only 범위는 2026-09-08 승인됐다. 실제 관측별 expected result는 미확정이다. | private 원문/schema, R1 계약 | 승인 원문 보존, 실제 표본 수집 전 새 expected-status manifest 고정 |
+| 로컬 구현 완료 및 실제 매핑 필요: policy 연결 | 원문 보존·ALL/ANY·연속 분기·정정·review-required compiler를 구현했다. 실제 version/owner/PRIMARY 관측과 미정 기간·등급·자유 규칙 매핑이 남았다. | `review_policy.py`, R1 migration/schema, SQL→compiler fixture | 실제 값을 승인된 정체성과 연결하고 사전 expected result 검증. 방향성 advice는 별도 |
+| 로컬 구현 완료 및 실제 transport 필요: 일관된 읽기 | STABLE RPC와 default-off reader는 구현·폐기형 검증됐다. 기존 broker captured_at을 재사용한다. 실제 Today의 authenticated transport/owner mapping은 남았다. | R1 RPC, Python adapter, strict Today fixture, 동시 commit 테스트 | 명시적 Auth 매핑 후 transport 검증. 기존 DB apply·credential·배포는 별도 승인 |
 | 별도 승인 필요: 전체 persistence/writer | A1은 create-only 핵심 계약이다. 전체 Source/EvidencePacket/DecisionRun/Decision/Outcome 및 publish/outbox 소유권 경로가 완성된 것으로 간주할 수 없다. backfill도 private composite를 축약할 수 없다. | A1 migration, `persistence_rehearsal.py`, `docs/portfolio-mandate-a1-contract.md`. idempotency·동시성·late failure rollback·journal replay | 필요한 schema/API diff 승인 및 구현 → disposable 검증 → 별도 실제 target/owner/window 승인 → backup/apply/backfill/writer 순차 실행 |
 | 별도 승인 필요: 기존 DB 복구 | 폐기형 성공만으로 운영 row·role·용량·app 호환을 증명하지 못한다. 실제 backup 및 last-known-good read-only board rehearsal이 남았다. | `scripts/portfolio_mandate_t20_rehearsal.py`, 운영 manifest/runbook. schema/data/ACL/RLS checksum, RTO/RPO, row-count, restore 후 read-only health | 정확한 DB identity, backup 위치, owner, window, rollback 권한 확정. RTO ≤30분, journal RPO 0, broker RPO ≤1 run |
 | 사용자 입력/실제 capability 필요: Outcome | 주문별 누적 체결 결과 표시는 된다. 개별 fill identity·correction lineage가 증명되지 않아 실제 T15 matching, 중복 fill 방지 및 90% coverage를 평가할 수 없다. | `outcome_history.py`, `toss_order_probe.py`, T15/O1 계약. 아래 capability 표 참조 | 증명된 단위만 사용. order ID→fill ID 복제와 누적량 차이의 가상 fill 생성 금지. 정밀 연결에는 별도 capability와 연결 승인 |
@@ -47,7 +47,7 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/portfolio_mandate_t20_rehearsal.py
 
 ## private 승인과 gate 범위 제안
 
-기존 private 문서의 8종목, 5 CORE/3 SATELLITE, 승인·active·LONG_TERM, composite rule과 review-required 효과는 유지한다. 실제 8종목 입력을 다시 요청하지 않는다. 추천하는 다음 결정은 **원래의 최소 5종목 기준을 충족하는 8종목 전체 검토 gate**이며, 별도 새 manifest에 review-only expected action을 먼저 승인하는 방식이다. 이는 아직 사용자 결정이나 승인으로 기록하지 않았다. 원문을 T13의 합성 SELL/HOLD로 변환하지 않는다. 필요한 metric/period/baseline이 원문에 없다면 해당 항목만 질문하고 `REVIEW`/미평가로 남긴다.
+기존 private 문서의 8종목, 5 CORE/3 SATELLITE, 승인·active·LONG_TERM, composite rule과 review-required 효과는 유지한다. 실제 8종목 입력을 다시 요청하지 않는다. **원래의 최소 5종목 기준을 충족하는 8종목 전체 review-only 범위와 추가 migration 작성은 2026-09-08 승인됐다.** 실제 관측별 expected status는 별도 새 manifest에서 사전 고정해야 하며 이번 범위 승인만으로 생성하지 않았다. 원문을 T13의 합성 SELL/HOLD로 변환하지 않는다. 필요한 metric/period/baseline이 원문에 없다면 해당 항목만 질문하고 `REVIEW`/미평가로 남긴다.
 
 ## 토스 capability 경계
 
@@ -106,9 +106,9 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/portfolio_mandate_t20_rehearsal.py
 
 이번 검증은 Python 전체 품질 검사, Web lint/format/typecheck/coverage/build, fixture E2E, 폐기형 PostgreSQL 복구를 사용한다. 상세 최종 개수는 아래 완료 기록에 남긴다. `just ci-web` 대신 이미 설치된 의존성으로 같은 lint/format/typecheck/coverage/build를 실행했다. 불필요한 clean/install/sync를 생략하고 `SAB_SKIP_ROOT_ENV=1` 및 고정 CI placeholder로 개인 `.env`를 로드하지 않았다. loader 테스트는 opt-out일 때 파일 read가 없음을 확인한다. Python 첫 시도는 제한 PATH가 Bash 3.2를 선택해 wrapper 테스트 22개가 실패했으며, 설치된 Bash 5.3을 우선한 재실행으로 판정한다.
 
-최종 검사: `just quality`의 Ruff/format/mypy 및 pytest **3,636 passed, 25 skipped**. A1 PostgreSQL 23개는 T20의 별도 폐기형 harness로 실행했다. 나머지 broker snapshot DB 계약 2개는 해당 DB 경로를 변경하지 않아 실행하지 않았다. Web은 **111 files / 942 tests**, coverage gate·lint·format·typecheck·Next build를 통과했다. Today/Reports E2E 5개와 별도 one-shot 합성 E2E 3개가 통과했고, A1 상세 문구 수정 후 해당 component 6개와 responsive journey 1개를 추가 확인했다. 375/1280px 합성 스크린샷을 육안 검토했으며 페이지 overflow는 375/768/1280px에서 검사했다. 기존 calendar 의존성의 NumPy timedelta deprecation warning은 남아 있다.
+최종 검사: `just quality`의 Ruff/format/mypy 및 pytest **3,636 passed, 25 skipped**. A1 계약 23개는 T20의 별도 폐기형 harness로 실행했다. 정정: 이 23개는 비DB 7개와 opt-in DB 16개다. 기본 검사에서 나머지 opt-in broker DB 계약 9개는 해당 경로를 변경하지 않아 실행하지 않았다. 이전의 23+2 skip 설명은 잘못된 분류였다. Web은 **111 files / 942 tests**, coverage gate·lint·format·typecheck·Next build를 통과했다. Today/Reports E2E 5개와 별도 one-shot 합성 E2E 3개가 통과했고, A1 상세 문구 수정 후 해당 component 6개와 responsive journey 1개를 추가 확인했다. 375/1280px 합성 스크린샷을 육안 검토했으며 페이지 overflow는 375/768/1280px에서 검사했다. 기존 calendar 의존성의 NumPy timedelta deprecation warning은 남아 있다.
 
-운영 provider 재조회, credential 사용, 새 migration 작성/apply/backfill/writer, 운영 Docker 배포, schedule/notification 변경, push는 이번에 실행하지 않았다. 실제 사용자의 60초 UX 및 미래 표본은 대체 검증으로 PASS 처리하지 않았다. 전체 goal과 운영 전환은 미완료다.
+2026-09-07 완료 시점에는 운영 provider 재조회, credential 사용, 새 migration 작성/apply/backfill/writer, 운영 Docker 배포, schedule/notification 변경, push는 이번에 실행하지 않았다. 실제 사용자의 60초 UX 및 미래 표본은 대체 검증으로 PASS 처리하지 않았다. 전체 goal과 운영 전환은 미완료다.
 
 | 로컬 커밋 | 변경 |
 | --- | --- |
@@ -122,8 +122,45 @@ T20 evidence의 app revision은 실행 당시 `f9a7473a`이며 미커밋 수정�
 
 다음 의존 순서는 다음과 같다.
 
-1. 사용자에게 **기존 승인 8종목 전체 + review-required 효과를 유지하는 새 gate 범위**를 확인하고, 미정 metric/period만 묻는다. 동시에 준비된 합성 UX task를 사용자가 수행한다.
-2. 이 결정에 근거해 **추가 migration 작성만** 승인받는다. 대상은 composite review-only provenance, atomic freshness/version read, 필요한 journal/policy persistence다. 기존 DB apply·credential·writer·배포 권한은 포함하지 않는다. 승인 뒤 최소 schema diff, typed adapter와 폐기형 integration을 완성한다.
+1. 2026-09-08 승인된 **8종목 전체 + review-required 효과**를 유지한다. 기존 원문을 다시 요청하지 않고 실제 version/owner/PRIMARY 관측과 미정 metric/period만 확인한다. 합성 UX task는 사용자 수행이 남았다.
+2. 추가 migration 작성 승인을 반영한 R1 schema·RPC·typed compiler·합성 Today·폐기형 복구를 사용한다. 실제 transport와 Auth owner 연결, importer, 전체 DecisionRun/Outcome/outbox는 별도 남은 구현이다. 기존 DB apply·credential·writer·배포 권한은 이번 승인에 포함되지 않는다.
 3. 실제 capability가 필요한 경우에만 새 조회의 기간·계정 선택·token 영향 시간·횟수·표시/저장 범위를 정한다. 기존 두 one-shot을 재실행하거나 부분체결을 만들기 위한 주문은 하지 않는다.
 4. 구현·검증된 diff와 checksum을 토대로 실제 DB target/owner/window/backup/restore를 특정한 별도 승인을 받는다. A1 적용만으로 전체 Outcome/publisher가 준비됐다고 간주하지 않는다.
 5. v5는 승인된 날짜에 기존 스케줄이 표본을 만든다. exact-slot evaluator와 human PASS 후 해당 horizon의 cutover만 별도 검토한다. LONG_TERM gate, 알림 owner, 안정화·archive·legacy 제거는 각각의 조건을 따른다.
+
+## 2026-09-08 R1 후속 검증
+
+사용자 후속 승인에 따라 [R1 계약](portfolio-review-r1-contract.md)의 추가 migration과
+8종목 review-only 수직 기능을 구현했다. 실제 승인 원문 8개가 새 holding schema에
+적합하고 원문 hash가 이전과 일치함을 비공개 값 출력 없이 확인했다. 전체 원문을
+fixture로 복사하지 않았다. 신규 fixture는 폐기형 SQL에 넣은 기존 합성 입력에서만
+생성했다. 기존 v5 frozen 자료는 이번 R1과 독립적으로 보존한다.
+
+SQL 계약 26개(비DB 7개 + opt-in DB 19개), 신규 compiler 23개, T20 unit 7개가
+통과했다. 폐기형 restore의 schema/data/권한/RLS와 R1 policy/observation checksum이
+일치했다. 최종 RTO는 0.088초이며 전체 gate 결과는 아래에 기록한다. Advisors는 WARN/ERROR 0,
+INFO 58개였으며 R1 관련 INFO 4개와 처리 근거를 R1 계약에 남겼다.
+
+Today/Reports 5개 E2E가 통과했다. R1 8개 row, 375/768/1280px, keyboard, console,
+overflow와 기존 selection/refresh/empty/stale/blocked/error를 확인했다. 375/1280px
+합성 화면을 육안 확인했다. 최초 별도 포트 실행은 이 작업의 기존 Next dev lock과
+충돌했으며 해당 합성 서버 종료 후 재실행했다. 운영 Docker에는 접근하지 않았다.
+실제 사용자 60초 UX와 실제 Auth/PostgREST HTTP 연결은 미검증이다.
+
+최종 `just quality`: Ruff/format/mypy 통과, **3,659 passed / 28 skipped**.
+처음에는 이전 정리 문서의 상태 meta 한 곳이 실패해 `Accepted`로 수정했고 전체
+검사를 다시 통과했다. 28 skips는 A1/R1 opt-in DB 19개와 broker DB 9개다.
+A1/R1은 별도 폐기형 26개 계약으로 실행했고 broker DB 경로는 미변경으로 생략했다.
+후속 테스트 날짜 의존성 보강 뒤 폐기형 26개를 다시 확인했다. 운영 source 시각을
+바꾸지 않고 합성 seed만 현재 검증 시각에 맞추며, 커밋된 CLI/UI replay clock은 고정이다.
+
+Web lint/format/typecheck/build와 **111 files / 943 tests / coverage gate**를 통과했다.
+기존과 같이 `just ci-web`의 install/clean/sync는 생략하고 설치된 의존성·root-env opt-out·
+CI placeholder로 같은 검사를 수행했다. 마지막 UI 설명 문구 정리 후 component 7개도
+다시 통과했다. 기존 calendar 의존성의 NumPy timedelta 경고는 미변경이다.
+
+원본 .gstack 두 계획은 2026-09-08 별도 백업·diff·직전 원본 hash 비교 후 갱신하고
+read-back을 확인했다. 원본 계획에 적힌 0.098초는 직전 성공 리허설이고, 이후 날짜
+의존성 보강 재실행의 최신 RTO는 0.088초다. 어느 수치도 운영 DB 측정은 아니다.
+현재 로컬 작성 승인은 처리됐고 실제 DB apply/backfill/writer·credential/provider·
+배포·schedule/notification·push는 수행하지 않았다. 전체 운영 goal은 미완료다.

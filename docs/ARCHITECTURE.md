@@ -509,10 +509,17 @@ adapter, report route, notification owner, automation 또는 deploy 경로에도
 `review_projection.py`는 기존 A1 validator를 재사용하는 local-only read projection이다.
 exact mandate version, active allocation/slice, clock 이전 evidence seal과 authority correction을
 연결하고 rebase·미승인·effective window·evidence 부족을 표시한다. A1 watermark에 freshness
-timestamp가 없어 실제 advice는 항상 false이며 action은 null이다. CLI가 고정 합성 입력에서
+timestamp가 없는 A1 JSON 계약이므로 실제 advice는 항상 false이며 action은 null이다. CLI가 고정 합성 입력에서
 생성한 strict Web fixture를 Today의 독립 A1 상세 검토에 표시한다. 선택한 T14 scenario와
-별도인 snapshot이며 private 원문·수량·actor는 반환하지 않는다. 실제 atomic read RPC,
-private composite policy 변환, 전체 DecisionRun/Outcome/outbox 연결은 아직 구현 과제다.
+별도인 snapshot이며 private 원문·수량·actor는 반환하지 않는다.
+
+2026-09-08 승인된 R1은 별도 `review_policy.py`와 추가 migration으로 exact approved
+version → 원문 policy → PRIMARY observation → 복합 review를 연결한다. STABLE read
+RPC는 owner와 JWT를 검사하고 기존 DB의 broker `captured_at` 및 allocation을 한
+snapshot으로 읽는다. compiler는 ALL/ANY·연속 분기·정정·freshness를 검증하며 항상
+review-only다. CLI와 Today는 폐기형 SQL의 고정 합성 응답을 재현한다. 실제 Today
+transport/Auth owner 매핑·importer와 전체 DecisionRun/Outcome/outbox는 남은 구현이다.
+R1의 권한·기간 매핑·복구 검증은 [R1 계약](portfolio-review-r1-contract.md)을 따른다.
 구현 및 승인 의존성은 [계획 대조 기록](portfolio-goal-reconciliation-20260907.md)에 둔다.
 
 ### Portfolio Outcome T15 provider-free adapter

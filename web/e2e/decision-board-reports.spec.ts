@@ -422,6 +422,11 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
   page,
 }) => {
   const unexpectedRequests = await configureFixtureBoundary(context, page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
 
   for (const viewport of [
     { width: 375, height: 812 },
@@ -437,7 +442,9 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
     });
     await expect(drilldown).toContainText("CORRECTED");
     await expect(drilldown).toContainText("PARTIALLY_EXECUTED");
-    const summary = drilldown.locator("summary");
+    const summary = drilldown
+      .locator("summary")
+      .filter({ hasText: "A1 version" });
     await summary.focus();
     await page.keyboard.press("Enter");
     await expect(
@@ -446,6 +453,19 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
     await expect(
       drilldown.locator('[aria-label="A1 connected review rows"]'),
     ).toContainText("ALLOCATION_REBASE_REQUIRED");
+    const compositeSummary = drilldown
+      .locator("summary")
+      .filter({ hasText: "Long-term composite review" });
+    await compositeSummary.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      drilldown.locator(
+        '[aria-label="Long-term composite review rows"] article',
+      ),
+    ).toHaveCount(8);
+    await expect(
+      drilldown.locator('[aria-label="Long-term composite review rows"]'),
+    ).toContainText("THESIS INVALIDATED REVIEW REQUIRED");
     await expectNoHorizontalOverflow(page);
     await drilldown.screenshot({
       path: `/private/tmp/portfolio-a1-review-${viewport.width}.png`,
@@ -497,4 +517,5 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
     "Synthetic private correction note",
   );
   expect(unexpectedRequests).toEqual([]);
+  expect(errors).toEqual([]);
 });

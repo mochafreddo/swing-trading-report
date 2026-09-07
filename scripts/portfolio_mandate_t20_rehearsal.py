@@ -23,6 +23,7 @@ from typing import Any
 A1_MIGRATION = Path(
     "supabase/migrations/20260828230000_create_portfolio_mandate_a1.sql"
 )
+R1_MIGRATION = Path("supabase/migrations/20260907150228_create_portfolio_review_r1.sql")
 _EXPECTED_VERSION = "170011"
 _DATABASE_PREFIX = "portfolio_mandate_a1_test_"
 _TEMP_PREFIX = "portfolio-mandate-a1-pg17."
@@ -74,12 +75,15 @@ def _sanitized_environment(source: Mapping[str, str]) -> dict[str, str]:
         "PORTFOLIO_MANDATE_A1_ALLOW_DISPOSABLE",
         "PORTFOLIO_MANDATE_A1_TEST_DSN",
         "PORTFOLIO_MANDATE_A1_TEST_DATA_DIR",
+        "PORTFOLIO_REVIEW_R1_REHEARSAL",
     }
-    return {
+    environment = {
         key: value
         for key, value in source.items()
         if not key.startswith("PG") and key not in blocked
     }
+    environment["LC_ALL"] = "C"
+    return environment
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -335,10 +339,12 @@ def _table_checksum(
     environment: Mapping[str, str],
     database: str,
 ) -> str:
-    if table not in {
-        "portfolio_mandate_journal_event_a1",
-        "portfolio_mandate_decision_projection_a1",
-    }:
+    if {
+        "portfolio_mandate_journal_event_a1": "journal_event_id",
+        "portfolio_mandate_decision_projection_a1": "decision_id",
+        "portfolio_mandate_review_policy_r1": "mandate_version_id",
+        "portfolio_mandate_review_observation_r1": "observation_id",
+    }.get(table) != order_column:
         raise RehearsalError("unsupported checksum table")
     _verify_identity(target, environment=environment, database=database)
     payload = _psql(
@@ -385,7 +391,8 @@ def _security_checksum(
           )
           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
           cross join pg_roles r
-          where n.nspname = 'public' and p.proname like '%_a1'
+          where n.nspname in ('public', 'portfolio_mandate_private')
+            and (p.proname like '%_a1' or p.proname like '%_r1')
             and r.rolname in ('anon','authenticated','service_role',
                              'portfolio_mandate_candidate_submitter_a1')
         ) permissions;
@@ -407,7 +414,9 @@ def _write_evidence(path: Path, evidence: Mapping[str, Any]) -> None:
     temporary.replace(path)
 
 
-def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
+def run_rehearsal(
+    repo_root: Path, evidence_path: Path, *, include_review: bool = False
+) -> dict[str, Any]:
     environment = _sanitized_environment(os.environ)
     temporary_root = Path(
         tempfile.mkdtemp(prefix=_TEMP_PREFIX, dir="/private/tmp")
@@ -482,6 +491,8 @@ def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
                 "PORTFOLIO_MANDATE_A1_TEST_DATA_DIR": str(data_directory),
             }
         )
+        if include_review:
+            test_environment["PORTFOLIO_REVIEW_R1_REHEARSAL"] = "1"
         _run(
             [
                 sys.executable,
@@ -592,6 +603,24 @@ def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
             )
             == security_checksum,
         }
+        if include_review:
+            for table, key in (
+                ("portfolio_mandate_review_policy_r1", "mandate_version_id"),
+                ("portfolio_mandate_review_observation_r1", "observation_id"),
+            ):
+                checksum_matches[table] = _table_checksum(
+                    target,
+                    table,
+                    key,
+                    environment=environment,
+                    database=target.database,
+                ) == _table_checksum(
+                    target,
+                    table,
+                    key,
+                    environment=environment,
+                    database=restore_database,
+                )
         if not all(checksum_matches.values()):
             failed = ", ".join(
                 name for name, matches in checksum_matches.items() if not matches
@@ -685,12 +714,23 @@ def run_rehearsal(repo_root: Path, evidence_path: Path) -> dict[str, Any]:
         temporary_directory_removed=temporary_directory_removed,
         **rehearsal_data,
     )
+    if include_review:
+        evidence["review_schema_version"] = "portfolio-review.r1"
+        evidence["review_migration_sha256"] = _sha256_bytes(
+            (repo_root / R1_MIGRATION).read_bytes()
+        )
+        evidence["review_policy_and_observation_restore_verified"] = True
     _write_evidence(evidence_path, evidence)
     return evidence
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--include-review",
+        action="store_true",
+        help="also verify the approved R1 extension on this new disposable cluster",
+    )
     parser.add_argument(
         "--evidence",
         type=Path,
@@ -702,7 +742,9 @@ def main() -> int:
     evidence_path = args.evidence
     if not evidence_path.is_absolute():
         evidence_path = repo_root / evidence_path
-    evidence = run_rehearsal(repo_root, evidence_path)
+    evidence = run_rehearsal(
+        repo_root, evidence_path, include_review=args.include_review
+    )
     print(
         json.dumps(
             {

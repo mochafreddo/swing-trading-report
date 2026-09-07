@@ -639,6 +639,13 @@ LONG_TERM writer, board, alert와
 `SELL/HOLD` compiler 경로를 만들지 않는다. AI candidate와 자유 텍스트는
 `REVIEW_ONLY`이며 주문이나 Toss write capability를 만들지 않는다.
 
+R1 복합 검토는 원래 승인된 `THESIS_INVALIDATED_REVIEW_REQUIRED` 효과를 유지한다.
+분기 조건의 ALL/ANY와 minimum matches/연속 분기를 결측 포함 3값 논리로 비교하며,
+정정은 이전 관측을 대체한다. 미승인·stale·allocation mismatch는 먼저 차단하고,
+YEAR/TRAILING_YEAR/EVENT·등급 순서·자유 규칙의 미정 매핑은 REVIEW로 남긴다.
+모든 결과의 action은 null이다. [R1 계약](portfolio-review-r1-contract.md)의 합성
+검증은 실제 LONG_TERM gate나 방향성 action authority가 아니다.
+
 ### 7.4 LONG_TERM T13 합성 정책
 
 T13은 A1 persistence 계약을 변경하거나 실제 mandate를 활성화하지 않고, 공유 합성

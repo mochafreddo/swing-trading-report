@@ -2,12 +2,15 @@ import Link from "next/link";
 
 import {
   mandateReviewProjectionSchema,
+  portfolioReviewR1Schema,
   type PortfolioDogfoodT14Source,
 } from "@/lib/portfolio-dogfood-t14-schema";
 import reviewFixture from "../../fixtures/portfolio-mandate-review.a1.synthetic.json";
+import compositeFixture from "../../fixtures/portfolio-review.r1.synthetic.json";
 
 import styles from "./today-decision-board.module.css";
 
+const compositeReview = portfolioReviewR1Schema.safeParse(compositeFixture);
 const review = mandateReviewProjectionSchema.safeParse(reviewFixture);
 
 export function MandateEvidenceOutcomeDogfood({
@@ -205,6 +208,56 @@ export function MandateEvidenceOutcomeDogfood({
                   <p>
                     Exact mandate version:{" "}
                     <code>{row.mandate_version_id ?? "NONE"}</code>
+                  </p>
+                </article>
+              ))}
+            </div>
+          </>
+        )}
+      </details>
+      <details className={styles.dogfoodScenario}>
+        <summary>Long-term composite review · SYNTHETIC_ONLY</summary>
+        {!compositeReview.success ? (
+          <p role="status">INVALID COMPOSITE REVIEW</p>
+        ) : (
+          <>
+            <p>
+              Eight synthetic mandates from one database snapshot, frozen at{" "}
+              {compositeReview.data.as_of}. Quarter:{" "}
+              {compositeReview.data.review_period}. This independent replay
+              stays unchanged when the scenario above changes.
+            </p>
+            <p>
+              Review required means inspect the evidence. No buy, sell or hold
+              recommendation; no production database connection.
+            </p>
+            <div
+              className={styles.dogfoodFlow}
+              aria-label="Long-term composite review rows"
+            >
+              {compositeReview.data.rows.map((row, index) => (
+                <article key={row.mandate_version_id}>
+                  <h4>
+                    Mandate {index + 1} · {row.status.replaceAll("_", " ")}
+                  </h4>
+                  <p>
+                    {row.issue_codes.length
+                      ? row.issue_codes.join(" · ")
+                      : "No additional review issues in this snapshot."}
+                  </p>
+                  <p>
+                    {row.matched_hard_trigger_count} confirmed hard triggers ·
+                    deterioration{" "}
+                    {row.deterioration_confirmed
+                      ? "confirmed"
+                      : "not confirmed"}
+                  </p>
+                  <p>
+                    {row.current_observation_count} current observations ·{" "}
+                    {row.superseded_observation_count} superseded observations
+                  </p>
+                  <p>
+                    Exact mandate version: <code>{row.mandate_version_id}</code>
                   </p>
                 </article>
               ))}

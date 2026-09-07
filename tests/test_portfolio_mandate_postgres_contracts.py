@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse, urlunsplit
 
@@ -13,6 +16,10 @@ from sab.portfolio_mandate.persistence_rehearsal import (
     PortfolioMandatePersistenceT16,
     T16ActivationCommand,
     T16DisposableTarget,
+)
+from sab.portfolio_mandate.review_policy import (
+    compile_portfolio_review_r1,
+    read_portfolio_review_r1,
 )
 
 _MIGRATION = Path("supabase/migrations/20260828230000_create_portfolio_mandate_a1.sql")
@@ -607,7 +614,11 @@ def _seed_predicate_case(
     dsn: _DisposablePostgresConnection,
     *,
     case: str,
+    source_time: datetime | None = None,
 ) -> dict[str, str]:
+    source_time = source_time or datetime(2026, 8, 29, tzinfo=UTC)
+    source_at = source_time.isoformat()
+    sealed_at = (source_time + timedelta(minutes=1)).isoformat()
     ids = _seed_activation_case(dsn, case=case)
     ids.update(
         {
@@ -657,9 +668,9 @@ def _seed_predicate_case(
         set role service_role;
         select * from public.seal_evidence_identity_a1(
           '{ids["seal_command"]}', '{ids["evidence_seal"]}', '{ids["source"]}',
-          '{ids["instrument"]}', 'synthetic-v1', '2026-08-29T00:00:00Z',
+          '{ids["instrument"]}', 'synthetic-v1', '{source_at}',
           'INTERNAL', '{identifier}', 'INSTRUMENT', 'XNAS', '{ticker}',
-          '2026-08-29T00:01:00Z', 'SOURCE_VALIDATOR'
+          '{sealed_at}', 'SOURCE_VALIDATOR'
         );
         """,
     )
@@ -778,7 +789,10 @@ def portfolio_mandate_postgres_dsn(
         language sql stable
         set search_path = pg_catalog
         as $$
-          select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+          select coalesce(
+            nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub',
+            nullif(current_setting('request.jwt.claim.sub', true), '')
+          )::uuid
         $$;
         create schema if not exists extensions;
         """,
@@ -1722,3 +1736,228 @@ def test_candidate_role_can_submit_review_only_but_cannot_write_authority(
         authority_error
     )
     assert "permission denied" in table_error
+
+
+@pytest.fixture(scope="session")
+def review_r1_db(portfolio_mandate_postgres_dsn, tmp_path_factory):
+    if os.environ.get("PORTFOLIO_REVIEW_R1_REHEARSAL") != "1":
+        pytest.skip("R1 disposable extension is explicit opt-in")
+    dsn = portfolio_mandate_postgres_dsn
+    migration = Path(
+        "supabase/migrations/20260907150228_create_portfolio_review_r1.sql"
+    )
+    broken = tmp_path_factory.mktemp("review-r1") / "late.sql"
+    broken.write_text(migration.read_text() + "\nselect 1/0;\n")
+    assert "division by zero" in _psql_error(dsn, file=broken)
+    assert (
+        _psql(
+            dsn,
+            sql="select to_regclass('public.portfolio_mandate_review_policy_r1') is null;",
+        )
+        == "t"
+    )
+    _psql(dsn, file=migration)
+    # No actual mandate/account document enters this disposable fixture.
+    source = json.loads(
+        Path(
+            "tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json"
+        ).read_text()
+    )
+    owner = _uuid("r1-owner")
+    cases = []
+    for index, holding in enumerate(source["holdings"]):
+        ids = _seed_predicate_case(
+            dsn, case=f"r1-{index}", source_time=datetime.now(UTC) - timedelta(days=1)
+        )
+        document = json.dumps(holding).replace("'", "''")
+        _psql(
+            dsn,
+            sql=f"""
+          update public.portfolio_mandate_a1 set owner_actor_id='{owner}' where mandate_id='{ids["mandate"]}';
+          update public.portfolio_mandate_version_a1 set horizon='LONG_TERM' where mandate_version_id='{ids["active_version"]}';
+          update public.portfolio_mandate_broker_snapshot_a1 set captured_at=statement_timestamp()-interval '1 minute' where broker_position_id='{ids["position"]}';
+          insert into public.portfolio_mandate_review_policy_r1(mandate_version_id,source_document_sha256,holding_document)
+          values ('{ids["active_version"]}', 'sha256:{"a" * 64}', '{document}');
+        """,
+        )
+        cases.append(ids)
+    ids = cases[0]
+    for index, metric, value in [
+        (0, "organic_growth", "-1"),
+        (1, "operating_margin", "9"),
+    ]:
+        _psql(
+            dsn,
+            sql=f"""
+          insert into public.portfolio_mandate_review_observation_r1(
+            observation_id,mandate_version_id,rule_path,period_key,metric,unit,observed_value,
+            evidence_seal_id,source_content_sha256,source_tier,authority,parser_version)
+          values ('{_uuid(f"r1-obs-{index}")}','{ids["active_version"]}','hard_triggers/0/{index}',
+            '2026Q2','{metric}','PERCENT','"{value}"','{ids["evidence_seal"]}',
+            'sha256:{"c" * 64}','PRIMARY','DETERMINISTIC_PARSER','synthetic-v1');
+        """,
+        )
+    return dsn, owner, cases
+
+
+def _r1_call(owner, versions):
+    assert all(str(uuid.UUID(v)) == v for v in versions)
+    ids = ",".join(f"'{v}'::uuid" for v in versions)
+    return f"""
+      set role authenticated;
+      set request.jwt.claims='{{"role":"authenticated","sub":"{owner}"}}';
+      select public.read_portfolio_review_r1(array[{ids}]);
+    """
+
+
+def test_r1_rpc_compiles_eight_synthetic_policies_and_denies_other_owners(review_r1_db):
+    dsn, owner, cases = review_r1_db
+    versions = [c["active_version"] for c in cases]
+    calls = []
+    envelopes = []
+
+    def rpc(name, params):
+        calls.append(name)
+        envelope = json.loads(_psql(dsn, sql=_r1_call(owner, params["p_version_ids"])))
+        envelopes.append(envelope)
+        return envelope
+
+    result = read_portfolio_review_r1(
+        rpc,
+        versions,
+        enabled=True,
+        review_period="2026Q2",
+        broker_max_age_seconds=600,
+        evidence_max_age_seconds=180 * 86400,
+    )
+    assert calls == ["read_portfolio_review_r1"]
+    assert len(result["rows"]) == 8 and result["advice_enabled"] is False
+    first = next(r for r in result["rows"] if r["mandate_version_id"] == versions[0])
+    assert first["status"] == "THESIS_INVALIDATED_REVIEW_REQUIRED"
+    assert all(r["action"] is None for r in result["rows"])
+    assert "REVIEW_READ_UNAUTHORIZED" in _psql_error(
+        dsn, sql=_r1_call(_uuid("r1-stranger"), versions)
+    )
+    assert "REVIEW_READ_UNAUTHORIZED" in _psql_error(
+        dsn, sql=_r1_call(owner, [*versions, _uuid("missing")])
+    )
+    assert "REVIEW_VERSION_SET_INVALID" in _psql_error(
+        dsn, sql=_r1_call(owner, [versions[0]] * 2)
+    )
+    if os.environ.get("PORTFOLIO_REVIEW_R1_EXPORT") == "1":
+        Path(
+            "tests/fixtures/portfolio_mandate/portfolio-review-r1.rpc.synthetic.json"
+        ).write_text(json.dumps(envelopes[0], indent=2) + "\n")
+        Path("web/fixtures/portfolio-review.r1.synthetic.json").write_text(
+            json.dumps(result, indent=2) + "\n"
+        )
+    else:
+        fixture = json.loads(
+            Path("web/fixtures/portfolio-review.r1.synthetic.json").read_text()
+        )
+        # SQL uses its live statement clock; the committed Web replay is frozen.
+        # Annual-review issue codes may change without changing these outcomes.
+        for field in ("mandate_version_id", "status", "matched_hard_trigger_count"):
+            assert [r[field] for r in result["rows"]] == [
+                r[field] for r in fixture["rows"]
+            ]
+
+
+def test_r1_table_grants_append_only_and_null_policy_fail_closed(review_r1_db):
+    dsn, _owner, cases = review_r1_db
+    version = cases[0]["active_version"]
+    for role in (
+        "anon",
+        "authenticated",
+        "service_role",
+        "portfolio_mandate_candidate_submitter_a1",
+    ):
+        assert "permission denied" in _psql_error(
+            dsn,
+            sql=f"set role {role}; select * from public.portfolio_mandate_review_policy_r1;",
+        )
+        assert (
+            _psql(
+                dsn,
+                sql=f"select has_table_privilege('{role}','public.portfolio_mandate_review_observation_r1','INSERT');",
+            )
+            == "f"
+        )
+    assert "permission denied" in _psql_error(
+        dsn,
+        sql=f"set role service_role; select public.read_portfolio_review_r1(array['{version}'::uuid]);",
+    )
+    assert "append-only" in _psql_error(
+        dsn,
+        sql=f"update public.portfolio_mandate_review_policy_r1 set holding_document='{{}}' where mandate_version_id='{version}';",
+    )
+    null_doc = json.dumps(
+        {
+            "approval_state": None,
+            "classification_state": "ACTIVE",
+            "horizon": "LONG_TERM",
+            "invalidation_policy": {},
+            "review_cadence": {},
+        }
+    ).replace("'", "''")
+    assert "check constraint" in _psql_error(
+        dsn,
+        sql=f"insert into public.portfolio_mandate_review_policy_r1(mandate_version_id,source_document_sha256,holding_document) values ('{cases[0]['draft_version']}','sha256:{'b' * 64}','{null_doc}');",
+    )
+    assert (
+        _psql(
+            dsn,
+            sql="select bool_and(relrowsecurity and relforcerowsecurity) from pg_class where relname in ('portfolio_mandate_review_policy_r1','portfolio_mandate_review_observation_r1');",
+        )
+        == "t"
+    )
+
+
+def test_r1_stable_rpc_uses_statement_snapshot_during_concurrent_broker_change(
+    review_r1_db,
+):
+    dsn, owner, cases = review_r1_db
+    ids = cases[-1]
+    call = _r1_call(owner, [ids["active_version"]])
+    query = call.replace(
+        "select public.read_portfolio_review_r1",
+        "set application_name='r1-snapshot-reader'; with pause as materialized (select pg_sleep(2)) select public.read_portfolio_review_r1",
+    ).replace("]);", "]) from pause;")
+    reader = _psql_process(dsn, sql=query)
+    try:
+        deadline = time.monotonic() + 5
+        while (
+            _psql(
+                dsn,
+                sql="select exists(select 1 from pg_stat_activity where application_name='r1-snapshot-reader' and wait_event='PgSleep');",
+            )
+            != "t"
+        ):
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        _psql(
+            dsn,
+            sql=f"""
+          insert into public.portfolio_mandate_broker_snapshot_a1(
+            broker_position_snapshot_id,broker_position_id,snapshot_version,quantity,currency,watermark,sealed_input_hash,captured_at)
+          values ('{_uuid("r1-new-snapshot")}','{ids["position"]}',2,10,'USD','r1-new-watermark','sha256:{"d" * 64}',statement_timestamp());
+        """,
+        )
+        stdout, stderr = reader.communicate(timeout=8)
+        assert reader.returncode == 0, stderr
+        before = json.loads(json.loads(stdout)["payload"])["rows"][0]
+        after = json.loads(json.loads(_psql(dsn, sql=call))["payload"])["rows"][0]
+        assert before["broker"]["snapshot_version"] == 1
+        assert after["broker"]["snapshot_version"] == 2
+        envelope = json.loads(_psql(dsn, sql=call))
+        blocked = compile_portfolio_review_r1(
+            envelope,
+            review_period="2026Q2",
+            broker_max_age_seconds=600,
+            evidence_max_age_seconds=180 * 86400,
+        )
+        assert "ALLOCATION_REBASE_REQUIRED" in blocked["rows"][0]["issue_codes"]
+    finally:
+        if reader.poll() is None:
+            reader.terminate()
+            reader.communicate(timeout=5)
