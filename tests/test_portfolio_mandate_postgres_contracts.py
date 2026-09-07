@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,10 +18,19 @@ from sab.portfolio_mandate.persistence_rehearsal import (
     T16ActivationCommand,
     T16DisposableTarget,
 )
+from sab.portfolio_mandate.review_import import (
+    import_review_packet,
+    replay_review_packet,
+)
 from sab.portfolio_mandate.review_policy import (
+    _hash,
     compile_portfolio_review_r1,
     read_portfolio_review_r1,
 )
+from sab.portfolio_mandate.review_store import ReviewStore, compiler_sql
+
+from tests.test_portfolio_review_r1 import envelope, identity
+from tests.test_portfolio_review_store import synthetic_import
 
 _MIGRATION = Path("supabase/migrations/20260828230000_create_portfolio_mandate_a1.sql")
 _ALLOW_ENV = "PORTFOLIO_MANDATE_A1_ALLOW_DISPOSABLE"
@@ -1758,11 +1768,10 @@ def review_r1_db(portfolio_mandate_postgres_dsn, tmp_path_factory):
     )
     _psql(dsn, file=migration)
     # No actual mandate/account document enters this disposable fixture.
-    source = json.loads(
-        Path(
-            "tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json"
-        ).read_text()
-    )
+    original = Path(
+        "tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json"
+    ).read_text()
+    source = json.loads(original)
     owner = _uuid("r1-owner")
     cases = []
     for index, holding in enumerate(source["holdings"]):
@@ -1777,7 +1786,7 @@ def review_r1_db(portfolio_mandate_postgres_dsn, tmp_path_factory):
           update public.portfolio_mandate_version_a1 set horizon='LONG_TERM' where mandate_version_id='{ids["active_version"]}';
           update public.portfolio_mandate_broker_snapshot_a1 set captured_at=statement_timestamp()-interval '1 minute' where broker_position_id='{ids["position"]}';
           insert into public.portfolio_mandate_review_policy_r1(mandate_version_id,source_document_sha256,holding_document)
-          values ('{ids["active_version"]}', 'sha256:{"a" * 64}', '{document}');
+          values ('{ids["active_version"]}', '{_hash(original)}', '{document}');
         """,
         )
         cases.append(ids)
@@ -1794,7 +1803,7 @@ def review_r1_db(portfolio_mandate_postgres_dsn, tmp_path_factory):
             evidence_seal_id,source_content_sha256,source_tier,authority,parser_version)
           values ('{_uuid(f"r1-obs-{index}")}','{ids["active_version"]}','hard_triggers/0/{index}',
             '2026Q2','{metric}','PERCENT','"{value}"','{ids["evidence_seal"]}',
-            'sha256:{"c" * 64}','PRIMARY','DETERMINISTIC_PARSER','synthetic-v1');
+            '{_hash("Synthetic PRIMARY source; no provider request.")}','PRIMARY','DETERMINISTIC_PARSER','synthetic-v1');
         """,
         )
     return dsn, owner, cases
@@ -1961,3 +1970,422 @@ def test_r1_stable_rpc_uses_statement_snapshot_during_concurrent_broker_change(
         if reader.poll() is None:
             reader.terminate()
             reader.communicate(timeout=5)
+
+
+_R2_MIGRATION = Path(
+    "supabase/migrations/20260907155523_create_portfolio_review_store_r2.sql"
+)
+
+
+@pytest.fixture(scope="session")
+def store_db(review_r1_db, tmp_path_factory):
+    if os.environ.get("PORTFOLIO_REVIEW_R2_REHEARSAL") != "1":
+        pytest.skip("R2 disposable extension is explicit opt-in")
+    dsn, owner, cases = review_r1_db
+    broken = tmp_path_factory.mktemp("r2-migration") / "late.sql"
+    broken.write_text(_R2_MIGRATION.read_text() + "\nselect 1/0;")
+    assert "division by zero" in _psql_error(dsn, file=broken)
+    assert (
+        _psql(
+            dsn,
+            sql="select to_regclass('public.portfolio_mandate_review_run_r2') is null;",
+        )
+        == "t"
+    )
+    assert (
+        _psql(
+            dsn,
+            sql="select count(*) from pg_roles where rolname='portfolio_mandate_review_compiler_r2';",
+        )
+        == "0"
+    )
+    _psql(dsn, file=_R2_MIGRATION)
+    return dsn, owner, cases
+
+
+def bundle_for(db, *, blocked=False):
+    dsn, owner, cases = db
+    raw = json.loads(_psql(dsn, sql=_r1_call(owner, [cases[0]["active_version"]])))
+    value = json.loads(raw["payload"])
+    if blocked:
+        value["rows"][0]["broker"] = None
+        raw = envelope(value)
+    original = Path(
+        "tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json"
+    ).read_text()
+    _, bindings = synthetic_import(value, owner, original)
+    return import_review_packet(raw, **bindings)
+
+
+def store_for(dsn, *, fail_late=False):
+    def rpc(name, params):
+        sql = compiler_sql(name, params)
+        if fail_late:
+            sql = "begin;" + sql + "select 1/0; commit;"
+        try:
+            raw = _psql(dsn, sql=sql)
+        except pytest.fail.Exception:
+            raise ValueError("SYNTHETIC_SQL_FAILURE") from None
+        return json.loads(raw) if raw else None
+
+    return ReviewStore(rpc, enabled=True)
+
+
+def commit_args(owner, label):
+    return {
+        "owner_id": owner,
+        "run_id": identity(label),
+        "trigger_id": identity(label + "-trigger"),
+    }
+
+
+def read_store(dsn, owner, versions):
+    return json.loads(
+        _psql(
+            dsn,
+            sql=_r1_call(owner, versions).replace(
+                "read_portfolio_review_r1", "read_portfolio_review_store_r2"
+            ),
+        )
+    )
+
+
+def test_r2_import_commit_today_replay_and_privacy(store_db):
+    dsn, owner, cases = store_db
+    bundle = bundle_for(store_db)
+    args = commit_args(owner, "r2-happy")
+    assert store_for(dsn).commit(bundle, **args)["status"] == "COMPILED"
+    assert store_for(dsn).commit(bundle, **args)["duplicate"]
+    stored = json.loads(
+        _psql(
+            dsn,
+            sql=f"select jsonb_build_object('packet',p.packet,'packet_sha256',p.packet_sha256,'projection',r.projection,'projection_sha256',r.projection_sha256) from public.portfolio_mandate_review_packet_r2 p join public.portfolio_mandate_review_run_r2 r on r.run_id=p.packet_id where r.run_id='{args['run_id']}';",
+        )
+    )
+    assert replay_review_packet(stored) == replay_review_packet(bundle)
+    today = read_store(dsn, owner, [cases[0]["active_version"]])
+    assert today["rows"][0]["run_id"] == args["run_id"]
+    assert today["rows"][0]["review"]["action"] is None
+    assert not today["advice_enabled"]
+    assert all(
+        s not in json.dumps(today)
+        for s in ("holding_document", "observed_value", "owner_id", "Synthetic PRIMARY")
+    )
+    assert (
+        read_store(dsn, owner, [cases[1]["active_version"]])["rows"][0]["run_id"]
+        is None
+    )
+
+
+def test_r2_denies_roles_other_owners_and_mutation(store_db):
+    dsn, _owner, cases = store_db
+    for role in (
+        "anon",
+        "authenticated",
+        "service_role",
+        "portfolio_mandate_candidate_submitter_a1",
+        "portfolio_mandate_review_compiler_r2",
+    ):
+        for table in ("packet", "run", "decision", "journal", "outcome", "outbox"):
+            assert "permission denied" in _psql_error(
+                dsn,
+                sql=f"set role {role}; select * from public.portfolio_mandate_review_{table}_r2;",
+            )
+    assert "REVIEW_READ_UNAUTHORIZED" in _psql_error(
+        dsn,
+        sql=_r1_call(identity("other-owner"), [cases[0]["active_version"]]).replace(
+            "read_portfolio_review_r1", "read_portfolio_review_store_r2"
+        ),
+    )
+    with pytest.raises(ValueError, match="REVIEW_STORE_UNAVAILABLE"):
+        store_for(dsn).commit(
+            bundle_for(store_db), **commit_args(identity("other-owner"), "r2-other")
+        )
+    for table in ("packet", "run", "decision", "journal"):
+        assert "append-only" in _psql_error(
+            dsn, sql=f"delete from public.portfolio_mandate_review_{table}_r2;"
+        )
+    assert (
+        _psql(
+            dsn,
+            sql="select count(*) from pg_auth_members m join pg_roles r on r.oid=m.roleid where r.rolname='portfolio_mandate_review_compiler_r2';",
+        )
+        == "0"
+    )
+
+
+def test_r2_late_failure_rolls_back_every_table_and_retry_conflict(store_db):
+    dsn, owner, _ = store_db
+    bundle = bundle_for(store_db)
+    args = commit_args(owner, "r2-late")
+    before = _psql(
+        dsn,
+        sql="select (select count(*) from public.portfolio_mandate_review_packet_r2),(select count(*) from public.portfolio_mandate_review_run_r2),(select count(*) from public.portfolio_mandate_review_decision_r2),(select count(*) from public.portfolio_mandate_review_journal_r2),(select count(*) from public.portfolio_mandate_review_outbox_r2);",
+    )
+    with pytest.raises(ValueError):
+        store_for(dsn, fail_late=True).commit(bundle, **args)
+    after = _psql(
+        dsn,
+        sql="select (select count(*) from public.portfolio_mandate_review_packet_r2),(select count(*) from public.portfolio_mandate_review_run_r2),(select count(*) from public.portfolio_mandate_review_decision_r2),(select count(*) from public.portfolio_mandate_review_journal_r2),(select count(*) from public.portfolio_mandate_review_outbox_r2);",
+    )
+    assert before == after
+    store_for(dsn).commit(bundle, **args)
+    with pytest.raises(ValueError):
+        store_for(dsn).commit(bundle_for(store_db, blocked=True), **args)
+
+
+def test_r2_concurrent_retry_correction_blocked_and_local_sink(store_db):
+    dsn, owner, cases = store_db
+    bundle = bundle_for(store_db)
+    args = commit_args(owner, "r2-concurrent")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(store_for(dsn).commit, bundle, **args) for _ in range(2)]
+        assert sorted(f.result()["duplicate"] for f in futures) == [False, True]
+    # A later snapshot is a new revision; BLOCKED must replace the Today result.
+    newer = bundle_for(store_db, blocked=True)
+    corrected = {
+        **args,
+        "run_id": identity("r2-corrected"),
+        "revision": 2,
+        "supersedes": args["run_id"],
+    }
+    assert store_for(dsn).commit(newer, **corrected)["status"] == "BLOCKED"
+    assert (
+        read_store(dsn, owner, [cases[0]["active_version"]])["rows"][0]["run_status"]
+        == "BLOCKED"
+    )
+    assert (
+        _psql(
+            dsn,
+            sql=f"select count(*) from public.portfolio_mandate_review_decision_r2 where run_id='{corrected['run_id']}';",
+        )
+        == "0"
+    )
+    with pytest.raises(ValueError):
+        store_for(dsn).commit(newer, **{**corrected, "run_id": identity("r2-fork")})
+    receipt = f"set role portfolio_mandate_review_compiler_r2; select portfolio_mandate_private.receive_local_outbox_r2('{owner}');"
+    assert int(_psql(dsn, sql=receipt)) > 0
+    assert _psql(dsn, sql=receipt) == "0"
+
+
+def test_r2_outcome_correction_is_unlinked_and_exports_synthetic_today(store_db):
+    dsn, owner, cases = store_db
+    args = commit_args(owner, "r2-outcomes")
+    store = store_for(dsn)
+    store.commit(bundle_for(store_db), **args)
+    event = {
+        "owner_id": owner,
+        "run_id": args["run_id"],
+        "outcome_id": identity("r2-unlinked"),
+        "status": "UNLINKED",
+    }
+    store.record_outcome(**event)
+    store.record_outcome(**event)
+    store.record_outcome(
+        **{
+            **event,
+            "outcome_id": identity("r2-ambiguous"),
+            "status": "AMBIGUOUS",
+            "supersedes": event["outcome_id"],
+        }
+    )
+    with pytest.raises(ValueError):
+        store.record_outcome(
+            **{
+                **event,
+                "outcome_id": identity("r2-fork-outcome"),
+                "supersedes": event["outcome_id"],
+            }
+        )
+    today = read_store(
+        dsn, owner, [cases[0]["active_version"], cases[1]["active_version"]]
+    )
+    row = next(r for r in today["rows"] if r["run_id"] is not None)
+    assert [o["status"] for o in row["outcomes"]] == ["UNLINKED", "AMBIGUOUS"]
+    assert "fill_id" not in json.dumps(today)
+    # Optional export is confined to synthetic fixture output, never private inputs.
+    if os.environ.get("PORTFOLIO_REVIEW_R2_EXPORT") == "1":
+        Path("web/fixtures/portfolio-review-store.r2.synthetic.json").write_text(
+            json.dumps(today, indent=2) + "\n"
+        )
+
+
+def test_r2_no_action_requires_authenticated_owner(store_db):
+    dsn, owner, _ = store_db
+    args = commit_args(owner, "r2-no-action")
+    store = store_for(dsn)
+    store.commit(bundle_for(store_db), **args)
+    event_id = identity("r2-no-action-event")
+    with pytest.raises(ValueError, match="REVIEW_OUTCOME_REJECTED"):
+        store.record_outcome(
+            owner_id=owner,
+            run_id=args["run_id"],
+            outcome_id=event_id,
+            status="NO_ACTION",
+            confirmed_actor_id=owner,
+        )
+    call = f"select public.confirm_portfolio_review_no_action_r2('{args['run_id']}','{event_id}',null);"
+    for role in ("anon", "service_role"):
+        assert "permission denied" in _psql_error(dsn, sql=f"set role {role};" + call)
+    assert "REVIEW_OUTCOME_OWNER_MISMATCH" in _psql_error(
+        dsn,
+        sql=f'set role authenticated; set request.jwt.claims=\'{{"role":"authenticated","sub":"{identity("other-owner")}"}}\';'
+        + call,
+    )
+    _psql(
+        dsn,
+        sql=f'set role authenticated; set request.jwt.claims=\'{{"role":"authenticated","sub":"{owner}"}}\';'
+        + call
+        + call,
+    )
+    assert (
+        _psql(
+            dsn,
+            sql=f"select count(*) from public.portfolio_mandate_review_outcome_r2 where outcome_id='{event_id}';",
+        )
+        == "1"
+    )
+
+
+def test_r2_older_snapshot_and_rewritten_observation_cannot_replace_latest(store_db):
+    from sab.portfolio_mandate.review_import import canonical
+    from sab.portfolio_mandate.review_policy import _hash
+
+    dsn, owner, cases = store_db
+    old = bundle_for(store_db)
+    current = bundle_for(store_db)
+    args = commit_args(owner, "r2-freshness")
+    store_for(dsn).commit(current, **args)
+    with pytest.raises(ValueError):
+        store_for(dsn).commit(old, **commit_args(owner, "r2-delayed"))
+    changed = json.loads(json.loads(bundle_for(store_db)["packet"])["input"]["payload"])
+    changed["rows"][0]["observations"][0]["observed_value"] = "2"
+    raw, bindings = synthetic_import(
+        changed,
+        owner,
+        Path(
+            "tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json"
+        ).read_text(),
+    )
+    rewritten = import_review_packet(raw, **bindings)
+    with pytest.raises(ValueError):
+        store_for(dsn).commit(
+            rewritten,
+            **{
+                **args,
+                "run_id": identity("r2-rewrite"),
+                "revision": 2,
+                "supersedes": args["run_id"],
+            },
+        )
+    assert (
+        read_store(dsn, owner, [cases[0]["active_version"]])["rows"][0]["run_id"]
+        == args["run_id"]
+    )
+    # A trusted compiler role is still denied extra private output fields by SQL.
+    forged = dict(current)
+    projection = json.loads(forged["projection"])
+    projection["rows"][0]["private_note"] = "PRIVATE_SENTINEL"
+    forged["projection"] = canonical(projection)
+    forged["projection_sha256"] = _hash(forged["projection"])
+    sql = compiler_sql(
+        "commit_review_r2",
+        {
+            "p_run_id": identity("r2-forged"),
+            "p_owner_id": owner,
+            "p_trigger_id": identity("r2-forged-trigger"),
+            "p_revision": 1,
+            "p_supersedes": None,
+            "p_bundle": forged,
+        },
+    )
+    assert "REVIEW_STORE_INVALID" in _psql_error(dsn, sql=sql)
+
+
+def test_r2_initial_policy_import_is_atomic_with_review_result(store_db):
+    dsn, owner, _ = store_db
+    ids = _seed_predicate_case(
+        dsn, case="r2-initial-import", source_time=datetime.now(UTC) - timedelta(days=1)
+    )
+    _psql(
+        dsn,
+        sql=f"update public.portfolio_mandate_a1 set owner_actor_id='{owner}' where mandate_id='{ids['mandate']}'; update public.portfolio_mandate_version_a1 set horizon='LONG_TERM' where mandate_version_id='{ids['active_version']}';",
+    )
+    raw = json.loads(_psql(dsn, sql=_r1_call(owner, [ids["active_version"]])))
+    value = json.loads(raw["payload"])
+    original = Path(
+        "tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json"
+    ).read_text()
+    row = value["rows"][0]
+    row["holding_document"] = json.dumps(json.loads(original)["holdings"][0])
+    row["holding_sha256"] = _hash(row["holding_document"])
+    row["source_document_sha256"] = _hash(original)
+    row["policy_recorded_at"] = value["read_at"]
+    _, bindings = synthetic_import(value, owner, original)
+    bundle = import_review_packet(envelope(value), **bindings)
+    args = commit_args(owner, "r2-initial-import")
+    with pytest.raises(ValueError):
+        store_for(dsn, fail_late=True).commit(bundle, **args)
+    assert (
+        _psql(
+            dsn,
+            sql=f"select count(*) from public.portfolio_mandate_review_policy_r1 where mandate_version_id='{ids['active_version']}';",
+        )
+        == "0"
+    )
+    store_for(dsn).commit(bundle, **args)
+    assert store_for(dsn).commit(bundle, **args)["duplicate"]
+    assert (
+        _psql(
+            dsn,
+            sql=f"select holding_sha256 from public.portfolio_mandate_review_policy_r1 where mandate_version_id='{ids['active_version']}';",
+        )
+        == row["holding_sha256"]
+    )
+
+
+def test_r2_observation_correction_import_changes_review_without_overwrite(store_db):
+    dsn, owner, cases = store_db
+    previous = bundle_for(store_db)
+    args = commit_args(owner, "r2-observation-import")
+    store_for(dsn).commit(previous, **args)
+    current = json.loads(json.loads(bundle_for(store_db)["packet"])["input"]["payload"])
+    row = current["rows"][0]
+    old = row["observations"][0]
+    correction = {
+        **old,
+        "observation_id": identity("r2-new-observation"),
+        "supersedes_observation_id": old["observation_id"],
+        "recorded_at": current["read_at"],
+        "observed_value": "2",
+    }
+    row["observations"].append(correction)
+    original = Path(
+        "tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json"
+    ).read_text()
+    raw, bindings = synthetic_import(current, owner, original)
+    bundle = import_review_packet(raw, **bindings)
+    updated = {
+        **args,
+        "run_id": identity("r2-corrected-observation-run"),
+        "revision": 2,
+        "supersedes": args["run_id"],
+    }
+    with pytest.raises(ValueError):
+        store_for(dsn, fail_late=True).commit(bundle, **updated)
+    assert (
+        _psql(
+            dsn,
+            sql=f"select count(*) from public.portfolio_mandate_review_observation_r1 where observation_id='{correction['observation_id']}';",
+        )
+        == "0"
+    )
+    store_for(dsn).commit(bundle, **updated)
+    assert _psql(
+        dsn,
+        sql=f"select observed_value::text from public.portfolio_mandate_review_observation_r1 where observation_id='{old['observation_id']}';",
+    ) == json.dumps(old["observed_value"])
+    today = read_store(dsn, owner, [cases[0]["active_version"]])
+    assert today["rows"][0]["review"]["superseded_observation_count"] == 1
+    assert today["rows"][0]["review"]["matched_hard_trigger_count"] == 0
+    assert replay_review_packet(bundle)["rows"][0]["action"] is None

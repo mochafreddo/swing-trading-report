@@ -164,3 +164,18 @@ read-back을 확인했다. 원본 계획에 적힌 0.098초는 직전 성공 리
 의존성 보강 재실행의 최신 RTO는 0.088초다. 어느 수치도 운영 DB 측정은 아니다.
 현재 로컬 작성 승인은 처리됐고 실제 DB apply/backfill/writer·credential/provider·
 배포·schedule/notification·push는 수행하지 않았다. 전체 운영 goal은 미완료다.
+
+
+## 2026-09-08 R2 로컬 통합 후속
+
+HEAD `edc37bd0`와 깨끗한 작업 트리에서 복원했다. 원본 `.gstack` 계획은 수정하지 않았다. 해당 계획의 남은 transport/importer/persistence 항목에는 다음 [R2 계약과 인계](portfolio-review-store-r2.md)의 완료 근거를 동기화할 수 있다.
+
+- default-off Python/Web authenticated transport, 독립 승인 원문·exact owner/version·PRIMARY content/seal importer를 추가했다. Web 관리자 세션을 Supabase 사용자로 간주하지 않는다.
+- R1 policy/observation 초기 import·정정과 sealed packet/run/review Decision/journal/local outbox를 원자적으로 저장한다. 동일 요청 재시도, 동시성, late rollback, 관측 덮어쓰기 거부, 오래된 snapshot 차단, canonical replay를 검증했다.
+- review-only Outcome의 `UNLINKED`/`AMBIGUOUS`와 인증 owner 확인 `NO_ACTION` 및 정정 이력을 저장·조회한다. 실제 order aggregate를 fill로 변환하지 않는다.
+- Today의 새 저장 영역은 폐기형 DB에서 내보낸 합성 snapshot을 보여 준다. 실제 default-off loader는 별도 사용자 session/owner/version 입력이 있어야 연결할 수 있다. 브라우저가 운영 DB나 writer에 연결된 화면으로 해석하지 않는다.
+- 수동 UX 화면: `http://127.0.0.1:43217/today#stored-review`. 공개 fixture 계정 `fixture-admin` / `fixture-password`. 실행/종료 명령과 기록 양식은 R2 계약에 있다. 합성 UX1–UX5와 실제 종목군 60초 무도움 결과는 여전히 `NOT_EVALUATED`다.
+
+새 폐기형 PostgreSQL 17.11에서 A1/R1/R2 **35개** 검사가 통과했다(기존 26 + 신규 9). 최신 복구는 **0.111초**, journal RPO 0, 신규 6개 table data·schema·권한/RLS checksum 및 authenticated read-only 조회 일치다. 매 실행 cluster 종료와 임시 데이터 디렉터리 정리를 확인했다. source/restore DB는 동일 폐기형 cluster에 있으므로 실제 cluster 재해 복구나 역할 재생성의 검증으로 확대하지 않는다. Advisor WARN/ERROR 0이며 deny-all RLS의 R2 INFO 6개는 의도한 결과다.
+
+최종 `just quality`는 Ruff/format/mypy 및 **3,686 passed / 37 skipped**로 통과했다. 37 skips는 별도 폐기형에서 실행한 A1/R1/R2 DB 28개와 미변경 broker DB 9개다. Web lint/format/typecheck, **112 files / 958 tests / coverage gate**, Next build를 통과했다. `just ci-web`의 install/clean/sync는 설치 금지와 기존 의존성 재사용에 따라 생략하고 같은 검사들을 root-env opt-out·CI placeholder로 직접 실행했다. 최종 fixture-only E2E는 **6 passed**이며 저장 흐름의 375/768/1280px·keyboard·refresh·stale/error·overflow와 기존 Today/Reports 흐름을 포함한다. 375/1280px 합성 화면을 육안 검토했다. 기존 calendar 의존성의 NumPy timedelta deprecation warning은 남아 있다. 실제 입력, DB 실행 승인, provider capability, v5 미래 표본/evaluator/human PASS 및 별도 LONG_TERM gate는 R2로 대체하지 않는다. 외부 notification·schedule·운영 Docker·push는 실행하지 않았다.

@@ -1,4 +1,11 @@
 import { Suspense } from "react";
+import { PortfolioStoredReview } from "@/components/portfolio-stored-review";
+import {
+  portfolioReviewStoreSchema,
+  type StoredReviewSource,
+} from "@/lib/portfolio-review-store-schema";
+import { readAuthenticatedStoredReviews } from "@/lib/portfolio-review-store.server";
+import storedReviewFixture from "../../../../fixtures/portfolio-review-store.r2.synthetic.json";
 
 import {
   TodayDecisionBoard,
@@ -158,11 +165,27 @@ async function TodayPageContent({
     loadTodayDecisionBoard(),
     searchParams,
   ]);
+  const synthetic =
+    process.env.SAB_SKIP_ROOT_ENV === "1" &&
+    process.env.SAB_PORTFOLIO_R2_FIXTURE === "1";
+  let stored: StoredReviewSource = await readAuthenticatedStoredReviews();
+  if (synthetic && (await hasValidAdminSession())) {
+    const value = portfolioReviewStoreSchema.safeParse(storedReviewFixture);
+    stored = value.success
+      ? { state: "READY", value: value.data }
+      : { state: "UNAVAILABLE" };
+    if (resolvedSearchParams.stored === "stale") stored = { state: "STALE" };
+    if (resolvedSearchParams.stored === "error")
+      stored = { state: "UNAVAILABLE" };
+  }
   return (
-    <TodayDecisionBoard
-      {...snapshot}
-      dogfoodSelection={readTodayDogfoodSelection(resolvedSearchParams)}
-    />
+    <>
+      <TodayDecisionBoard
+        {...snapshot}
+        dogfoodSelection={readTodayDogfoodSelection(resolvedSearchParams)}
+      />
+      <PortfolioStoredReview source={stored} synthetic={synthetic} />
+    </>
   );
 }
 

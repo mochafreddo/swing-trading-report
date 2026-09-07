@@ -23,6 +23,17 @@ from typing import Any
 A1_MIGRATION = Path(
     "supabase/migrations/20260828230000_create_portfolio_mandate_a1.sql"
 )
+R2_MIGRATION = Path(
+    "supabase/migrations/20260907155523_create_portfolio_review_store_r2.sql"
+)
+R2_TABLES = {
+    "portfolio_mandate_review_packet_r2": "packet_id",
+    "portfolio_mandate_review_run_r2": "run_id",
+    "portfolio_mandate_review_decision_r2": "decision_id",
+    "portfolio_mandate_review_journal_r2": "run_id",
+    "portfolio_mandate_review_outcome_r2": "outcome_id",
+    "portfolio_mandate_review_outbox_r2": "decision_id",
+}
 R1_MIGRATION = Path("supabase/migrations/20260907150228_create_portfolio_review_r1.sql")
 _EXPECTED_VERSION = "170011"
 _DATABASE_PREFIX = "portfolio_mandate_a1_test_"
@@ -71,17 +82,19 @@ class RehearsalTarget:
 
 
 def _sanitized_environment(source: Mapping[str, str]) -> dict[str, str]:
-    blocked = {
-        "PORTFOLIO_MANDATE_A1_ALLOW_DISPOSABLE",
-        "PORTFOLIO_MANDATE_A1_TEST_DSN",
-        "PORTFOLIO_MANDATE_A1_TEST_DATA_DIR",
-        "PORTFOLIO_REVIEW_R1_REHEARSAL",
+    allowed = {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "TMPDIR",
+        "LANG",
+        "UV_CACHE_DIR",
+        "VIRTUAL_ENV",
+        "PORTFOLIO_REVIEW_R2_EXPORT",
     }
-    environment = {
-        key: value
-        for key, value in source.items()
-        if not key.startswith("PG") and key not in blocked
-    }
+    environment = {key: value for key, value in source.items() if key in allowed}
+    environment["SAB_SKIP_ROOT_ENV"] = "1"
     environment["LC_ALL"] = "C"
     return environment
 
@@ -340,6 +353,7 @@ def _table_checksum(
     database: str,
 ) -> str:
     if {
+        **R2_TABLES,
         "portfolio_mandate_journal_event_a1": "journal_event_id",
         "portfolio_mandate_decision_projection_a1": "decision_id",
         "portfolio_mandate_review_policy_r1": "mandate_version_id",
@@ -382,7 +396,7 @@ def _security_checksum(
           where n.nspname = 'public' and c.relkind = 'r'
             and c.relname like 'portfolio_mandate_%'
             and r.rolname in ('anon','authenticated','service_role',
-                             'portfolio_mandate_candidate_submitter_a1')
+                             'portfolio_mandate_candidate_submitter_a1','portfolio_mandate_review_compiler_r2')
           union all
           select jsonb_build_array(
             'function', p.proname, pg_get_function_identity_arguments(p.oid),
@@ -392,9 +406,9 @@ def _security_checksum(
           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
           cross join pg_roles r
           where n.nspname in ('public', 'portfolio_mandate_private')
-            and (p.proname like '%_a1' or p.proname like '%_r1')
+            and (p.proname like '%_a1' or p.proname like '%_r1' or p.proname like '%_r2')
             and r.rolname in ('anon','authenticated','service_role',
-                             'portfolio_mandate_candidate_submitter_a1')
+                             'portfolio_mandate_candidate_submitter_a1','portfolio_mandate_review_compiler_r2')
         ) permissions;
         """,
         environment=environment,
@@ -415,15 +429,20 @@ def _write_evidence(path: Path, evidence: Mapping[str, Any]) -> None:
 
 
 def run_rehearsal(
-    repo_root: Path, evidence_path: Path, *, include_review: bool = False
+    repo_root: Path,
+    evidence_path: Path,
+    *,
+    include_review: bool = False,
+    include_store: bool = False,
 ) -> dict[str, Any]:
+    include_review = include_review or include_store
     environment = _sanitized_environment(os.environ)
+    port = _free_loopback_port()
     temporary_root = Path(
         tempfile.mkdtemp(prefix=_TEMP_PREFIX, dir="/private/tmp")
     ).resolve()
     data_directory = temporary_root / "data"
     log_path = temporary_root / "postgres.log"
-    port = _free_loopback_port()
     database = _DATABASE_PREFIX + "t20" + uuid.uuid4().hex[:12]
     user = getpass.getuser()
     target = RehearsalTarget(
@@ -493,18 +512,42 @@ def run_rehearsal(
         )
         if include_review:
             test_environment["PORTFOLIO_REVIEW_R1_REHEARSAL"] = "1"
+        if include_store:
+            test_environment["PORTFOLIO_REVIEW_R2_REHEARSAL"] = "1"
         _run(
             [
                 sys.executable,
                 "-m",
                 "pytest",
                 "-q",
+                "--junitxml=" + str(evidence_path.with_suffix(".pytest.xml")),
                 "tests/test_portfolio_mandate_postgres_contracts.py",
             ],
             environment=test_environment,
             cwd=repo_root,
         )
         _verify_identity(target, environment=environment)
+        if include_store:
+            advisor_output = _run(
+                [
+                    _binary("supabase"),
+                    "db",
+                    "advisors",
+                    "--db-url",
+                    target.dsn,
+                    "--type",
+                    "all",
+                    "--level",
+                    "info",
+                    "--fail-on",
+                    "warn",
+                    "-o",
+                    "json",
+                ],
+                environment={**environment, "PGSSLMODE": "disable"},
+                cwd=repo_root,
+            )
+            evidence_path.with_suffix(".advisors.json").write_text(advisor_output)
 
         backup_path = temporary_root / "portfolio-mandate-a1.backup"
         _verify_identity(target, environment=environment)
@@ -607,6 +650,7 @@ def run_rehearsal(
             for table, key in (
                 ("portfolio_mandate_review_policy_r1", "mandate_version_id"),
                 ("portfolio_mandate_review_observation_r1", "observation_id"),
+                *(R2_TABLES.items() if include_store else []),
             ):
                 checksum_matches[table] = _table_checksum(
                     target,
@@ -658,6 +702,18 @@ def run_rehearsal(
                 )
                 failed = f"{failed}; first schema difference at {differing_line}"
             raise RehearsalError(f"restored checksum mismatch: {failed}")
+        if include_store:
+            # The owner is chosen as cluster owner before SET ROLE; the read RPC
+            # then executes under authenticated and a read-only transaction.
+            ids_sql = "select owner_id::text || '|' || version_ids::text from public.portfolio_mandate_review_run_r2 order by sequence desc limit 1;"
+            owner, versions = _psql(target, ids_sql, environment=environment).split("|")
+            read_sql = f'begin read only; set role authenticated; set request.jwt.claims=\'{{"role":"authenticated","sub":"{owner}"}}\'; select public.read_portfolio_review_store_r2(\'{versions}\'::uuid[]); commit;'
+            source_read = _psql(target, read_sql, environment=environment)
+            restored_read = _psql(
+                target, read_sql, environment=environment, database=restore_database
+            )
+            if source_read != restored_read:
+                raise RehearsalError("restored R2 read-only projection mismatch")
         _run(
             [
                 _binary("dropdb"),
@@ -720,12 +776,22 @@ def run_rehearsal(
             (repo_root / R1_MIGRATION).read_bytes()
         )
         evidence["review_policy_and_observation_restore_verified"] = True
+    if include_store:
+        evidence["store_migration_sha256"] = _sha256_bytes(
+            (repo_root / R2_MIGRATION).read_bytes()
+        )
+        evidence["store_tables_and_read_only_restore_verified"] = True
     _write_evidence(evidence_path, evidence)
     return evidence
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--include-store",
+        action="store_true",
+        help="also verify R2 atomic review storage and read-only restore",
+    )
     parser.add_argument(
         "--include-review",
         action="store_true",
@@ -743,7 +809,10 @@ def main() -> int:
     if not evidence_path.is_absolute():
         evidence_path = repo_root / evidence_path
     evidence = run_rehearsal(
-        repo_root, evidence_path, include_review=args.include_review
+        repo_root,
+        evidence_path,
+        include_review=args.include_review,
+        include_store=args.include_store,
     )
     print(
         json.dumps(

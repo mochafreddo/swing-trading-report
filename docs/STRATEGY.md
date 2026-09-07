@@ -705,6 +705,8 @@ AI research는 candidate만 만들고 방향성 action 권한을 갖지 않는�
 완전성이나 수동 주문 포함 범위를 보증하지 않으며 T15 개별 fill, 정정 lineage, 손익 또는 advice에
 연결하지 않는다. 조회가 실패하거나 페이지가 미완결이면 부분 결과를 표시하지 않고 재시도하지 않는다.
 
+[R2 저장 경로](portfolio-review-store-r2.md)는 R1의 `action=null`, `advice_enabled=false`와 review-required 의미를 유지한다. 저장·정정·Outcome 기록은 새로운 매수·매도 근거가 아니며 주문 누적 결과로 fill lineage를 추정하지 않는다.
+
 ## 8. 운영/재현성 권장 사항
 
 - 같은 날짜 리포트라도 “실행 시각(장중/장후)”에 따라 평가 캔들이 달라질 수 있으므로,

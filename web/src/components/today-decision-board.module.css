@@ -522,6 +522,7 @@
 
 .dogfoodPanel {
   min-width: 0;
+  overflow-wrap: anywhere;
   padding: var(--space-6);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);

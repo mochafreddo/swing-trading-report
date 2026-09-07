@@ -44,11 +44,16 @@ def test_t20_subprocess_environment_discards_all_inherited_pg_routing() -> None:
             **os.environ,
             "PGHOST": "production.example.com",
             "PGSERVICE": "production",
+            "SUPABASE_SECRET_KEY": "PRIVATE_SENTINEL",
+            "TOSS_SECRET": "PRIVATE_SENTINEL",
             "PORTFOLIO_MANDATE_A1_TEST_DSN": "unsafe",
             "PORTFOLIO_REVIEW_R1_REHEARSAL": "1",
         }
     )
 
+    assert environment["SAB_SKIP_ROOT_ENV"] == "1"
+    assert "SUPABASE_SECRET_KEY" not in environment
+    assert "TOSS_SECRET" not in environment
     assert "PGHOST" not in environment
     assert "PGSERVICE" not in environment
     assert "PORTFOLIO_MANDATE_A1_TEST_DSN" not in environment

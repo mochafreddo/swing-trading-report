@@ -28,6 +28,46 @@ const unclassifiedFixturePath =
 const privateMandateFixturePath =
   "../tests/fixtures/portfolio_mandate/portfolio-mandate-private-v1-preview.synthetic.json";
 
+test("fixture-only stored review from disposable database", async ({
+  context,
+  page,
+}) => {
+  const requests = await configureFixtureBoundary(context, page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/today#stored-review");
+    const panel = page.locator("#stored-review");
+    await expect(panel).toContainText("EMPTY");
+    await expect(panel).toContainText("THESIS_INVALIDATED_REVIEW_REQUIRED");
+    await expect(panel).toContainText("AMBIGUOUS");
+    const detail = panel.locator("summary");
+    await expect(detail).toBeVisible();
+    await detail.focus();
+    await expect(detail).toBeFocused();
+    await detail.press("Enter");
+    await expect(panel.locator("details")).toHaveAttribute("open", "");
+    await expect(panel).toContainText("PRIMARY 관측 2개");
+    await expectNoHorizontalOverflow(page);
+    if (width !== 768)
+      await panel.screenshot({
+        path: `test-results/portfolio-r2-${width}.png`,
+      });
+    await page.reload();
+    await expect(panel).toContainText("AMBIGUOUS");
+  }
+  await page.goto("/today?stored=stale#stored-review");
+  await expect(page.locator("#stored-review")).toContainText("STALE");
+  await expect(page.locator("#stored-review")).not.toContainText(
+    "THESIS_INVALIDATED",
+  );
+  await page.goto("/today?stored=error#stored-review");
+  await expect(page.locator("#stored-review")).toContainText("UNAVAILABLE");
+  expect(errors).toEqual([]);
+  expect(requests).toEqual([]);
+});
+
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const layout = await page.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,

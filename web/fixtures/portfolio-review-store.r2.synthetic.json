@@ -1,0 +1,49 @@
+{
+  "mode": "LOCAL_ONLY",
+  "rows": [
+    {
+      "as_of": null,
+      "review": null,
+      "run_id": null,
+      "outcomes": [],
+      "run_status": null,
+      "mandate_version_id": "55685cdf-d6dd-5679-9dc6-d6dc49c3fe74"
+    },
+    {
+      "as_of": "2026-09-08T01:07:23.718462+09:00",
+      "review": {
+        "action": null,
+        "status": "THESIS_INVALIDATED_REVIEW_REQUIRED",
+        "issue_codes": [
+          "SPECIAL_RULE_REQUIRES_REVIEW",
+          "UNSTRUCTURED_RULE_REQUIRES_REVIEW"
+        ],
+        "instrument_id": "f392e669-8413-555d-b527-1be3fcd1fa43",
+        "mandate_version_id": "6b6c870a-5875-50cb-801c-2dada6ec16e8",
+        "deterioration_confirmed": false,
+        "current_observation_count": 2,
+        "matched_hard_trigger_count": 1,
+        "superseded_observation_count": 0
+      },
+      "run_id": "95e3777d-b187-533f-a9d7-1fbf235dd960",
+      "outcomes": [
+        {
+          "basis": "ORDER_AGGREGATE_ONLY",
+          "status": "UNLINKED",
+          "outcome_id": "0f1a0501-4c79-5fc6-9e67-f9884d76eb5e",
+          "supersedes_outcome_id": null
+        },
+        {
+          "basis": "ORDER_AGGREGATE_ONLY",
+          "status": "AMBIGUOUS",
+          "outcome_id": "0d2a1210-cf2b-57c2-a4e7-14930e591a52",
+          "supersedes_outcome_id": "0f1a0501-4c79-5fc6-9e67-f9884d76eb5e"
+        }
+      ],
+      "run_status": "COMPILED",
+      "mandate_version_id": "6b6c870a-5875-50cb-801c-2dada6ec16e8"
+    }
+  ],
+  "advice_enabled": false,
+  "schema_version": "portfolio-review-store.r2"
+}

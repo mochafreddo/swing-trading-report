@@ -27,6 +27,7 @@ htmlcov/
 .pnpm-store/
 web/node_modules/
 web/.next/
+web/.next-portfolio-fixture/
 web/.turbo/
 web/coverage/
 web/playwright-report/

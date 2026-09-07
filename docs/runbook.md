@@ -129,6 +129,10 @@ committed proposal은 먼저 `just decision-board-shadow-gate-validate`로 구�
 
 RunJournal의 terminal 수만으로 졸업시키지 않습니다. 모든 planned ENTRY/HOLDING slot, 기존 후보/action diff, source/input diff, policy version을 한 ledger에 결속하고 `UNEXPLAINED=0`, privacy/order/notification/replay/universe hard gate를 모두 통과해야 합니다. 통과 결과는 별도 cutover 검토 자격일 뿐이며 이 runbook의 disabled template을 load하거나 schedule을 추가하는 권한이 아닙니다. 주문은 gate 이후에도 사용자가 직접 실행합니다.
 
+## Portfolio review R2 로컬 사용
+
+별도 합성 화면과 DB 복구 재현, 실제 연결용 checksum/owner/backup/rollback manifest는 [R2 계약과 인계](portfolio-review-store-r2.md)를 참고하세요. `scripts/portfolio_mandate_t20_rehearsal.py --include-store`는 매번 새 폐기형 DB만 사용합니다. 실제 사용자 매핑이나 기존 DB credential을 입력하는 도구가 아닙니다.
+
 ## 필수 품질 게이트
 
 ```bash
