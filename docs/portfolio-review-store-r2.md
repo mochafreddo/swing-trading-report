@@ -52,7 +52,7 @@ R2 importer/transport/replay/Outcome 단위 검사 27개가 통과했다. 새 �
 
 Web 새 계약/transport/component 15개와 전체 112 files / 958 tests·coverage gate가 통과했다. 실제 사용자 60초 평가는 수행하지 않았다. 최종 전체 gate·E2E·restore 수치는 [계획 대조 문서](portfolio-goal-reconciliation-20260907.md)의 R2 실행 기록을 따른다.
 
-검증 중 숨은 streaming content에 focus를 주던 E2E는 실제 표시 이후 keyboard 검사로 고쳤다. Next build와 E2E를 함께 실행할 때 `.next` 안의 fixture 출력이 지워지는 문제는 sibling 출력 디렉터리로 수정했다. Supabase advisor의 R2 foreign-key index INFO에는 실제 covering index를 추가했고, RLS policy가 없다는 INFO 6개는 직접 table 접근을 허용하지 않는 의도적인 deny-all이다. 나머지 A1/R1 INFO는 이 migration이 변경하지 않는 범위다.
+검증 중 숨은 streaming content에 focus를 주던 E2E는 실제 표시 이후 keyboard 검사로 고쳤다. Next build와 E2E를 함께 실행할 때 `.next` 안의 fixture 출력이 지워지는 문제는 sibling 출력 디렉터리로 수정했다. Supabase advisor의 R2 foreign-key index INFO에는 실제 covering index를 추가했고, RLS policy가 없다는 INFO 6개는 직접 table 접근을 허용하지 않는 의도적인 deny-all이다. 최종 advisor는 INFO 65개, WARN/ERROR 0개다. 새 index의 unused INFO는 극소 합성 부하 결과이며 나머지 A1/R1 INFO는 이 migration이 변경하지 않는 범위다.
 
 ## 실제 연결용 manifest
 
@@ -63,7 +63,7 @@ Web 새 계약/transport/component 15개와 전체 112 files / 958 tests·covera
 | A1 migration SHA256 | `1c23293c9b319020a63a2c71613d62fbb0209074a7ac74b384fb98649fbdb2ba` |
 | R1 migration SHA256 | `a4656b8e2487904b0e4ce8ab9e492eb9275912e7c5fe3d36dfef9f173fa20ea1` |
 | R2 migration SHA256 | `149d73d9d60d54e92c3bbb933ec01fe999df3263524d391f49163ae55d1050ff` |
-| app revision/diff | 실행 후보 커밋 고정 후 `git show --stat`과 위 세 migration의 checksum 대조 |
+| app revision/diff | 로컬 구현 `bc6ba3111df2c337f3ab672eb0dc09f2fd7d5be2`. 실제 실행 후보를 정할 때 `git show --stat`과 위 세 migration checksum 재대조 |
 | target identity | 미정: 정확한 project/database/server identity, version, 현재 migration 목록 |
 | owner/version/source | 미정: 종목별 exact A1 version ↔ authenticated owner, 독립 승인 source/holding hash와 PRIMARY seal/content hash |
 | compiler principal | 미정: 전용 role의 운영 connection principal과 bounded role membership. service-role 대용 사용 금지 |
