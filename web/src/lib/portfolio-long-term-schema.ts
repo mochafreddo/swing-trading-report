@@ -142,6 +142,9 @@ const decisionSchema = z
       "PREDICATE_REVIEW_ONLY",
       "MANDATE_UNCLASSIFIED",
       "REVIEW_NOT_DUE",
+      "MANDATE_UNAPPROVED",
+      "EVIDENCE_FUTURE",
+      "PREDICATE_INPUT_MISMATCH",
     ]),
     mode: z.literal("LOCAL_ONLY"),
   })
@@ -162,12 +165,23 @@ export type LongTermDecisionT13 = z.infer<typeof decisionSchema>;
 
 function policyOutcome(
   item: PortfolioLongTermT13Fixture["cases"][number],
+  asOf: string,
 ): Pick<LongTermDecisionT13, "status" | "action" | "reason_code"> {
   if (item.mandate.classification_state !== "ACTIVE") {
     return {
       status: "NO_ADVICE",
       action: null,
       reason_code: "MANDATE_UNCLASSIFIED",
+    };
+  }
+  if (
+    item.mandate.approval_state !== "APPROVED" ||
+    item.mandate.horizon !== "LONG_TERM"
+  ) {
+    return {
+      status: "NO_ADVICE",
+      action: null,
+      reason_code: "MANDATE_UNAPPROVED",
     };
   }
   if (!item.mandate.review_cadence.due) {
@@ -191,6 +205,14 @@ function policyOutcome(
       reason_code: "EVIDENCE_CONFLICTED",
     };
   }
+  const filing = item.evidence.filing_event;
+  if (Date.parse(filing.published_at) > Date.parse(asOf)) {
+    return {
+      status: "REVIEW",
+      action: "REVIEW",
+      reason_code: "EVIDENCE_FUTURE",
+    };
+  }
   if (item.concentration.status === "BREACH") {
     return {
       status: "REVIEW",
@@ -199,11 +221,49 @@ function policyOutcome(
     };
   }
   const evaluation = item.evidence.predicate_evaluation;
-  if (evaluation.authority === "AI_RESEARCH") {
+  if (
+    evaluation.authority === "AI_RESEARCH" ||
+    evaluation.result === "CANDIDATE"
+  ) {
     return {
       status: "REVIEW",
       action: "REVIEW",
       reason_code: "PREDICATE_REVIEW_ONLY",
+    };
+  }
+  const definition = item.mandate.invalidation_predicate;
+  if (
+    definition === null ||
+    !["DETERMINISTIC_PARSER", "USER"].includes(evaluation.authority) ||
+    (evaluation.authority === "DETERMINISTIC_PARSER" &&
+      !evaluation.parser_version) ||
+    item.evidence.validation_status !== "VALID" ||
+    item.evidence.source_tier !== "PRIMARY" ||
+    evaluation.unit !== definition.unit ||
+    evaluation.period !== definition.period ||
+    filing.period !== definition.period
+  ) {
+    return {
+      status: "REVIEW",
+      action: "REVIEW",
+      reason_code: "PREDICATE_INPUT_MISMATCH",
+    };
+  }
+  // Both values use the contract's exact six decimal places, including negatives.
+  const observed = BigInt(evaluation.observed_value.replace(".", ""));
+  const threshold = BigInt(definition.threshold.replace(".", ""));
+  const fulfilled = {
+    LT: observed < threshold,
+    LTE: observed <= threshold,
+    GT: observed > threshold,
+    GTE: observed >= threshold,
+    EQ: observed === threshold,
+  }[definition.operator];
+  if (evaluation.result !== (fulfilled ? "FULFILLED" : "NOT_FULFILLED")) {
+    return {
+      status: "REVIEW",
+      action: "REVIEW",
+      reason_code: "PREDICATE_INPUT_MISMATCH",
     };
   }
   if (evaluation.result === "FULFILLED") {
@@ -227,7 +287,7 @@ export function compilePortfolioLongTermT13(
     case_id: item.case_id,
     instrument_id: item.instrument.instrument_id,
     canonical_ticker: item.instrument.canonical_ticker,
-    ...policyOutcome(item),
+    ...policyOutcome(item, value.as_of),
     mode: "LOCAL_ONLY" as const,
   }));
 }

@@ -53,3 +53,34 @@ describe("Portfolio LONG_TERM T13 schema", () => {
     );
   });
 });
+
+const boundaryCases = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../../../tests/fixtures/portfolio_mandate/long-term-policy-boundary.synthetic.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as {
+  name: string;
+  path: string[];
+  value: unknown;
+  action: string | null;
+  reason: string;
+}[];
+it.each(boundaryCases)(
+  "rejects unsafe local policy input: $name",
+  (boundary) => {
+    const value = parsePortfolioLongTermT13Fixture(fixture());
+    let target = value.cases[0] as unknown as Record<string, unknown>;
+    for (const part of boundary.path.slice(0, -1))
+      target = target[part] as Record<string, unknown>;
+    target[boundary.path.at(-1)!] = boundary.value;
+    const result = compilePortfolioLongTermT13(value)[0];
+    expect([result?.action, result?.reason_code]).toEqual([
+      boundary.action,
+      boundary.reason,
+    ]);
+  },
+);

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import re
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, TypedDict
 from urllib.parse import urlsplit
 
@@ -385,10 +386,12 @@ def validate_portfolio_long_term_t13_fixture(value: Any) -> dict[str, Any]:
     return copy.deepcopy(fixture)
 
 
-def _policy_outcome(case: dict[str, Any]) -> tuple[str, str | None, str]:
+def _policy_outcome(case: dict[str, Any], as_of: str) -> tuple[str, str | None, str]:
     mandate = case["mandate"]
     if mandate["classification_state"] != "ACTIVE":
         return "NO_ADVICE", None, "MANDATE_UNCLASSIFIED"
+    if mandate["approval_state"] != "APPROVED" or mandate["horizon"] != "LONG_TERM":
+        return "NO_ADVICE", None, "MANDATE_UNAPPROVED"
     if not mandate["review_cadence"]["due"]:
         return "NOT_DUE", None, "REVIEW_NOT_DUE"
 
@@ -397,12 +400,43 @@ def _policy_outcome(case: dict[str, Any]) -> tuple[str, str | None, str]:
         return "REVIEW", "REVIEW", "EVIDENCE_STALE"
     if evidence["validation_status"] == "CONFLICTED":
         return "REVIEW", "REVIEW", "EVIDENCE_CONFLICTED"
+    filing = evidence["filing_event"]
+    if datetime.fromisoformat(filing["published_at"]) > datetime.fromisoformat(as_of):
+        return "REVIEW", "REVIEW", "EVIDENCE_FUTURE"
     if case["concentration"]["status"] == "BREACH":
         return "REVIEW", "REVIEW", "CONCENTRATION_BREACH"
 
     predicate = evidence["predicate_evaluation"]
-    if predicate["authority"] == "AI_RESEARCH":
+    if predicate["authority"] == "AI_RESEARCH" or predicate["result"] == "CANDIDATE":
         return "REVIEW", "REVIEW", "PREDICATE_REVIEW_ONLY"
+    definition = mandate["invalidation_predicate"]
+    if (
+        definition is None
+        or predicate["authority"] not in {"DETERMINISTIC_PARSER", "USER"}
+        or (
+            predicate["authority"] == "DETERMINISTIC_PARSER"
+            and not predicate["parser_version"]
+        )
+        or evidence["validation_status"] != "VALID"
+        or evidence["source_tier"] != "PRIMARY"
+        or predicate["unit"] != definition["unit"]
+        or predicate["period"] != definition["period"]
+        or filing["period"] != definition["period"]
+    ):
+        return "REVIEW", "REVIEW", "PREDICATE_INPUT_MISMATCH"
+    observed, threshold = (
+        Decimal(predicate["observed_value"]),
+        Decimal(definition["threshold"]),
+    )
+    fulfilled = {
+        "LT": observed < threshold,
+        "LTE": observed <= threshold,
+        "GT": observed > threshold,
+        "GTE": observed >= threshold,
+        "EQ": observed == threshold,
+    }[definition["operator"]]
+    if predicate["result"] != ("FULFILLED" if fulfilled else "NOT_FULFILLED"):
+        return "REVIEW", "REVIEW", "PREDICATE_INPUT_MISMATCH"
     if predicate["result"] == "FULFILLED":
         return "DECIDED", "SELL", "PREDICATE_FULFILLED"
     return "DECIDED", "HOLD", "PREDICATE_NOT_FULFILLED"
@@ -415,7 +449,7 @@ def compile_portfolio_long_term_t13(
 
     decisions: list[LongTermDecisionT13] = []
     for case in value["cases"]:
-        status, action, reason_code = _policy_outcome(case)
+        status, action, reason_code = _policy_outcome(case, value["as_of"])
         decisions.append(
             LongTermDecisionT13(
                 case_id=case["case_id"],

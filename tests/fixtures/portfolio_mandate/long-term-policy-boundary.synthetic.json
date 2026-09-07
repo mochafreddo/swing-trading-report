@@ -1,0 +1,78 @@
+[
+  {
+    "name": "unapproved",
+    "path": [
+      "mandate",
+      "approval_state"
+    ],
+    "value": "DRAFT",
+    "reason": "MANDATE_UNAPPROVED",
+    "action": null
+  },
+  {
+    "name": "false-fulfillment",
+    "path": [
+      "evidence",
+      "predicate_evaluation",
+      "result"
+    ],
+    "value": "FULFILLED",
+    "reason": "PREDICATE_INPUT_MISMATCH",
+    "action": "REVIEW"
+  },
+  {
+    "name": "wrong-unit",
+    "path": [
+      "evidence",
+      "predicate_evaluation",
+      "unit"
+    ],
+    "value": "USD",
+    "reason": "PREDICATE_INPUT_MISMATCH",
+    "action": "REVIEW"
+  },
+  {
+    "name": "wrong-evaluation-period",
+    "path": [
+      "evidence",
+      "predicate_evaluation",
+      "period"
+    ],
+    "value": "FY2025Q2",
+    "reason": "PREDICATE_INPUT_MISMATCH",
+    "action": "REVIEW"
+  },
+  {
+    "name": "wrong-filing-period",
+    "path": [
+      "evidence",
+      "filing_event",
+      "period"
+    ],
+    "value": "FY2025Q2",
+    "reason": "PREDICATE_INPUT_MISMATCH",
+    "action": "REVIEW"
+  },
+  {
+    "name": "future-filing",
+    "path": [
+      "evidence",
+      "filing_event",
+      "published_at"
+    ],
+    "value": "2026-09-02T00:00:00Z",
+    "reason": "EVIDENCE_FUTURE",
+    "action": "REVIEW"
+  },
+  {
+    "name": "authoritative-candidate",
+    "path": [
+      "evidence",
+      "predicate_evaluation",
+      "result"
+    ],
+    "value": "CANDIDATE",
+    "reason": "PREDICATE_REVIEW_ONLY",
+    "action": "REVIEW"
+  }
+]

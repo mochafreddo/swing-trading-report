@@ -141,6 +141,8 @@ def test_long_term_policy_truth_table_fails_closed() -> None:
         for part in path[:-1]:
             target = target[part]
         target[path[-1]] = value
+        if path == ("evidence", "predicate_evaluation", "result"):
+            target["observed_value"] = "99.000000"
         if path == ("evidence", "predicate_evaluation", "authority"):
             target["result"] = "CANDIDATE"
 
@@ -213,3 +215,23 @@ def test_predicate_and_mandate_authority_fail_closed() -> None:
         "NO_ADVICE",
         None,
     )
+
+
+@pytest.mark.parametrize(
+    "case",
+    json.loads(
+        (
+            REPO_ROOT
+            / "tests/fixtures/portfolio_mandate/long-term-policy-boundary.synthetic.json"
+        ).read_text()
+    ),
+    ids=lambda case: case["name"],
+)
+def test_policy_checks_approval_and_observation_before_directional_advice(case):
+    value = _representative_case()
+    target = value["cases"][0]
+    for part in case["path"][:-1]:
+        target = target[part]
+    target[case["path"][-1]] = case["value"]
+    result = compile_portfolio_long_term_t13(value)[0]
+    assert (result["action"], result["reason_code"]) == (case["action"], case["reason"])

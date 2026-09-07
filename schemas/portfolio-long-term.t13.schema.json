@@ -247,7 +247,10 @@
             "CONCENTRATION_BREACH",
             "PREDICATE_REVIEW_ONLY",
             "MANDATE_UNCLASSIFIED",
-            "REVIEW_NOT_DUE"
+            "REVIEW_NOT_DUE",
+            "MANDATE_UNAPPROVED",
+            "EVIDENCE_FUTURE",
+            "PREDICATE_INPUT_MISMATCH"
           ]
         },
         "mode": { "const": "LOCAL_ONLY" }
