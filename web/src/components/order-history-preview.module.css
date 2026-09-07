@@ -1,0 +1,124 @@
+.panel {
+  min-width: 0;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--panel);
+}
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+  align-items: start;
+}
+.heading h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.kicker {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+}
+.badge {
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+}
+.help {
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+.period,
+.scenarios {
+  border: 0;
+  padding: 0;
+  margin: 1rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.period legend,
+.scenarios legend {
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+.period label {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+.period input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 3rem;
+  font: inherit;
+  padding: 0.65rem;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+}
+.scenarios label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.actions button {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.65rem 1rem;
+  min-height: 3rem;
+  cursor: pointer;
+}
+.actions button:first-child {
+  border-color: var(--accent);
+}
+.panel :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.result {
+  display: grid;
+  gap: 0.4rem;
+  padding-block: 1rem;
+  line-height: 1.5;
+}
+.tableScroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.tableScroll table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.tableScroll caption {
+  text-align: start;
+  padding-block: 0.75rem;
+}
+.tableScroll th,
+.tableScroll td {
+  text-align: start;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+@media (max-width: 480px) {
+  .panel {
+    padding: 1rem;
+  }
+}

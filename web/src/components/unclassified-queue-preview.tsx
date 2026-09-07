@@ -149,8 +149,8 @@ function PrivateMandatePreviewResult({
         </div>
       </dl>
       <p className={styles.localPreviewCaveat}>
-        Private local draft only. It is not active advice, an approval event, or
-        an instruction to trade.
+        Document approval is preserved as recorded. Opening this preview does
+        not create an approval event or connect production advice.
       </p>
 
       <div
@@ -161,11 +161,15 @@ function PrivateMandatePreviewResult({
           <article className={styles.privateMandateCard} key={holding.ticker}>
             <div className={styles.queueHeading}>
               <span className={styles.unclassifiedBadge}>
-                PRIVATE DRAFT · NO ADVICE · NOT ACTIVE
+                {holding.approval_state} · {holding.classification_state} ·{" "}
+                {holding.horizon}
               </span>
               <span className={styles.runKind}>{holding.role}</span>
             </div>
             <h3>{holding.ticker}</h3>
+            <p className={styles.privateMandateState}>
+              PRODUCTION ADVICE NOT CONNECTED · NO ADVICE
+            </p>
 
             <h4>Thesis</h4>
             <p>{holding.thesis}</p>

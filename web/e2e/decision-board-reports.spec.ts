@@ -127,6 +127,66 @@ async function configureFixtureBoundary(
   return unexpectedRequests;
 }
 
+test("fixture-only order aggregate preview", async ({ context, page }) => {
+  const unexpectedRequests = await configureFixtureBoundary(context, page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await page.goto("/today");
+  await expect(page).toHaveURL(`${webOrigin}/today`);
+  await expect(page).toHaveTitle("SAB Control Panel");
+  const panel = page.locator("#order-history-preview");
+  await expect(
+    panel.getByRole("heading", { name: "토스 주문 이력 · 합성 미리보기" }),
+  ).toBeVisible();
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await panel.getByRole("radio", { name: "정상 결과" }).check();
+    await panel.getByRole("button", { name: "합성 내역 조회" }).click();
+    await expect(panel.locator("tbody tr")).toHaveCount(3);
+    await expect(panel).toContainText("123.456789 USD");
+    await expectNoHorizontalOverflow(page);
+    await panel.scrollIntoViewIfNeeded();
+    await panel.screenshot({
+      path: `/private/tmp/toss-order-preview-${width}.png`,
+    });
+    await panel.getByLabel("시작일").fill("2026-09-01");
+    await panel.getByLabel("종료일").fill("2026-09-01");
+    await expect(panel.locator("table")).toHaveCount(0);
+    await panel.getByRole("button", { name: "합성 내역 조회" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(panel.locator("tbody tr")).toHaveCount(1);
+    await expect(panel).toContainText("2026-09-01 12:30:00");
+    await panel.getByLabel("시작일").fill("2026-08-07");
+    await panel.getByLabel("종료일").fill("2026-09-05");
+  }
+  await panel.getByLabel("시작일").fill("2026-09-06");
+  await panel.getByRole("button", { name: "합성 내역 조회" }).click();
+  await expect(panel.getByRole("status")).toContainText("최대 30일 범위");
+  await expect(panel.getByRole("status")).toBeFocused();
+  await expect(panel.getByLabel("시작일")).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await panel.getByLabel("시작일").fill("2026-08-07");
+  for (const [name, state] of [
+    ["빈 결과", "조회 결과 없음"],
+    ["페이지 미완결", "페이지 미완결 · 결과 표시 보류"],
+    ["응답 오류", "검증 실패 · 결과 표시 보류"],
+  ]) {
+    await panel.getByRole("radio", { name, exact: true }).check();
+    await panel.getByRole("button", { name: "합성 내역 조회" }).click();
+    await expect(panel.getByRole("status")).toContainText(state);
+    await expect(panel.locator("table")).toHaveCount(0);
+  }
+  await page.reload();
+  await expect(panel.getByRole("status")).toContainText("조회 전");
+  expect(errors).toEqual([]);
+  expect(unexpectedRequests).toEqual([]);
+});
+
 test("fixture-only /reports Decision Board journey", async ({
   context,
   page,
@@ -309,9 +369,9 @@ test("fixture-only /today private mandate memory-only journey", async ({
         '[aria-label="Private portfolio mandate preview rows"] article',
       ),
     ).toHaveCount(8);
-    await expect(
-      queue.getByText("PRIVATE DRAFT · NO ADVICE · NOT ACTIVE"),
-    ).toHaveCount(8);
+    await expect(queue.getByText("APPROVED · ACTIVE · LONG_TERM")).toHaveCount(
+      8,
+    );
     await expect(queue).toContainText("5 CORE · 3 SATELLITE");
     await expect(boardSummary.locator("strong")).toHaveText("0");
     await expect(

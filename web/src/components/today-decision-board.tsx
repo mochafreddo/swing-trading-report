@@ -17,6 +17,7 @@ import type {
 import { UnclassifiedQueuePreview } from "./unclassified-queue-preview";
 import { LongTermSyntheticLane } from "./long-term-synthetic-lane";
 import { MandateEvidenceOutcomeDogfood } from "./mandate-evidence-outcome-dogfood";
+import { OrderHistoryPreview } from "./order-history-preview";
 
 import styles from "./today-decision-board.module.css";
 
@@ -602,6 +603,8 @@ export function TodayDecisionBoard({
           </p>
         )}
       </section>
+
+      <OrderHistoryPreview />
 
       <MandateEvidenceOutcomeDogfood
         source={dogfoodSource}

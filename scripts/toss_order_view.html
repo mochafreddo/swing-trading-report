@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>토스 주문 이력 · 로컬 1회 조회</title>
+    <style nonce="__NONCE__">
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #080d16;
+        color: #e6edf7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1rem;
+      }
+      main {
+        max-width: 76rem;
+        margin: auto;
+        border: 1px solid #303b4d;
+        border-radius: 1rem;
+        padding: 1.5rem;
+        background: #101722;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin: 0;
+      }
+      p {
+        line-height: 1.7;
+      }
+      .badge {
+        border: 1px solid #728cbb;
+        border-radius: 0.5rem;
+        padding: 0.5rem;
+        font-size: 0.8rem;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+      }
+      button {
+        min-height: 3rem;
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border: 1px solid #a0bfff;
+        border-radius: 0.5rem;
+        padding: 0.7rem 1rem;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      :focus-visible {
+        outline: 2px solid #b6ceff;
+        outline-offset: 3px;
+      }
+      #status {
+        padding-block: 1rem;
+        line-height: 1.6;
+      }
+      .scroll {
+        max-width: 100%;
+        overflow-x: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.875rem;
+        font-variant-numeric: tabular-nums;
+      }
+      caption {
+        text-align: left;
+        padding-block: 0.75rem;
+      }
+      th,
+      td {
+        text-align: left;
+        white-space: nowrap;
+        padding: 0.9rem;
+        border-bottom: 1px solid #303b4d;
+      }
+      .note {
+        font-size: 0.875rem;
+        color: #b9c6db;
+      }
+      [hidden] {
+        display: none;
+      }
+      @media (max-width: 480px) {
+        main {
+          padding: 1rem;
+        }
+        body {
+          padding: 0.75rem;
+        }
+        h1 {
+          font-size: 1.2rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>토스 주문 이력 · 로컬 1회 조회</h1>
+        <span class="badge">__MODE__ · NO ADVICE</span>
+      </header>
+      <p>
+        주문 생성일 <strong>__FROM__ ~ __TO__ (KST)</strong> · 종료 주문만
+        조회합니다.
+      </p>
+      <p class="note">
+        토큰 POST 1회 + 주문 GET 최대 4회 · 4페이지 · 1 MiB · 30초.<br />
+        개별 체결 명세가 아닌 주문별 누적 체결 결과입니다. 매수·매도는 과거 주문
+        방향이며 추천이 아닙니다.
+      </p>
+      <div class="actions">
+        <button id="query" type="button" __DISABLED__>
+          승인된 내역 1회 조회
+        </button>
+        <button id="clear" type="button">결과 지우기</button>
+      </div>
+      <div
+        id="status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        tabindex="-1"
+        data-state="READY"
+      >
+        조회 전 · 이 창에서 명시적으로 조회할 때만 실행합니다.
+      </div>
+      <div
+        id="results"
+        class="scroll"
+        role="region"
+        aria-label="주문별 체결 결과"
+        tabindex="0"
+        hidden
+      >
+        <table>
+          <caption>
+            종료 주문 · KST 주문 생성 시각 기준
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">주문 생성 시각</th>
+              <th scope="col">종목</th>
+              <th scope="col">주문 방향</th>
+              <th scope="col">주문 상태</th>
+              <th scope="col">누적 체결량</th>
+              <th scope="col">평균 체결가</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="note">
+        표시 데이터는 이 비공개 브라우저 창의 메모리에서만 사용합니다.
+        저장·재시도·자동 재조회는 하지 않습니다. 조회 후 로컬 서버는 닫힙니다.
+        새로고침·화면 이동·결과 지우기로 제거한 데이터는 복원되지 않습니다. 이
+        화면은 열린 지 15분 후 결과를 지웁니다.
+      </p>
+    </main>
+    <script nonce="__NONCE__">
+      const query = document.getElementById("query");
+      const status = document.getElementById("status");
+      const rows = document.getElementById("rows");
+      const results = document.getElementById("results");
+      const labels = {
+        FILLED: "체결 완료",
+        PARTIAL_FILLED: "부분체결",
+        CANCELED: "취소",
+        REPLACED: "정정",
+        REJECTED: "거부",
+        CANCEL_REJECTED: "취소 거부",
+        REPLACE_REJECTED: "정정 거부",
+      };
+      let controller;
+      let discarded = false;
+      function clear() {
+        discarded = true;
+        controller?.abort();
+        rows.replaceChildren();
+        results.hidden = true;
+        status.dataset.state = "CLEARED";
+        status.textContent =
+          "결과를 지웠습니다. 자동 복원하거나 재조회하지 않습니다.";
+      }
+      document.getElementById("clear").addEventListener("click", clear);
+      window.addEventListener("pagehide", clear);
+      setTimeout(
+        () => {
+          query.disabled = true;
+          clear();
+        },
+        15 * 60 * 1000,
+      );
+      query.addEventListener("click", async () => {
+        if (query.disabled) return;
+        query.disabled = true;
+        discarded = false;
+        controller = new AbortController();
+        status.dataset.state = "LOADING";
+        status.textContent = "승인된 1회 조회 중입니다. 재시도하지 않습니다.";
+        try {
+          const response = await fetch("/query", {
+            method: "POST",
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Local-View": "1",
+            },
+            body: "{}",
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("QUERY_FAILED");
+          const data = await response.json();
+          if (discarded) return;
+          if (!["COMPLETE", "EMPTY"].includes(data.state))
+            throw new Error("QUERY_FAILED");
+          for (const row of data.rows) {
+            const tr = document.createElement("tr");
+            const values = [
+              row.orderedAtKst.slice(0, 19).replace("T", " "),
+              row.symbol,
+              row.side === "BUY" ? "매수" : "매도",
+              labels[row.status],
+              row.filledQuantity,
+              row.averageFilledPrice === null
+                ? "—"
+                : row.averageFilledPrice + " " + row.currency,
+            ];
+            for (const value of values) {
+              const td = document.createElement("td");
+              td.textContent = value;
+              tr.append(td);
+            }
+            rows.append(tr);
+          }
+          results.hidden = data.state !== "COMPLETE";
+          status.dataset.state = data.state;
+          status.textContent =
+            data.state === "COMPLETE"
+              ? "조회 완료 · 메모리에서만 표시 중"
+              : "조회 완료 · 해당 기간의 종료 주문 없음";
+          data.rows.length = 0;
+        } catch {
+          if (discarded) return;
+          rows.replaceChildren();
+          results.hidden = true;
+          status.dataset.state = "FAILED";
+          status.textContent =
+            "조회가 완료되지 않았습니다. 결과를 표시하지 않으며 재시도하지 않습니다.";
+          status.focus();
+        } finally {
+          controller = undefined;
+        }
+      });
+    </script>
+  </body>
+</html>

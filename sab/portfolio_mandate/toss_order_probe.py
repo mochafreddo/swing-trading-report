@@ -7,7 +7,7 @@ import json
 import re
 import signal
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlencode
@@ -61,7 +61,7 @@ def _number(value: Any) -> Decimal:
     if (
         type(value) is not str
         or len(value) > 30
-        or not re.fullmatch(r"\d+(?:\.\d+)?", value)
+        or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value)
     ):
         raise _Stop("MALFORMED_PAYLOAD")
     return Decimal(value)
@@ -98,6 +98,8 @@ def _aggregate(order: Any) -> tuple[str, bool, bool]:
         raise _Stop("MALFORMED_PAYLOAD")
     _timestamp(order.get("orderedAt"))
     quantity = _number(order.get("quantity"))
+    if order.get("orderAmount") is not None:
+        _number(order["orderAmount"])
     execution = order.get("execution")
     if type(execution) is not dict:
         raise _Stop("MALFORMED_PAYLOAD")
@@ -144,12 +146,15 @@ def run_toss_order_probe_t21(
     to_date: str,
     *,
     approved: bool = False,
+    _display_rows: list[dict[str, str | None]] | None = None,
 ) -> dict[str, Any]:
     """One token POST and up to four CLOSED-order GETs, with sanitized output only.
 
     The caller must obtain specific approval; a previous KIS approval is not valid.
     No files, token cache, proxy, retry, redirect, scheduler or generic URL input.
     Unix main-thread execution is required for the hard wall-clock deadline.
+    The separately approved local viewer may collect minimal rows in memory only.
+    The returned capability summary never contains those rows.
     """
     result: dict[str, Any] = {
         "schema_version": "toss-order-aggregate-probe.t21",
@@ -167,6 +172,8 @@ def run_toss_order_probe_t21(
         "oauth_read_only_scope": "NOT_EVALUATED",
         "order_operations": 0,
     }
+    if _display_rows is not None:
+        _display_rows.clear()
     if approved is not True:
         return result
     try:
@@ -284,6 +291,7 @@ def run_toss_order_probe_t21(
         cursor: str | None = None
         seen_cursors: set[str] = set()
         seen_orders: set[str] = set()
+        pending_rows: list[dict[str, str | None]] = []
         partial, correction = False, False
         for _ in range(MAX_PAGES):
             payload = request(token=token, cursor=cursor)
@@ -302,6 +310,10 @@ def run_toss_order_probe_t21(
                 if identity in seen_orders:
                     raise _Stop("DUPLICATE_ORDER")
                 seen_orders.add(identity)
+                if _display_rows is not None:
+                    row = _order_view_row(order)
+                    if from_date <= str(row["orderedAtKst"])[:10] <= to_date:
+                        pending_rows.append(row)
                 partial, correction = (
                     partial or has_partial,
                     correction or has_correction,
@@ -326,6 +338,8 @@ def run_toss_order_probe_t21(
                         else "NOT_OBSERVED",
                     }
                 )
+                if _display_rows is not None:
+                    _display_rows.extend(pending_rows)
                 break
             if type(cursor) is not str or not 0 < len(cursor) <= 8192:
                 raise _Stop("MALFORMED_PAYLOAD")
@@ -346,4 +360,24 @@ def run_toss_order_probe_t21(
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous_handler)
         result["elapsed_ms"] = round((time.monotonic() - begun) * 1000)
+        if _display_rows is not None and result["result_code"] not in {
+            "COMPLETE_ORDER_AGGREGATE",
+            "COMPLETE_NO_ORDERS",
+        }:
+            _display_rows.clear()
     return result
+
+
+def _order_view_row(order: dict[str, Any]) -> dict[str, str | None]:
+    """Project only an already validated order; never include account or IDs."""
+    return {
+        "symbol": order["symbol"],
+        "side": order["side"],
+        "status": order["status"],
+        "currency": order["currency"],
+        "orderedAtKst": datetime.fromisoformat(order["orderedAt"])
+        .astimezone(timezone(timedelta(hours=9)))
+        .isoformat(),
+        "filledQuantity": order["execution"]["filledQuantity"],
+        "averageFilledPrice": order["execution"]["averageFilledPrice"],
+    }

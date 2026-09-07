@@ -251,6 +251,20 @@ def test_unknown_status_is_not_silently_classified(
     assert result["result_code"] == "UNSUPPORTED_ORDER_STATUS"
 
 
+def test_malformed_amount_cannot_bypass_quantity_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order = _order()
+    order["orderAmount"] = True
+    order["execution"]["filledQuantity"] = "11"
+    result, calls = _run(
+        monkeypatch, [_token(), _Response(_page([order]))], approved=True
+    )
+    assert result["result_code"] == "MALFORMED_PAYLOAD"
+    assert result["provider_history_state"] == "NOT_EVALUATED"
+    assert len(calls) == 2
+
+
 def test_byte_budget_counts_token_and_history(monkeypatch: pytest.MonkeyPatch) -> None:
     result, calls = _run(
         monkeypatch, [_token(), _Response(b" " * 1_048_576)], approved=True
@@ -356,3 +370,71 @@ def test_cancellation_state_is_not_correction_lineage(
     assert result["result_code"] == "COMPLETE_ORDER_AGGREGATE"
     assert result["correction_cancel_state"] == "OBSERVED_ORDER_STATE_ONLY"
     assert result["individual_fill_lineage"] == "NOT_EVALUATED"
+
+
+def test_display_projection_is_separate_from_sanitized_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows: list[dict[str, str | None]] = []
+    order = _order()
+    order["accountSeq"] = "SENSITIVE-ACCOUNT-SENTINEL"
+    order["orderedAt"] = "2026-08-31T23:30:00-04:00"
+    result, calls = _run(
+        monkeypatch,
+        [_token(), _Response(_page([order]))],
+        approved=True,
+        _display_rows=rows,
+    )
+    assert len(calls) == 2
+    assert rows == [
+        {
+            "symbol": "SYNTH",
+            "side": "BUY",
+            "status": "PARTIAL_FILLED",
+            "currency": "USD",
+            "orderedAtKst": "2026-09-01T12:30:00+09:00",
+            "filledQuantity": "2",
+            "averageFilledPrice": "123.456",
+        }
+    ]
+    assert "SYNTH" not in json.dumps(result)
+    assert "SENTINEL" not in json.dumps(rows)
+
+
+@pytest.mark.parametrize("failure", ["duplicate", "incomplete", "http"])
+def test_display_withholds_partial_rows_on_failure(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    rows = [{"symbol": "STALE-SENTINEL"}]
+    if failure == "duplicate":
+        pages = [_Response(_page([_order()], "a")), _Response(_page([_order()]))]
+    elif failure == "incomplete":
+        pages = [
+            _Response(_page([_order()], "a")),
+            *[_Response(_page([], str(i))) for i in range(3)],
+        ]
+    else:
+        pages = [_Response(_page([_order()], "a")), _Response(b"SENSITIVE ERROR", 503)]
+    result, _ = _run(monkeypatch, [_token(), *pages], approved=True, _display_rows=rows)
+    assert result["provider_history_state"] == "NOT_EVALUATED"
+    assert rows == []
+
+
+def test_display_does_not_expand_date_window_or_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows: list[dict[str, str | None]] = []
+    order = _order()
+    order["orderedAt"] = "2026-08-06T23:00:00+09:00"
+    result, calls = _run(
+        monkeypatch,
+        [_token(), _Response(_page([order]))],
+        approved=True,
+        _display_rows=rows,
+    )
+    assert result["result_code"] == "COMPLETE_ORDER_AGGREGATE"
+    assert len(calls) == 2
+    assert rows == []
+    result, calls = _run(monkeypatch, [], _display_rows=rows)
+    assert result["result_code"] == "APPROVAL_REQUIRED"
+    assert rows == [] and calls == []

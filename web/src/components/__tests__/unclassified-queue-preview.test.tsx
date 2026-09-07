@@ -141,8 +141,11 @@ describe("UnclassifiedQueuePreview", () => {
     expect(fileLabel?.textContent).toBe("Unclassified queue JSON");
     expect(board.input.accept).toBe("application/json,.json");
     expect(
-      Array.from(board.container.querySelectorAll("button"), (button) =>
-        button.textContent?.trim(),
+      Array.from(
+        board.container.querySelectorAll(
+          '[aria-labelledby="unclassified-preview-title"] button',
+        ),
+        (button) => button.textContent?.trim(),
       ),
     ).toEqual(["Clear local preview"]);
     await board.choose(fixtureDocument);
@@ -207,8 +210,12 @@ describe("UnclassifiedQueuePreview", () => {
     ).toHaveLength(8);
     expect(board.container.textContent).toContain("5 CORE · 3 SATELLITE");
     expect(board.container.textContent).toContain(
-      "PRIVATE DRAFT · NO ADVICE · NOT ACTIVE",
+      "APPROVED · ACTIVE · LONG_TERM",
     );
+    expect(board.container.textContent).toContain(
+      "PRODUCTION ADVICE NOT CONNECTED",
+    );
+    expect(board.container.textContent).not.toContain("PRIVATE DRAFT");
     expect(board.container.textContent).toContain(
       "Synthetic durable-demand thesis for parser and display verification.",
     );
