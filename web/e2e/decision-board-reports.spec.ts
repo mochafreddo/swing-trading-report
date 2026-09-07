@@ -437,7 +437,19 @@ test("fixture-only /today Mandate Evidence Outcome journey", async ({
     });
     await expect(drilldown).toContainText("CORRECTED");
     await expect(drilldown).toContainText("PARTIALLY_EXECUTED");
+    const summary = drilldown.locator("summary");
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      drilldown.locator('[aria-label="A1 connected review rows"] article'),
+    ).toHaveCount(2);
+    await expect(
+      drilldown.locator('[aria-label="A1 connected review rows"]'),
+    ).toContainText("ALLOCATION_REBASE_REQUIRED");
     await expectNoHorizontalOverflow(page);
+    await drilldown.screenshot({
+      path: `/private/tmp/portfolio-a1-review-${viewport.width}.png`,
+    });
   }
 
   const drilldown = page.getByRole("region", {

@@ -6,7 +6,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MandateEvidenceOutcomeDogfood } from "@/components/mandate-evidence-outcome-dogfood";
-import { parsePortfolioDogfoodT14Source } from "@/lib/portfolio-dogfood-t14-schema";
+import {
+  mandateReviewProjectionSchema,
+  parsePortfolioDogfoodT14Source,
+} from "@/lib/portfolio-dogfood-t14-schema";
+import reviewFixture from "../../../fixtures/portfolio-mandate-review.a1.synthetic.json";
 
 const fixturePath = fileURLToPath(
   new URL(
@@ -27,6 +31,28 @@ function renderScenario(selectedScenarioId: string) {
 }
 
 describe("MandateEvidenceOutcomeDogfood", () => {
+  it("uses the Python A1 projection while refusing active advice and private fields", () => {
+    expect(mandateReviewProjectionSchema.safeParse(reviewFixture).success).toBe(
+      true,
+    );
+    const html = renderScenario("corrected-lineage");
+    expect(html).toContain("A1 version → slice → evidence review");
+    expect(html).toContain("ALLOCATION_REBASE_REQUIRED");
+    expect(html).toContain("superseded event");
+    expect(
+      mandateReviewProjectionSchema.safeParse({
+        ...reviewFixture,
+        advice_enabled: true,
+      }).success,
+    ).toBe(false);
+    const privateRow = {
+      ...reviewFixture,
+      rows: [{ ...reviewFixture.rows[0], quantity: "PRIVATE_SENTINEL" }],
+    };
+    expect(mandateReviewProjectionSchema.safeParse(privateRow).success).toBe(
+      false,
+    );
+  });
   it("renders the corrected public lineage without execution-private fields", () => {
     const html = renderScenario("corrected-lineage");
 

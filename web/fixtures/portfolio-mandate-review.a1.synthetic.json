@@ -1,0 +1,47 @@
+{
+  "advice_enabled": false,
+  "as_of": "2026-08-28T00:25:00+00:00",
+  "mode": "LOCAL_ONLY",
+  "rows": [
+    {
+      "action": null,
+      "approval_state": "APPROVED",
+      "current_authority_event_ids": [
+        "19191919-1919-4919-8919-191919191919",
+        "21212121-2121-4121-8121-212121212121"
+      ],
+      "horizon": "SWING",
+      "instrument_id": "33333333-3333-4333-8333-333333333333",
+      "issue_codes": [
+        "BROKER_FRESHNESS_UNPROVEN",
+        "PRODUCTION_ADVICE_NOT_CONNECTED",
+        "ALLOCATION_REBASE_REQUIRED",
+        "PREDICATE_REVIEW_REQUIRED"
+      ],
+      "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "slice_id": "13131313-1313-4313-8313-131313131313",
+      "superseded_event_count": 1
+    },
+    {
+      "action": null,
+      "approval_state": "APPROVED",
+      "current_authority_event_ids": [
+        "19191919-1919-4919-8919-191919191919",
+        "21212121-2121-4121-8121-212121212121"
+      ],
+      "horizon": "SWING",
+      "instrument_id": "33333333-3333-4333-8333-333333333333",
+      "issue_codes": [
+        "BROKER_FRESHNESS_UNPROVEN",
+        "PRODUCTION_ADVICE_NOT_CONNECTED",
+        "ALLOCATION_REBASE_REQUIRED",
+        "PREDICATE_REVIEW_REQUIRED"
+      ],
+      "mandate_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "slice_id": "14141414-1414-4414-8414-141414141414",
+      "superseded_event_count": 1
+    }
+  ],
+  "schema_version": "portfolio-mandate-review.a1",
+  "unallocated_position_count": 0
+}

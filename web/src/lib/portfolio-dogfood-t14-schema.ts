@@ -1,5 +1,70 @@
 import { z } from "zod";
 
+export const mandateReviewProjectionSchema = z
+  .object({
+    schema_version: z.literal("portfolio-mandate-review.a1"),
+    mode: z.literal("LOCAL_ONLY"),
+    as_of: z.string().datetime({ offset: true }),
+    advice_enabled: z.literal(false),
+    unallocated_position_count: z.number().int().nonnegative(),
+    rows: z
+      .array(
+        z
+          .object({
+            slice_id: z.string().uuid(),
+            instrument_id: z.string().uuid(),
+            mandate_version_id: z.string().uuid().nullable(),
+            horizon: z.enum(["SWING", "LONG_TERM"]).nullable(),
+            approval_state: z
+              .enum(["APPROVED", "DRAFT", "NEEDS_REAPPROVAL"])
+              .nullable(),
+            issue_codes: z
+              .array(
+                z.enum([
+                  "BROKER_FRESHNESS_UNPROVEN",
+                  "PRODUCTION_ADVICE_NOT_CONNECTED",
+                  "ALLOCATION_REBASE_REQUIRED",
+                  "SLICE_INELIGIBLE",
+                  "UNCLASSIFIED_NO_ADVICE",
+                  "MANDATE_NOT_ACTIVE",
+                  "MANDATE_OUTSIDE_EFFECTIVE_WINDOW",
+                  "PREDICATE_REVIEW_REQUIRED",
+                  "CURRENT_PREDICATE_EVIDENCE_MISSING",
+                ]),
+              )
+              .min(2),
+            current_authority_event_ids: z.array(z.string().uuid()),
+            superseded_event_count: z.number().int().nonnegative(),
+            action: z.null(),
+          })
+          .strict(),
+      )
+      .max(1000),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      new Set(value.rows.map((row) => row.slice_id)).size !== value.rows.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Duplicate slice projection",
+      });
+    }
+    value.rows.forEach((row, index) => {
+      if (
+        !row.issue_codes.includes("BROKER_FRESHNESS_UNPROVEN") ||
+        !row.issue_codes.includes("PRODUCTION_ADVICE_NOT_CONNECTED")
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["rows", index],
+          message: "Review-only boundary is required",
+        });
+      }
+    });
+  });
+
 const uuidSchema = z.string().uuid();
 const timestampSchema = z
   .string()

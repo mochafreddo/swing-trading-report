@@ -1,8 +1,14 @@
 import Link from "next/link";
 
-import type { PortfolioDogfoodT14Source } from "@/lib/portfolio-dogfood-t14-schema";
+import {
+  mandateReviewProjectionSchema,
+  type PortfolioDogfoodT14Source,
+} from "@/lib/portfolio-dogfood-t14-schema";
+import reviewFixture from "../../fixtures/portfolio-mandate-review.a1.synthetic.json";
 
 import styles from "./today-decision-board.module.css";
+
+const review = mandateReviewProjectionSchema.safeParse(reviewFixture);
 
 export function MandateEvidenceOutcomeDogfood({
   source,
@@ -164,6 +170,48 @@ export function MandateEvidenceOutcomeDogfood({
           </div>
         </div>
       )}
+      <details className={styles.dogfoodScenario}>
+        <summary>A1 version → slice → evidence review · SYNTHETIC_ONLY</summary>
+        {!review.success ? (
+          <p role="status">INVALID A1 REVIEW PROJECTION</p>
+        ) : (
+          <>
+            <p>
+              Independent A1 snapshot · SWING slices · frozen at{" "}
+              {review.data.as_of}. This review uses its own fixture and remains
+              unchanged when the scenario above changes. No active advice or
+              production database connection.
+            </p>
+            <p>
+              {review.data.unallocated_position_count} positions without a
+              current allocation. Freshness remains unproven even when this
+              count is zero.
+            </p>
+            <div
+              className={styles.dogfoodFlow}
+              aria-label="A1 connected review rows"
+            >
+              {review.data.rows.map((row, index) => (
+                <article key={row.slice_id}>
+                  <h4>
+                    Slice {index + 1} · {row.approval_state ?? "UNCLASSIFIED"} ·{" "}
+                    {row.horizon ?? "NO HORIZON"}
+                  </h4>
+                  <p>{row.issue_codes.join(" · ")}</p>
+                  <p>
+                    {row.current_authority_event_ids.length} current review
+                    events · {row.superseded_event_count} superseded event
+                  </p>
+                  <p>
+                    Exact mandate version:{" "}
+                    <code>{row.mandate_version_id ?? "NONE"}</code>
+                  </p>
+                </article>
+              ))}
+            </div>
+          </>
+        )}
+      </details>
     </section>
   );
 }
