@@ -2391,6 +2391,95 @@ def test_r2_observation_correction_import_changes_review_without_overwrite(store
     assert replay_review_packet(bundle)["rows"][0]["action"] is None
 
 
+def test_r2_fixture_replay_and_local_receipt(store_db):
+    from scripts.portfolio_review_live_fixture import SyntheticReview
+
+    dsn, owner, cases = store_db
+    bundle = bundle_for(store_db)
+    args = commit_args(owner, "r2-proof")
+    store_for(dsn).commit(bundle, **args)
+    review = SyntheticReview(
+        lambda sql: _psql(dsn, sql=sql),
+        bundle,
+        [cases[0]["active_version"], cases[1]["active_version"]],
+    )
+    body = {
+        "command": "replay",
+        "request_id": identity("r2-proof-replay"),
+        "run_id": args["run_id"],
+    }
+    proof = review.command(body)
+    assert proof["verification"] == {
+        "kind": "REPLAY",
+        "run_id": args["run_id"],
+        "matched": True,
+        "packet_sha256": bundle["packet_sha256"],
+        "projection_sha256": bundle["projection_sha256"],
+    }
+    assert review.command(body)["duplicate"]
+    receive = {**body, "command": "receive", "request_id": identity("r2-proof-receive")}
+    receipt = review.command(receive)
+    assert receipt["verification"]["total"] == receipt["verification"]["received"] == 1
+    assert (
+        receipt["verification"]["pending"]
+        == receipt["verification"]["external_sends"]
+        == 0
+    )
+    assert receipt["verification"]["newly_received"] >= 1
+    before = _psql(
+        dsn,
+        sql="select count(received_at) from public.portfolio_mandate_review_outbox_r2;",
+    )
+    # A retry of the old batch cannot consume records from a subsequently saved run.
+    newer = commit_args(owner, "r2-proof-newer")
+    store_for(dsn).commit(bundle_for(store_db), **newer)
+    assert review.command(receive) == {**receipt, "duplicate": True}
+    assert (
+        _psql(
+            dsn,
+            sql="select count(received_at) from public.portfolio_mandate_review_outbox_r2;",
+        )
+        == before
+    )
+    with pytest.raises(ValueError, match="STALE_SELECTION"):
+        review.command({**body, "request_id": identity("r2-proof-stale")})
+    current_body = {
+        **receive,
+        "run_id": newer["run_id"],
+        "request_id": identity("r2-proof-new-batch"),
+    }
+    assert review.command(current_body)["verification"]["newly_received"] == 1
+    assert (
+        review.command(
+            {**current_body, "request_id": identity("r2-proof-empty-batch")}
+        )["verification"]["newly_received"]
+        == 0
+    )
+    blocked = {
+        **newer,
+        "run_id": identity("r2-proof-blocked"),
+        "revision": 2,
+        "supersedes": newer["run_id"],
+    }
+    store_for(dsn).commit(bundle_for(store_db, blocked=True), **blocked)
+    result = review.command(
+        {
+            **receive,
+            "run_id": blocked["run_id"],
+            "request_id": identity("r2-proof-blocked-batch"),
+        }
+    )
+    assert (
+        result["verification"]["total"]
+        == result["verification"]["received"]
+        == result["verification"]["pending"]
+        == 0
+    )
+    assert "holding_document" not in json.dumps(proof)
+    # Leave a current non-blocked run for manual/E2E inspection.
+    store_for(dsn).commit(bundle_for(store_db), **commit_args(owner, "r2-proof-ready"))
+
+
 def test_r2_live_disposable_ui(store_db):
     if os.environ.get("PORTFOLIO_REVIEW_LIVE_UI") != "1":
         pytest.skip("live disposable UI is explicit opt-in")

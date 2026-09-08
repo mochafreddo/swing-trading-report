@@ -196,3 +196,14 @@ HEAD `edc37bd0`와 깨끗한 작업 트리에서 복원했다. 원본 `.gstack` 
 최종 live 사용 후 복구는 **0.100초**, journal RPO **0**, A1/R1/R2 schema/data/ACL/RLS와 authenticated read-only 조회 일치다. 새 cluster 종료와 임시 디렉터리 삭제를 확인했다. 근거는 `tmp/portfolio-r2-live-evidence.local.json`, 같은 이름의 `.pytest.xml`/`.advisors.json`, `tmp/portfolio-review-live.local.log`와 `web/test-results/portfolio-live-*.png`다. 같은 폐기형 cluster 안의 복구 검증이므로 운영 cluster 장애 복구나 역할 재생성을 입증하지 않는다. 기존 migration 세 개의 SHA256은 R2 manifest와 동일하며 이번에는 migration을 추가하거나 수정하지 않았다.
 
 다음 행동은 live 수동 창의 합성 5task 평가다. 사용자 평가 상태는 `NOT_EVALUATED`로 유지한다. 실제 owner/version/PRIMARY hash·freshness·미정 의미와 expected-status 입력, 실제 Supabase session UX 및 확정 source adapter, 전체 V1/fill 기반 O1, 기존 DB/provider/배포 승인, v5 미래 표본과 evaluator/human PASS 및 별도 LONG_TERM gate가 남아 있다. 운영 Docker, 기존 DB credential, provider, 주문, 외부 notification, schedule/automation 및 push는 실행하지 않았다.
+
+
+## 2026-09-08 저장 replay와 로컬 수신 확인
+
+깨끗한 `1bdcb033`에서 이어서 기존 DB 테스트에만 있던 replay와 로컬 outbox 수신 확인을 합성 화면에 연결했다. 기존 compiler와 `receive_local_outbox_r2`를 재사용했으며 migration이나 dependency를 추가하지 않았다. 현재 run의 검증 결과는 run ID·hash 또는 수신 수치만 반환하고 요청 command/run과 strict schema가 일치해야 표시한다.
+
+로컬 sink의 범위는 합성 owner 전체의 수신 가능 run이다. 화면에는 batch의 새 수신 수와 현재 run의 수신·대기를 구분해 표시한다. 같은 request ID는 최초 receipt 응답을 반환하므로 그 뒤 생성한 run을 추가 처리하지 않는다. 다른 request ID로 다시 확인했을 때 새 수신 0건, BLOCKED의 outbox 0건, stale selection 거부, 변조 packet의 replay 거부를 검증했다. replay는 저장 당시 clock/budget으로 재현한 결과이며 현재 freshness·실제 gate PASS나 외부 알림 전달을 증명하지 않는다.
+
+Python `just quality`는 **3,698 passed / 39 skipped**로 통과했다. 39개 제외 항목은 별도 opt-in DB/live 30개와 미변경 broker DB 9개이며 기존 calendar의 NumPy timedelta deprecation warning은 남아 있다. 새 폐기형 PostgreSQL A1/R1/R2/live 검사 **37개**, Web **113 files / 980 tests 및 coverage gate**, lint/format/typecheck/build, 기존 E2E **6개**와 live E2E **1개**, 문서 계약 **21개**를 통과했다. live E2E는 재검증 hash·run 일치, 수신 반복·새로고침 후 상태 유지, 375/768/1280px·keyboard·overflow·privacy·응답 중단 경계를 포함한다. 375/1280px 수신 화면을 육안 확인했다. 설치·clean·sync가 있는 `just ci-web` 대신 설치된 도구로 같은 검사들을 실행했다.
+
+사용 후 복구는 **0.124초**, journal RPO 0이며 schema/data/ACL/RLS와 authenticated read-only 조회가 일치했다. 임시 cluster 종료와 데이터 디렉터리 삭제를 확인했다. 근거는 `tmp/portfolio-r2-proof-evidence.local.json`과 같은 이름의 `.pytest.xml`/`.advisors.json`이다. 기존 세 migration checksum도 R2 manifest와 일치했다. 실제 매핑·인증 UX, V1/O1 확장, 운영 승인, v5 표본과 사용자 평가는 기존 미완료 상태를 유지한다. 사용자용 live 5task 지시는 [R2 재현·평가 절차](portfolio-review-store-r2.md)에 구체화했다.

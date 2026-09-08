@@ -100,10 +100,31 @@ test("live disposable review writes survive refresh and preserve correction line
     })
     .click();
   await expect(panel).toContainText("NO_ACTION");
+  await page
+    .getByRole("button", { name: "저장된 검토 재검증", exact: true })
+    .click();
+  const verification = page.getByRole("region", { name: "검토 검증 결과" });
+  await expect(verification).toContainText("REPLAY_MATCH");
+  await expect(verification).toContainText(await runId());
+  await expect(verification).toContainText("sha256:");
+  await page
+    .getByRole("button", { name: "합성 로컬 수신 확인", exact: true })
+    .click();
+  await expect(verification).toContainText("총 1건 · 수신 1건 · 대기 0건");
+  await expect(verification).toContainText("외부 전송 0건");
+  await page
+    .getByRole("button", { name: "합성 로컬 수신 확인", exact: true })
+    .click();
+  await expect(verification).toContainText("이번 요청으로 0건");
   for (const width of [375, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.reload();
     await expect(panel).toContainText("NO_ACTION");
+    await expect(verification).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "합성 로컬 수신 확인", exact: true })
+      .click();
+    await expect(verification).toContainText("총 1건 · 수신 1건 · 대기 0건");
     const summary = panel.locator("summary");
     await expect(summary).toBeVisible();
     await summary.focus();
@@ -139,7 +160,7 @@ test("live disposable review writes survive refresh and preserve correction line
   await expect(
     page
       .getByRole("status")
-      .filter({ hasText: "저장 결과를 확인하지 못했습니다" }),
+      .filter({ hasText: "처리 결과를 확인하지 못했습니다" }),
   ).toBeVisible();
   await expect(panel).toContainText("NO_ACTION");
   await page.unroute("**/api/portfolio-review-fixture");

@@ -135,3 +135,70 @@ it.each(["valid", "owner", "versions", "unavailable"])(
       expect(new URL(String(url)).origin).toBe("http://127.0.0.1:43419");
   },
 );
+
+it.each([
+  "valid",
+  "wrong_run",
+  "wrong_kind",
+  "missing",
+  "private",
+  "external",
+  "counts",
+])(
+  "binds verification proof to the requested run and command: %s",
+  async (fault) => {
+    const verification: Record<string, unknown> = {
+      kind: "LOCAL_SINK",
+      run_id: command.run_id,
+      scope: "SYNTHETIC_OWNER",
+      destination: "LOCAL_REVIEW_SINK",
+      newly_received: 1,
+      total: 1,
+      received: 1,
+      pending: 0,
+      external_sends: 0,
+    };
+    if (fault === "wrong_run") verification.run_id = command.request_id;
+    if (fault === "wrong_kind") verification.kind = "REPLAY";
+    if (fault === "private") verification.packet = "PRIVATE_SENTINEL";
+    if (fault === "external") verification.external_sends = 1;
+    if (fault === "counts") verification.pending = 1;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        json({
+          ok: true,
+          duplicate: false,
+          ...(fault === "missing" ? {} : { verification }),
+        }),
+      ),
+    );
+    const response = await POST(request({ ...command, command: "receive" }));
+    expect(response.status).toBe(fault === "valid" ? 200 : 403);
+    expect(JSON.stringify(await response.json())).not.toContain(
+      "PRIVATE_SENTINEL",
+    );
+  },
+);
+
+it("returns replay hashes only and rejects a proof on an ordinary write", async () => {
+  const verification = {
+    kind: "REPLAY",
+    run_id: command.run_id,
+    matched: true,
+    packet_sha256: "sha256:" + "a".repeat(64),
+    projection_sha256: "sha256:" + "b".repeat(64),
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockImplementation(async () =>
+        json({ ok: true, duplicate: false, verification }),
+      ),
+  );
+  expect((await POST(request({ ...command, command: "replay" }))).status).toBe(
+    200,
+  );
+  expect((await POST(request())).status).toBe(403);
+});

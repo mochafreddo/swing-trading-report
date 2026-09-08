@@ -55,6 +55,12 @@ SAB_SKIP_ROOT_ENV=1 UV_CACHE_DIR=.uv-cache uv run --no-sync python -m scripts.po
 
 화면의 버튼은 합성 입력 재검토, 입력 부족 차단, 관측 값 `2`/`-2`의 append-only 정정, `UNLINKED` → `AMBIGUOUS` 및 사용자가 직접 선택한 `NO_ACTION`을 기록한다. 관측 값과 PRIMARY content는 공개 합성 fixture로 고정한다. 실제 투자 의미나 source를 추정하지 않는다. 결과는 실제 authenticated read RPC를 통해 표시되며 새로고침해도 유지된다. run 선택이 오래됐으면 저장을 거부하고 같은 request ID의 같은 요청은 DB에 동일 bytes로 재시도한다. 세션당 새 요청은 128개로 제한하며 재시작은 새로운 DB를 만든다.
 
+`저장된 검토 재검증`은 현재 선택한 run의 DB packet/projection을 읽고 기존 `replay_review_packet`으로 canonical bytes와 두 hash를 검증한다. 성공 응답에는 run ID와 hash 및 일치 여부만 포함하며 원문이나 source content를 반환하지 않는다. 저장 당시 clock/budget으로 수행하는 replay이므로 현재 freshness나 실제 gate PASS를 증명하지 않는다. 변조된 packet이나 결과, 다른 run의 proof, 알 수 없는 필드와 검증 종류는 거부한다.
+
+`합성 로컬 수신 확인`은 기존 `receive_local_outbox_r2`를 호출한다. 범위는 **폐기형 DB의 합성 owner 전체에서 수신 가능한 run**이며 현재 화면의 run 하나만 처리하는 것으로 해석하지 않는다. 응답은 이번 owner batch의 새 수신 건수와 현재 run의 total/received/pending을 구분한다. `BLOCKED` run은 outbox가 없으므로 세 수치가 모두 0이다. 새 요청으로 다시 실행하면 이미 수신한 기록은 중복되지 않는다. 같은 request ID 재시도는 최초 확인 결과를 반환하며 이후 생성된 run까지 새로 수신 처리하지 않는다. 새 batch는 새 버튼 클릭/request가 필요하다. 이는 DB 내부 receipt이며 알림 전송·실제 delivery 증거가 아니다.
+
+검증 응답은 서버와 브라우저에서 동일한 strict schema로 검사하고 요청한 command/run에 묶는다. 합계 불일치, 외부 전송 수치, private field가 섞인 결과는 표시하지 않는다. 검증 표시는 브라우저의 현재 화면에만 두고 새 작업 시작이나 전체 새로고침 시 지운다. 실제 수신 기록은 DB에 남으므로 재조회·backup/restore로 다시 확인할 수 있다.
+
 `SAB_SKIP_ROOT_ENV=1`과 `SAB_PORTFOLIO_R2_FIXTURE=1`, 검증된 loopback port가 모두 있어야 live adapter와 API가 활성화된다. 고정 cohort의 합성 Auth HTTP test double을 실제 typed reader에 주입하고 실제 HTTPS 요구를 완화하지 않는다. API는 공통 관리자·local·동일 출처 guard와 1KiB 입력 제한을 사용한다. DB test double은 loopback Host와 고정 합성 bearer를 확인하고 브라우저 Origin, 임의 owner/version/SQL/URL, 알 수 없는 command를 거부한다. 그 bearer는 공개 테스트 표식이며 실제 인증 자격 증명이 아니다. 공개 projection만 반환하고 원문·관측값·source content를 브라우저에 보내지 않는다. 수집·주문·외부 전송 경로가 없다.
 
 실제 Today에서는 기본 `DISABLED`다. 독립된 Supabase 사용자 세션을 발급·연결하는 실제 UX와 owner mapping의 주입은 아직 남아 있다. fixture의 stale/error 선택은 각각 `/today?stored=stale#stored-review`, `/today?stored=error#stored-review`이며 이 상태에서는 저장 버튼도 숨긴다. freshness budget은 합성 packet의 broker 600초/source 180일, Web 결과 3,600초다. 수동 창이 오래되면 broker freshness에 따라 검토가 차단될 수 있다. fixture Next 출력은 `.next-portfolio-fixture`에 둔다.
@@ -102,5 +108,14 @@ Web 새 계약/transport/component 15개와 전체 112 files / 958 tests·covera
 | 사용자 평가 | 합성 5task와 실제 cohort의 종목별 60초 무도움 수행. 에이전트 E2E로 PASS 대체 불가 |
 
 사용자 평가에는 [기존 UX1–UX5](portfolio-goal-reconciliation-20260907.md#수동-ux-평가-준비)를 사용한다. 추가 저장 흐름 지시는 “저장된 검토에서 재검토가 필요한 이유를 찾고, 주문 결과가 왜 확정 연결이 아닌지와 어떤 기록이 정정됐는지 설명한다”이다. 기록 필드는 `task_id / 시작·종료시각 / elapsed_seconds / success / help_used / issue_code`이며 개인 원문/종목값을 기록하지 않는다. 현재 모든 사용자 결과는 `NOT_EVALUATED`다.
+
+live 저장·검증 화면의 수동 5task 지시는 다음과 같다. 각 task의 시작·종료시각, 도움 여부와 결과를 위 양식에 따로 기록한다. 에이전트의 E2E 결과로 사용자 성공을 채우지 않는다.
+
+1. 저장된 검토에서 재검토가 필요한 이유와 매수·매도 조언의 활성 여부를 찾는다.
+2. 입력 부족 검토를 저장하고 이전 정상 결과가 남아 있지 않은지 확인한 뒤 합성 입력으로 다시 검토한다.
+3. 합성 관측을 정정하고 이전 관측이 삭제되지 않았음을 이력 수치로 설명한다.
+4. 미연결 Outcome을 기록하고 모호한 상태로 정정한 뒤, 개별 fill이나 확정 Decision 연결과 다른 이유를 설명한다. 아무 행동도 하지 않았다고 확인할 때만 NO_ACTION을 선택한다.
+5. 저장된 검토를 재검증하고 로컬 수신을 두 번 확인한다. hash 일치, 현재 검토의 수신·대기 수치, 두 번째 새 수신 0건이 각각 무엇을 뜻하는지 설명한다.
+
 
 다음 행동은 위 live 수동 창에서 합성 저장·정정·Outcome 5task 평가를 기록하는 것이다. 실제 연결에는 매핑 입력 확정이 필요하다. 실행을 승인받을 단계가 되면 위 manifest의 미정 필드를 모두 채운 후 “확정된 target/owner/window에서 명시한 세 migration checksum과 diff에 한해 backup·폐기형 restore 대조·schema apply를 승인한다. data import·writer·배포·provider·알림은 제외한다”처럼 범위를 구분한다. 이 문구는 현재 승인이 아니며 미정 target에 적용할 수 없다.

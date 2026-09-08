@@ -521,7 +521,7 @@ review-only다. CLI와 Today는 폐기형 SQL의 고정 합성 응답을 재현�
 transport/Auth owner 매핑·importer와 전체 DecisionRun/Outcome/outbox는 남은 구현이다.
 R1의 권한·기간 매핑·복구 검증은 [R1 계약](portfolio-review-r1-contract.md)을 따른다.
 
-R2는 `review_transport.py`의 명시적 Auth owner/version과 `review_import.py`의 독립 승인/source binding을 연결한다. 새 compiler role의 단일 transaction이 R1 원문·관측 import, sealed packet, review run/Decision, journal, local outbox를 저장한다. STABLE Today 조회는 최신 차단 결과도 그대로 반영하며 typed Outcome 정정은 별도 append-only 이력으로 남는다. 실제 Today session mapping은 기본 비활성이다. 합성 화면은 정적 DB export 또는 `--review-ui`가 생성한 새 폐기형 DB의 live read RPC를 사용한다. live 모드의 고정 command API는 공통 관리자/local/동일 출처 guard를 거쳐 기존 importer/store를 호출하고 관측·Outcome 정정과 중복 요청을 검증한다. 서버 종료 후 같은 DB의 backup/restore를 대조한다. [R2 계약](portfolio-review-store-r2.md)은 권한·멱등성·replay·복구와 남은 실제 연결 경계를 설명한다.
+R2는 `review_transport.py`의 명시적 Auth owner/version과 `review_import.py`의 독립 승인/source binding을 연결한다. 새 compiler role의 단일 transaction이 R1 원문·관측 import, sealed packet, review run/Decision, journal, local outbox를 저장한다. STABLE Today 조회는 최신 차단 결과도 그대로 반영하며 typed Outcome 정정은 별도 append-only 이력으로 남는다. 실제 Today session mapping은 기본 비활성이다. 합성 화면은 정적 DB export 또는 `--review-ui`가 생성한 새 폐기형 DB의 live read RPC를 사용한다. live 모드의 고정 command API는 공통 관리자/local/동일 출처 guard를 거쳐 기존 importer/store를 호출하고 관측·Outcome 정정과 중복 요청을 검증한다. 현재 run의 sealed packet replay는 기존 compiler를 재사용하고 공개 hash만 반환한다. 로컬 수신은 기존 owner 단위 DB sink를 사용하며 최초 batch의 확인 결과를 고정해 같은 요청의 재시도가 나중 run을 수신 처리하지 않게 한다. 서버 종료 후 같은 DB의 backup/restore를 대조한다. [R2 계약](portfolio-review-store-r2.md)은 권한·멱등성·replay·복구와 남은 실제 연결 경계를 설명한다.
 구현 및 승인 의존성은 [계획 대조 기록](portfolio-goal-reconciliation-20260907.md)에 둔다.
 
 ### Portfolio Outcome T15 provider-free adapter

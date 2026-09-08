@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { parseReviewFixtureResult } from "@/lib/portfolio-review-fixture-schema";
 import { enforceAdminApiGuard } from "@/lib/admin-api-guard";
 import { parseJsonBody } from "@/lib/parse-json-body";
 import {
@@ -16,6 +17,8 @@ const commandSchema = z
       "unlinked",
       "ambiguous",
       "no_action",
+      "replay",
+      "receive",
     ]),
     request_id: z.string().uuid(),
     run_id: z.string().uuid(),
@@ -37,10 +40,11 @@ export async function POST(request: NextRequest) {
     const command = commandSchema.parse(parsed.payload);
     const response = await fixtureRequest("/command", JSON.stringify(command));
     if (!response.ok) return fail(409);
-    const result = z
-      .object({ ok: z.literal(true), duplicate: z.boolean() })
-      .strict()
-      .parse(await response.json());
+    const result = parseReviewFixtureResult(
+      await response.json(),
+      command.command,
+      command.run_id,
+    );
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });

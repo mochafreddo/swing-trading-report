@@ -79,3 +79,26 @@ def test_fixture_session_limit_is_bounded_before_database_io():
             {"command": "compile", "request_id": str(uuid4()), "run_id": str(uuid4())}
         )
     review.sql.assert_not_called()
+
+
+def test_failed_replay_does_not_return_or_cache_a_success_proof():
+    from sab.portfolio_mandate.review_import import import_review_packet
+
+    from tests.test_portfolio_review_store import synthetic_import
+
+    raw, bindings = synthetic_import()
+    bundle = import_review_packet(raw, **bindings)
+    bundle["projection"] = "PRIVATE_SENTINEL"
+    run_id = str(uuid4())
+    sql = Mock(
+        side_effect=[json.dumps({"rows": [{"run_id": run_id}]}), json.dumps(bundle)]
+    )
+    review = review_with(sql)
+    with pytest.raises(ValueError, match="REVIEW_REPLAY_MISMATCH"):
+        review.command(
+            {"command": "replay", "request_id": str(uuid4()), "run_id": run_id}
+        )
+    assert review.history == {}
+    assert sql.call_count == 2
+    assert "where r.run_id=" in sql.call_args.args[0]
+    assert f"r.owner_id='{review.owner}'" in sql.call_args.args[0]

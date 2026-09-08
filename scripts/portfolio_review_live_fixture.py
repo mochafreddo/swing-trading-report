@@ -21,12 +21,22 @@ from sab.portfolio_mandate.review_import import (
     EvidenceBinding,
     canonical,
     import_review_packet,
+    replay_review_packet,
 )
 from sab.portfolio_mandate.review_policy import _hash, _json
 from sab.portfolio_mandate.review_store import ReviewStore, compiler_sql
 
 TOKEN = "synthetic-review-only"
-COMMANDS = {"compile", "block", "correct", "unlinked", "ambiguous", "no_action"}
+COMMANDS = {
+    "compile",
+    "block",
+    "correct",
+    "unlinked",
+    "ambiguous",
+    "no_action",
+    "replay",
+    "receive",
+}
 
 
 class SyntheticReview:
@@ -84,7 +94,7 @@ class SyntheticReview:
             json.loads(self.authenticated(f"select public.{name}(array[{ids}]);")),
         )
 
-    def command(self, body: object) -> dict[str, bool]:
+    def command(self, body: object) -> dict[str, Any]:
         if not isinstance(body, dict) or set(body) != {
             "command",
             "request_id",
@@ -100,15 +110,68 @@ class SyntheticReview:
             previous, retry = self.history[request_id]
             if previous != body:
                 raise ValueError("REQUEST_CONFLICT")
-            retry()  # Exercise the real DB idempotency contract with identical bytes.
-            return {"ok": True, "duplicate": True}
+            value = retry()  # Ordinary writes retry with the original bytes.
+            return {
+                "ok": True,
+                "duplicate": True,
+                **(
+                    {"verification": value}
+                    if body["command"] in {"replay", "receive"}
+                    else {}
+                ),
+            }
         if len(self.history) >= 128:
             raise ValueError("SESSION_LIMIT")
         current = next(r for r in self.read()["rows"] if r["run_id"] is not None)
         if current["run_id"] != run_id:
             raise ValueError("STALE_SELECTION")
         command = body["command"]
-        if command in {"compile", "block", "correct"}:
+        if command == "replay":
+
+            def execute() -> Any:
+                bundle = json.loads(
+                    self.sql(
+                        "select jsonb_build_object('packet',p.packet,'packet_sha256',p.packet_sha256,'projection',r.projection,'projection_sha256',r.projection_sha256) "
+                        "from public.portfolio_mandate_review_packet_r2 p join public.portfolio_mandate_review_run_r2 r on r.run_id=p.packet_id "
+                        f"where r.run_id='{run_id}' and r.owner_id='{self.owner}';"
+                    )
+                )
+                replay_review_packet(bundle)
+                return {
+                    "kind": "REPLAY",
+                    "run_id": run_id,
+                    "matched": True,
+                    "packet_sha256": bundle["packet_sha256"],
+                    "projection_sha256": bundle["projection_sha256"],
+                }
+        elif command == "receive":
+
+            def execute() -> Any:
+                # Existing sink processes this synthetic owner's eligible runs only.
+                count = int(
+                    self.sql(
+                        "set role portfolio_mandate_review_compiler_r2; "
+                        f"select portfolio_mandate_private.receive_local_outbox_r2('{self.owner}');"
+                    )
+                )
+                counts = json.loads(
+                    self.sql(
+                        "select jsonb_build_object('total',count(*),'received',count(o.received_at),'pending',count(*)-count(o.received_at)) "
+                        "from public.portfolio_mandate_review_outbox_r2 o join public.portfolio_mandate_review_decision_r2 d on d.decision_id=o.decision_id "
+                        "join public.portfolio_mandate_review_run_r2 r on r.run_id=d.run_id "
+                        f"where r.run_id='{run_id}' and r.owner_id='{self.owner}';"
+                    )
+                )
+                return {
+                    "kind": "LOCAL_SINK",
+                    "run_id": run_id,
+                    "scope": "SYNTHETIC_OWNER",
+                    "destination": "LOCAL_REVIEW_SINK",
+                    "newly_received": count,
+                    "external_sends": 0,
+                    **counts,
+                }
+        elif command in {"compile", "block", "correct"}:
             raw = self.read(input_only=True)
             value = json.loads(raw["payload"])
             row = value["rows"][0]
@@ -171,9 +234,16 @@ class SyntheticReview:
                         supersedes=parent,
                     )
 
-        execute()
-        self.history[request_id] = (dict(body), execute)
-        return {"ok": True, "duplicate": False}
+        value = execute()
+        # Retrying an acknowledged receipt cannot consume records created later.
+        # A new click/request is required to process a new batch for this owner.
+        retry = (lambda: value) if command == "receive" else execute
+        self.history[request_id] = (dict(body), retry)
+        return {
+            "ok": True,
+            "duplicate": False,
+            **({"verification": value} if command in {"replay", "receive"} else {}),
+        }
 
 
 def handler_for(review: SyntheticReview) -> type[BaseHTTPRequestHandler]:
