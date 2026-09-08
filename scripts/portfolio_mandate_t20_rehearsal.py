@@ -434,7 +434,13 @@ def run_rehearsal(
     *,
     include_review: bool = False,
     include_store: bool = False,
+    review_ui: bool = False,
+    review_ui_seconds: int = 0,
 ) -> dict[str, Any]:
+    if not 0 <= review_ui_seconds <= 3600:
+        raise ValueError("manual UI window must be 0..3600 seconds")
+    review_ui = review_ui or review_ui_seconds > 0
+    include_store = include_store or review_ui
     include_review = include_review or include_store
     environment = _sanitized_environment(os.environ)
     port = _free_loopback_port()
@@ -514,6 +520,9 @@ def run_rehearsal(
             test_environment["PORTFOLIO_REVIEW_R1_REHEARSAL"] = "1"
         if include_store:
             test_environment["PORTFOLIO_REVIEW_R2_REHEARSAL"] = "1"
+        if review_ui:
+            test_environment["PORTFOLIO_REVIEW_LIVE_UI"] = "1"
+            test_environment["PORTFOLIO_REVIEW_LIVE_SECONDS"] = str(review_ui_seconds)
         _run(
             [
                 sys.executable,
@@ -781,6 +790,11 @@ def run_rehearsal(
             (repo_root / R2_MIGRATION).read_bytes()
         )
         evidence["store_tables_and_read_only_restore_verified"] = True
+    if review_ui:
+        evidence["live_synthetic_ui"] = (
+            "MANUAL_WINDOW" if review_ui_seconds else "E2E_PASSED"
+        )
+        evidence["user_ux_evaluation"] = "NOT_EVALUATED"
     _write_evidence(evidence_path, evidence)
     return evidence
 
@@ -803,6 +817,17 @@ def main() -> int:
         default=Path("tmp/portfolio-mandate-t20-evidence.local.json"),
         help="gitignored local evidence output",
     )
+    parser.add_argument(
+        "--review-ui",
+        action="store_true",
+        help="exercise live disposable DB UI at port 43317 before backup/restore",
+    )
+    parser.add_argument(
+        "--review-ui-seconds",
+        type=int,
+        default=0,
+        help="manual window up to 3600 seconds; zero runs browser E2E",
+    )
     args = parser.parse_args()
     repo_root = Path(__file__).resolve().parents[1]
     evidence_path = args.evidence
@@ -813,6 +838,8 @@ def main() -> int:
         evidence_path,
         include_review=args.include_review,
         include_store=args.include_store,
+        review_ui=args.review_ui,
+        review_ui_seconds=args.review_ui_seconds,
     )
     print(
         json.dumps(

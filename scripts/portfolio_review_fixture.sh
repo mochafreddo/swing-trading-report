@@ -18,6 +18,11 @@ fi
 node_bin="$(command -v node)"
 fixture_pid=''
 web_pid=''
+live_port="${PORTFOLIO_REVIEW_LIVE_PORT:-}"
+if [[ -n "$live_port" ]] && { [[ ! "$live_port" =~ ^[0-9]{4,5}$ ]] || (( live_port < 1024 || live_port > 65535 )); }; then
+  echo 'Invalid live fixture port' >&2
+  exit 1
+fi
 cleanup() {
   if [[ -n "$web_pid" ]]; then kill "$web_pid" 2>/dev/null || true; fi
   if [[ -n "$fixture_pid" ]]; then kill "$fixture_pid" 2>/dev/null || true; fi
@@ -30,12 +35,12 @@ env -i PATH="$PATH" "$node_bin" e2e/decision-board-fixture-server.mjs "$data_por
 fixture_pid=$!
 # Direct Next CLI avoids a child process wrapper that could outlive this script.
 env -i PATH="$PATH" SAB_SKIP_ROOT_ENV=1 SAB_PORTFOLIO_R2_FIXTURE=1 \
-  SAB_BASIC_AUTH_USER=fixture-admin SAB_BASIC_AUTH_PASS=fixture-password \
+  SAB_RUNTIME_STATE_STORE=memory SAB_BASIC_AUTH_USER=fixture-admin SAB_BASIC_AUTH_PASS=fixture-password \
   SAB_SESSION_SECRET=fixture-session-secret-at-least-32-bytes \
   SAB_SESSION_COOKIE_SECURE=false SAB_TRUST_HOST_HEADER_FOR_LOCAL_REQUESTS=1 \
   SUPABASE_URL="http://127.0.0.1:$data_port" SUPABASE_SECRET_KEY=sb_secret_fixture_only \
   SUPABASE_REPORTS_BUCKET=reports REPORT_SEARCH_WINDOW=100 RUN_DISPATCH_ENABLED=0 \
-  NEXT_TELEMETRY_DISABLED=1 \
+  PORTFOLIO_REVIEW_LIVE_PORT="$live_port" NEXT_TELEMETRY_DISABLED=1 \
   "$node_bin" node_modules/next/dist/bin/next dev --hostname 127.0.0.1 --port "$web_port" &
 web_pid=$!
 echo "Synthetic review: http://127.0.0.1:$web_port/today#stored-review"

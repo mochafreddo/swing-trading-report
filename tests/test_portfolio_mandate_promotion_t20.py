@@ -190,3 +190,17 @@ def test_t20_reuses_the_single_existing_a1_create_only_migration() -> None:
         )
         == 1
     )
+
+
+@pytest.mark.parametrize("seconds", [-1, 3601])
+def test_t20_rejects_unbounded_manual_window_before_creating_cluster(
+    monkeypatch, tmp_path, seconds
+):
+    def forbidden():
+        pytest.fail("must validate duration before binding a port")
+
+    monkeypatch.setattr(rehearsal, "_free_loopback_port", forbidden)
+    with pytest.raises(ValueError, match=r"0\.\.3600"):
+        rehearsal.run_rehearsal(
+            Path.cwd(), tmp_path / "evidence.json", review_ui_seconds=seconds
+        )

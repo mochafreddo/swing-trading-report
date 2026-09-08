@@ -131,7 +131,7 @@ RunJournal의 terminal 수만으로 졸업시키지 않습니다. 모든 planned
 
 ## Portfolio review R2 로컬 사용
 
-별도 합성 화면과 DB 복구 재현, 실제 연결용 checksum/owner/backup/rollback manifest는 [R2 계약과 인계](portfolio-review-store-r2.md)를 참고하세요. `scripts/portfolio_mandate_t20_rehearsal.py --include-store`는 매번 새 폐기형 DB만 사용합니다. 실제 사용자 매핑이나 기존 DB credential을 입력하는 도구가 아닙니다.
+별도 합성 화면과 DB 복구 재현, 실제 연결용 checksum/owner/backup/rollback manifest는 [R2 계약과 인계](portfolio-review-store-r2.md)를 참고하세요. `scripts/portfolio_mandate_t20_rehearsal.py --include-store`는 매번 새 폐기형 DB만 사용합니다. 화면에서 직접 저장·정정·Outcome을 확인하려면 `--review-ui`를 사용하세요. `--review-ui-seconds 600`을 더하면 DB 준비 후 600초의 수동 창을 열고, 창 종료 후 사용한 데이터의 backup/restore와 임시 cluster 정리까지 수행합니다. 포트는 43317이며 로그인은 공개 합성 계정 `fixture-admin` / `fixture-password`입니다. 실제 사용자 매핑이나 기존 DB credential을 입력하는 도구가 아닙니다.
 
 ## 필수 품질 게이트
 

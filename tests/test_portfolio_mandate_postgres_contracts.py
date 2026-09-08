@@ -2389,3 +2389,25 @@ def test_r2_observation_correction_import_changes_review_without_overwrite(store
     assert today["rows"][0]["review"]["superseded_observation_count"] == 1
     assert today["rows"][0]["review"]["matched_hard_trigger_count"] == 0
     assert replay_review_packet(bundle)["rows"][0]["action"] is None
+
+
+def test_r2_live_disposable_ui(store_db):
+    if os.environ.get("PORTFOLIO_REVIEW_LIVE_UI") != "1":
+        pytest.skip("live disposable UI is explicit opt-in")
+    from scripts.portfolio_review_live_fixture import SyntheticReview, exercise_live_ui
+
+    dsn, _owner, cases = store_db
+    review = SyntheticReview(
+        lambda sql: _psql(dsn, sql=sql),
+        bundle_for(store_db),
+        [cases[0]["active_version"], cases[1]["active_version"]],
+    )
+    exercise_live_ui(
+        review, seconds=int(os.environ.get("PORTFOLIO_REVIEW_LIVE_SECONDS", "0"))
+    )
+    # Canonical replay after browser writes, before the harness dumps/restores all data.
+    for raw in _psql(
+        dsn,
+        sql="select jsonb_build_object('packet',p.packet,'packet_sha256',p.packet_sha256,'projection',r.projection,'projection_sha256',r.projection_sha256) from public.portfolio_mandate_review_packet_r2 p join public.portfolio_mandate_review_run_r2 r on r.run_id=p.packet_id;",
+    ).splitlines():
+        assert replay_review_packet(json.loads(raw))["advice_enabled"] is False

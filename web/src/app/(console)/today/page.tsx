@@ -1,3 +1,8 @@
+import { PortfolioReviewFixtureControls } from "@/components/portfolio-review-fixture-controls";
+import {
+  liveReviewFixtureOrigin,
+  readLiveReviewFixture,
+} from "@/lib/portfolio-review-fixture.server";
 import { Suspense } from "react";
 import { PortfolioStoredReview } from "@/components/portfolio-stored-review";
 import {
@@ -170,10 +175,14 @@ async function TodayPageContent({
     process.env.SAB_PORTFOLIO_R2_FIXTURE === "1";
   let stored: StoredReviewSource = await readAuthenticatedStoredReviews();
   if (synthetic && (await hasValidAdminSession())) {
-    const value = portfolioReviewStoreSchema.safeParse(storedReviewFixture);
-    stored = value.success
-      ? { state: "READY", value: value.data }
-      : { state: "UNAVAILABLE" };
+    if (liveReviewFixtureOrigin()) {
+      stored = await readLiveReviewFixture();
+    } else {
+      const value = portfolioReviewStoreSchema.safeParse(storedReviewFixture);
+      stored = value.success
+        ? { state: "READY", value: value.data }
+        : { state: "UNAVAILABLE" };
+    }
     if (resolvedSearchParams.stored === "stale") stored = { state: "STALE" };
     if (resolvedSearchParams.stored === "error")
       stored = { state: "UNAVAILABLE" };
@@ -185,6 +194,16 @@ async function TodayPageContent({
         dogfoodSelection={readTodayDogfoodSelection(resolvedSearchParams)}
       />
       <PortfolioStoredReview source={stored} synthetic={synthetic} />
+      {liveReviewFixtureOrigin() &&
+        stored.state === "READY" &&
+        stored.value.rows
+          .filter((row) => row.run_id !== null)
+          .map((row) => (
+            <PortfolioReviewFixtureControls
+              key={row.run_id}
+              runId={row.run_id!}
+            />
+          ))}
     </>
   );
 }

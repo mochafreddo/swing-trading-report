@@ -181,3 +181,18 @@ HEAD `edc37bd0`와 깨끗한 작업 트리에서 복원했다. 원본 `.gstack` 
 최종 `just quality`는 Ruff/format/mypy 및 **3,686 passed / 37 skipped**로 통과했다. 37 skips는 별도 폐기형에서 실행한 A1/R1/R2 DB 28개와 미변경 broker DB 9개다. Web lint/format/typecheck, **112 files / 958 tests / coverage gate**, Next build를 통과했다. `just ci-web`의 install/clean/sync는 설치 금지와 기존 의존성 재사용에 따라 생략하고 같은 검사들을 root-env opt-out·CI placeholder로 직접 실행했다. 최종 fixture-only E2E는 **6 passed**이며 저장 흐름의 375/768/1280px·keyboard·refresh·stale/error·overflow와 기존 Today/Reports 흐름을 포함한다. 375/1280px 합성 화면을 육안 검토했다. 기존 calendar 의존성의 NumPy timedelta deprecation warning은 남아 있다. 실제 입력, DB 실행 승인, provider capability, v5 미래 표본/evaluator/human PASS 및 별도 LONG_TERM gate는 R2로 대체하지 않는다. 외부 notification·schedule·운영 Docker·push는 실행하지 않았다.
 
 로컬 구현 커밋은 `bc6ba3111df2c337f3ab672eb0dc09f2fd7d5be2`이며 secret scan/Ruff/format/mypy/Web lint·format/route-static 커밋 hook도 모두 통과했다. push하지 않았다. R2 사용 서버 43217의 `/login` 응답은 HTTP 200으로 확인했다. 이 서버는 세션용 합성 화면이며 지속 운영이나 사용자 UX PASS를 뜻하지 않는다.
+
+
+## 2026-09-08 live 폐기형 DB 화면 연결
+
+깨끗한 `408d0965`에서 후속 로컬 작업을 시작했다. 정적 R2 export만 보여 주던 Today에 현재 폐기형 DB의 read RPC와 고정 합성 command API를 연결했다. 사용자는 로그인 후 합성 입력 검토 저장 → 입력 부족 차단 → 관측 정정 → 미연결/모호한 Outcome → 직접 확인 NO_ACTION을 사용할 수 있다. 실제 owner/source 매핑과 기존 DB 연결은 여전히 기본 비활성이다.
+
+`python -m scripts.portfolio_mandate_t20_rehearsal --review-ui`는 새 DB 검증 후 서버와 브라우저를 실행하고, UI가 쓴 데이터까지 canonical replay·backup/restore·권한/RLS/checksum·read-only 조회를 대조한 뒤 정리한다. `--review-ui-seconds 600`은 DB 준비 후 600초의 수동 사용 창을 연다. 화면은 `http://127.0.0.1:43317/today#stored-review`, 공개 계정은 `fixture-admin` / `fixture-password`다. 전체 환경 설정·종료 조건·기록 양식은 [R2 재현 절차](portfolio-review-store-r2.md#재현)에 있다.
+
+현재 직접 검증 결과는 Python `just quality` **3,697 passed / 38 skipped**, Web **113 files / 972 tests 및 coverage gate**, lint/format/typecheck/build 통과다. Python의 38 skips는 opt-in DB 및 live UI 29개와 미변경 broker DB 9개다. opt-in A1/R1/R2/live suite **36개**를 새 PostgreSQL 17.11 cluster에서 별도로 통과했다. `just ci-web`의 설치·clean·sync는 설치 금지와 기존 의존성 재사용 때문에 실행하지 않고 같은 lint/format/typecheck/coverage/build를 root-env opt-out과 CI placeholder로 실행했다. 기존 calendar의 NumPy timedelta deprecation warning은 그대로 남아 있다.
+
+기존 fixture Today/Reports E2E **6개**와 새 live E2E **1개**가 통과했다. 실제 합성 로그인, 비로그인/다른 출처 거부, 같은 request ID의 동일 bytes 재시도, 오래된 run 선택 거부, 차단 결과의 최신 표시, 관측·Outcome append-only 정정, 새로고침, 375/768/1280px, keyboard, overflow, privacy sentinel과 외부 요청 차단을 확인했다. 응답 중단 시 저장 실패로 단정하지 않고 현재 결과를 다시 조회하도록 안내한다. 375px 버튼과 375/1280px 결과 화면을 육안 확인했다. 검증 중 발견한 합성 로그인 실패는 기존 memory throttle 설정을 명시해 해결했고 새 API는 공통 admin/local/same-origin guard와 bounded JSON parser를 재사용한다.
+
+최종 live 사용 후 복구는 **0.100초**, journal RPO **0**, A1/R1/R2 schema/data/ACL/RLS와 authenticated read-only 조회 일치다. 새 cluster 종료와 임시 디렉터리 삭제를 확인했다. 근거는 `tmp/portfolio-r2-live-evidence.local.json`, 같은 이름의 `.pytest.xml`/`.advisors.json`, `tmp/portfolio-review-live.local.log`와 `web/test-results/portfolio-live-*.png`다. 같은 폐기형 cluster 안의 복구 검증이므로 운영 cluster 장애 복구나 역할 재생성을 입증하지 않는다. 기존 migration 세 개의 SHA256은 R2 manifest와 동일하며 이번에는 migration을 추가하거나 수정하지 않았다.
+
+다음 행동은 live 수동 창의 합성 5task 평가다. 사용자 평가 상태는 `NOT_EVALUATED`로 유지한다. 실제 owner/version/PRIMARY hash·freshness·미정 의미와 expected-status 입력, 실제 Supabase session UX 및 확정 source adapter, 전체 V1/fill 기반 O1, 기존 DB/provider/배포 승인, v5 미래 표본과 evaluator/human PASS 및 별도 LONG_TERM gate가 남아 있다. 운영 Docker, 기존 DB credential, provider, 주문, 외부 notification, schedule/automation 및 push는 실행하지 않았다.

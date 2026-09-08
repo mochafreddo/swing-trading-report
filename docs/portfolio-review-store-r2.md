@@ -44,7 +44,20 @@ SAB_SKIP_ROOT_ENV=1 DECISION_BOARD_E2E_WEB_PORT=43217 DECISION_BOARD_E2E_FIXTURE
 
 수동 평가 서버는 Bash 5 이상의 `bash scripts/portfolio_review_fixture.sh`로 시작하며 `Ctrl-C`로 해당 두 서버만 종료한다. 기본 포트는 43217/43218이며 `PORTFOLIO_FIXTURE_WEB_PORT`와 `PORTFOLIO_FIXTURE_DATA_PORT`로 바꿀 수 있다. 로그인은 공개 합성 값 `fixture-admin` / `fixture-password`다. 이 서버는 credential을 상속하지 않고 주문 실행을 비활성화한다.
 
-E2E의 `/today#stored-review`는 **폐기형 DB 조회 결과를 내보낸 정적 합성 snapshot**이다. 브라우저를 운영 DB에 붙이거나 브라우저가 저장 transaction을 실행하는 화면은 아니다. `SAB_SKIP_ROOT_ENV=1`과 `SAB_PORTFOLIO_R2_FIXTURE=1`이 모두 있어야 표시하고 관리자 인증도 확인한다. 실제 Today에서는 기본 `DISABLED`다. 독립된 Supabase 사용자 세션을 발급·연결하는 실제 UX와 owner mapping의 주입은 아직 남아 있다. fixture의 stale/error 선택은 각각 `/today?stored=stale#stored-review`, `/today?stored=error#stored-review`로 재현한다. fixture Next 출력은 `.next-portfolio-fixture`에 두어 다른 dev/build 출력과 충돌하지 않는다.
+기존 `scripts/portfolio_review_fixture.sh` 단독 실행과 decision-board E2E는 폐기형 DB에서 내보낸 정적 snapshot을 사용한다. 다음 live 모드는 같은 Today 화면을 현재 살아 있는 새 폐기형 DB에 연결한다.
+
+```sh
+SAB_SKIP_ROOT_ENV=1 UV_CACHE_DIR=.uv-cache uv run --no-sync python -m scripts.portfolio_mandate_t20_rehearsal --review-ui --evidence tmp/portfolio-r2-live-evidence.local.json
+SAB_SKIP_ROOT_ENV=1 UV_CACHE_DIR=.uv-cache uv run --no-sync python -m scripts.portfolio_mandate_t20_rehearsal --review-ui --review-ui-seconds 600 --evidence tmp/portfolio-r2-manual-evidence.local.json
+```
+
+첫 명령은 DB 검증과 실제 로그인·브라우저 조작을 수행한다. 둘째 명령은 DB 준비 후 600초 동안 `http://127.0.0.1:43317/today#stored-review`를 사용할 수 있게 한다. 공개 계정은 `fixture-admin` / `fixture-password`이며 로그인 throttle은 기존 memory 구현을 사용한다. `tmp/portfolio-review-live.local.log`의 서버 준비 기록을 확인한다. 수동 창의 최대 길이는 3,600초이며 창이 끝나면 해당 서버 종료 → 사용 후 DB backup/restore/checksum·authenticated read-only 대조 → cluster 정리를 수행한다. 브라우저 탭을 닫아도 창이 즉시 끝나지는 않는다. 기존 합성 dev 서버가 `.next-portfolio-fixture`를 사용 중이면 그 서버를 시작한 터미널에서 먼저 종료해야 한다. runner는 다른 세션 서버를 종료하지 않는다.
+
+화면의 버튼은 합성 입력 재검토, 입력 부족 차단, 관측 값 `2`/`-2`의 append-only 정정, `UNLINKED` → `AMBIGUOUS` 및 사용자가 직접 선택한 `NO_ACTION`을 기록한다. 관측 값과 PRIMARY content는 공개 합성 fixture로 고정한다. 실제 투자 의미나 source를 추정하지 않는다. 결과는 실제 authenticated read RPC를 통해 표시되며 새로고침해도 유지된다. run 선택이 오래됐으면 저장을 거부하고 같은 request ID의 같은 요청은 DB에 동일 bytes로 재시도한다. 세션당 새 요청은 128개로 제한하며 재시작은 새로운 DB를 만든다.
+
+`SAB_SKIP_ROOT_ENV=1`과 `SAB_PORTFOLIO_R2_FIXTURE=1`, 검증된 loopback port가 모두 있어야 live adapter와 API가 활성화된다. 고정 cohort의 합성 Auth HTTP test double을 실제 typed reader에 주입하고 실제 HTTPS 요구를 완화하지 않는다. API는 공통 관리자·local·동일 출처 guard와 1KiB 입력 제한을 사용한다. DB test double은 loopback Host와 고정 합성 bearer를 확인하고 브라우저 Origin, 임의 owner/version/SQL/URL, 알 수 없는 command를 거부한다. 그 bearer는 공개 테스트 표식이며 실제 인증 자격 증명이 아니다. 공개 projection만 반환하고 원문·관측값·source content를 브라우저에 보내지 않는다. 수집·주문·외부 전송 경로가 없다.
+
+실제 Today에서는 기본 `DISABLED`다. 독립된 Supabase 사용자 세션을 발급·연결하는 실제 UX와 owner mapping의 주입은 아직 남아 있다. fixture의 stale/error 선택은 각각 `/today?stored=stale#stored-review`, `/today?stored=error#stored-review`이며 이 상태에서는 저장 버튼도 숨긴다. freshness budget은 합성 packet의 broker 600초/source 180일, Web 결과 3,600초다. 수동 창이 오래되면 broker freshness에 따라 검토가 차단될 수 있다. fixture Next 출력은 `.next-portfolio-fixture`에 둔다.
 
 ## 검증 기록
 
@@ -63,7 +76,7 @@ Web 새 계약/transport/component 15개와 전체 112 files / 958 tests·covera
 | A1 migration SHA256 | `1c23293c9b319020a63a2c71613d62fbb0209074a7ac74b384fb98649fbdb2ba` |
 | R1 migration SHA256 | `a4656b8e2487904b0e4ce8ab9e492eb9275912e7c5fe3d36dfef9f173fa20ea1` |
 | R2 migration SHA256 | `149d73d9d60d54e92c3bbb933ec01fe999df3263524d391f49163ae55d1050ff` |
-| app revision/diff | 로컬 구현 `bc6ba3111df2c337f3ab672eb0dc09f2fd7d5be2`. 실제 실행 후보를 정할 때 `git show --stat`과 위 세 migration checksum 재대조 |
+| app revision/diff | 저장 core `bc6ba3111df2c337f3ab672eb0dc09f2fd7d5be2`와 후속 live fixture 변경. 실제 실행 후보의 `git rev-parse HEAD`를 고정하고 `git show --stat`과 위 세 migration checksum 재대조 |
 | target identity | 미정: 정확한 project/database/server identity, version, 현재 migration 목록 |
 | owner/version/source | 미정: 종목별 exact A1 version ↔ authenticated owner, 독립 승인 source/holding hash와 PRIMARY seal/content hash |
 | compiler principal | 미정: 전용 role의 운영 connection principal과 bounded role membership. service-role 대용 사용 금지 |
@@ -90,4 +103,4 @@ Web 새 계약/transport/component 15개와 전체 112 files / 958 tests·covera
 
 사용자 평가에는 [기존 UX1–UX5](portfolio-goal-reconciliation-20260907.md#수동-ux-평가-준비)를 사용한다. 추가 저장 흐름 지시는 “저장된 검토에서 재검토가 필요한 이유를 찾고, 주문 결과가 왜 확정 연결이 아닌지와 어떤 기록이 정정됐는지 설명한다”이다. 기록 필드는 `task_id / 시작·종료시각 / elapsed_seconds / success / help_used / issue_code`이며 개인 원문/종목값을 기록하지 않는다. 현재 모든 사용자 결과는 `NOT_EVALUATED`다.
 
-다음 행동은 실제 매핑 입력의 확정이다. 실행을 승인받을 단계가 되면 위 manifest의 미정 필드를 모두 채운 후 “확정된 target/owner/window에서 명시한 세 migration checksum과 diff에 한해 backup·폐기형 restore 대조·schema apply를 승인한다. data import·writer·배포·provider·알림은 제외한다”처럼 범위를 구분한다. 이 문구는 현재 승인이 아니며 미정 target에 적용할 수 없다.
+다음 행동은 위 live 수동 창에서 합성 저장·정정·Outcome 5task 평가를 기록하는 것이다. 실제 연결에는 매핑 입력 확정이 필요하다. 실행을 승인받을 단계가 되면 위 manifest의 미정 필드를 모두 채운 후 “확정된 target/owner/window에서 명시한 세 migration checksum과 diff에 한해 backup·폐기형 restore 대조·schema apply를 승인한다. data import·writer·배포·provider·알림은 제외한다”처럼 범위를 구분한다. 이 문구는 현재 승인이 아니며 미정 target에 적용할 수 없다.
