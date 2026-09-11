@@ -11,11 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CONTROLS = [
     ('calendar_rate_limit', 'time.sleep(0.35)', 'time.sleep(0.15)', 'test_calendar_collection_respects_three_requests_per_second'),
-    ('held_quote_validation', "if not all(key in inputs for key in ('stock', 'calendar', 'bars_0', 'bars_1')):", 'if held:', 'test_live_session_hold_does_not_hide_invalid_quotes'),
+    ('held_quote_validation', "if not all(key in inputs for key in ('stock', 'calendar', 'bars_0')):", 'if held:', 'test_live_session_hold_does_not_hide_invalid_quotes'),
     ('breakout_equality', "last['clos'] > base", "last['clos'] >= base", 'test_breakout_equality_is_excluded'),
     ('volume_boundary', ">= avg_volume * Decimal(RULES['volume_multiple'])", ">= avg_volume * Decimal('1.4')", 'test_volume_multiple_below_boundary_is_excluded'),
     ('market_cap_boundary', ">= Decimal(RULES['market_cap_min_usd'])", ">= Decimal('9000000000')", 'test_market_cap_below_boundary_is_excluded'),
-    ('liquidity_boundary', ">= Decimal(RULES['turnover_min_usd'])", "> Decimal(RULES['turnover_min_usd'])", 'test_turnover_inclusive_boundary'),
+    ('liquidity_boundary', "turnover < Decimal(RULES['turnover_min_usd'])", "turnover <= Decimal(RULES['turnover_min_usd'])", 'test_turnover_inclusive_boundary'),
     ('sma_equality', "last['clos'] > sma", "last['clos'] >= sma", 'test_sma_equality_is_excluded'),
     ('bad_quotes', "raise DataError('invalid_ohlc')", 'pass', 'test_bad_quotes_are_held_without_a_price_plan'),
     ('estimated_earnings', "return {'status': 'unconfirmed', 'source': url, 'reason': 'uncertain_earnings_announcement'}", 'pass', 'test_unconfirmed_and_estimated_earnings_are_held'),
@@ -23,7 +23,19 @@ CONTROLS = [
     ('missing_earnings', "if inputs['earnings'].get('status') != 'confirmed':", 'if False:', 'test_unconfirmed_and_estimated_earnings_are_held'),
     ('earnings_fifth_session', "event > date.fromisoformat(inputs['calendar']['future'][-1])", "event >= date.fromisoformat(inputs['calendar']['future'][-1])", 'test_earnings_window_includes_today_fifth_session_and_weekend'),
     ('wrong_target', "'target': entry + risk * 2", "'target': entry + risk * 3", 'test_selected_report_and_offline_replay'),
-    ('unverified_live_data', "inputs['issues'].append('kis_regular_session_unverified')", 'pass', 'test_unverified_live_session_cannot_become_candidate'),
+    ('unverified_live_data', 'if any(meta.get(key) != value for key, value in required.items()):', 'if False:', 'test_unverified_live_session_cannot_become_candidate'),
+    ('reference_price', "raise DataError('daily_price_reference_mismatch')", 'pass', 'test_reference_disagreement_or_unknown_adjustment_is_held'),
+    ('reference_volume', "raise DataError('invalid_daily_volume_units')", 'pass', 'test_reference_disagreement_or_unknown_adjustment_is_held'),
+    ('corporate_action_metadata', "raise DataError('corporate_action_metadata_invalid')", 'pass', 'test_reference_disagreement_or_unknown_adjustment_is_held'),
+    ('split_window', "if reference['events'].get('splits'):", 'if False:', 'test_split_window_is_held'),
+    ('report_day_split', 'datetime.combine(report_day + timedelta(days=1), datetime.min.time(), NY)', 'datetime.combine(report_day, datetime.min.time(), NY)', 'test_report_day_split_is_checked_before_publishing_prices'),
+    ('dividend_policy', "if reference['events'].get('splits'):", "if reference['events'].get('splits') or reference['events'].get('dividends'):", 'test_cash_dividend_keeps_the_unadjusted_price_plan'),
+    ('amount_rounding', 'max(Decimal(0), amount - 1)', 'amount', 'test_turnover_inclusive_boundary'),
+    ('insufficient_bound', "raise DataError('turnover_lower_bound_insufficient')", "return result | {'status': 'excluded'}", 'test_turnover_inclusive_boundary'),
+    ('missing_minutes', 'if set(found) != set(expected):', 'if False:', 'test_invalid_regular_turnover_is_held'),
+    ('duplicate_minutes', "raise DataError('duplicate_or_unordered_minutes')", 'pass', 'test_invalid_regular_turnover_is_held'),
+    ('minute_amount_units', "raise DataError('turnover_unit_or_session_mismatch')", 'pass', 'test_invalid_regular_turnover_is_held'),
+    ('minute_timezone', "raise DataError('minute_timezone_mismatch')", 'pass', 'test_invalid_regular_turnover_is_held'),
 ]
 
 

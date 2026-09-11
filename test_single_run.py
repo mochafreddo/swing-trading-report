@@ -36,6 +36,10 @@ class PublicResponses:
         self.earnings_day = 'September 30, 2026'
         self.earnings_note = 'Micron announced that it will report quarterly results after market close.'
         self.calls = []
+        self.splits = {}
+        self.reference_edit = lambda data: data
+        self.minute_edit = lambda rows: rows
+        self.early_closes = {}
 
     def __call__(self, url):
         self.calls.append(url)
@@ -51,12 +55,44 @@ class PublicResponses:
             following = min(d for d in self.days if d > target)
             def session(d):
                 return {'date': d.isoformat(), 'regularMarket': {
-                    'startTime': f'{d}T13:30:00+00:00', 'endTime': f'{d}T20:00:00+00:00'}
+                    'startTime': f'{d}T13:30:00+00:00', 'endTime': f'{d}T{self.early_closes.get(str(d), 20):02}:00:00+00:00'}
                     if d in self.days else None}
             value = {'result': {'today': session(target), 'previousBusinessDay': session(previous),
                                 'nextBusinessDay': session(following)}}
         elif path.endswith('/dailyprice'):
             value = {'rt_cd': '0', 'output1': {'rsym': 'DNASMU'}, 'output2': list(reversed(self.bars))}
+        elif path.endswith('/chart/MU'):
+            times = [int(datetime.strptime(r['xymd'], '%Y%m%d').replace(hour=13, minute=30, tzinfo=timezone.utc).timestamp()) for r in self.bars]
+            last_day = datetime.strptime(self.bars[-1]['xymd'], '%Y%m%d')
+            close_hour = self.early_closes.get(last_day.date().isoformat(), 20)
+            last_close = last_day.replace(hour=close_hour, tzinfo=timezone.utc)
+            splits = {key: event for key, event in self.splits.items() if event['date'] < int(query['period2'][0])}
+            value = {'chart': {'error': None, 'result': [{'meta': {
+                'symbol': 'MU', 'currency': 'USD', 'exchangeName': 'NMS', 'instrumentType': 'EQUITY',
+                'exchangeTimezoneName': 'America/New_York', 'dataGranularity': '1d',
+                'regularMarketTime': int(last_close.timestamp()),
+                'regularMarketPrice': self.bars[-1]['clos']},
+                'timestamp': times, 'events': {'splits': splits}, 'indicators': {'quote': [{
+                    name: [r[key] for r in self.bars] for name, key in
+                    [('open', 'open'), ('high', 'high'), ('low', 'low'), ('close', 'clos'), ('volume', 'tvol')]
+                }]}}]}}
+        elif path.endswith('/inquire-time-itemchartprice'):
+            rows = []
+            for bar in self.bars[-20:]:
+                start = datetime.strptime(bar['xymd'], '%Y%m%d').replace(hour=9, minute=30)
+                for i in range(13):
+                    local = start + timedelta(minutes=30*i)
+                    korean = local + timedelta(hours=13)
+                    volume = int(bar['tvol']) // 13 + (int(bar['tvol']) % 13 if i == 12 else 0)
+                    price = Decimal(bar['clos'])
+                    rows.append(dict(tymd=bar['xymd'], xymd=bar['xymd'], xhms=local.strftime('%H%M%S'),
+                                     kymd=korean.strftime('%Y%m%d'), khms=korean.strftime('%H%M%S'),
+                                     open=str(price), high=str(price+1), low=str(price-1), last=str(price),
+                                     evol=str(volume), eamt=str(int(price*volume))))
+            rows = self.minute_edit(list(reversed(rows)))
+            key = query.get('KEYB', ['99999999999999'])[0]
+            selected = [r for r in rows if r['xymd']+r['xhms'] <= key][:120]
+            value = {'rt_cd': '0', 'output1': {'rsym': 'DNASMU'}, 'output2': selected}
         elif url == NEWS_URL:
             value = {'@type': 'NewsArticle', 'headline':
                      f'Micron Technology to Report Fiscal Fourth Quarter Results on {self.earnings_day}',
@@ -66,10 +102,81 @@ class PublicResponses:
             return f'<a href="{NEWS_URL}">Micron Technology to Report Fiscal Fourth Quarter Results</a>'
         else:
             raise AssertionError(f'unexpected public request: {url}')
+        if path.endswith('/chart/MU'):
+            value['chart']['result'][0] = self.reference_edit(value['chart']['result'][0])
         return json.dumps(value)
 
 
 class SingleRunTests(unittest.TestCase):
+    def test_verified_public_sources_can_evaluate_without_synthetic_bypass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / 'run'
+            record = run(out, DAY, fetch=PublicResponses(), now=NOW)
+            self.assertEqual(record['result']['status'], 'selected')
+            self.assertFalse(record['synthetic'])
+            self.assertEqual(record['result']['metrics']['average_turnover_lower_bound_usd'], '100599987')
+            self.assertEqual(replay(out)['result'], record['result'])
+
+    def test_invalid_regular_turnover_is_held(self):
+        for mode in ['missing', 'duplicate', 'amount', 'timezone', 'unordered']:
+            with self.subTest(mode=mode):
+                source = PublicResponses()
+                def broken(rows):
+                    if mode == 'missing':
+                        rows.pop(10)
+                    elif mode == 'duplicate':
+                        rows.insert(10, dict(rows[10]))
+                    elif mode == 'amount':
+                        rows[10]['eamt'] = '1'
+                    elif mode == 'timezone':
+                        rows[10]['khms'] = '120000'
+                    else:
+                        rows[10], rows[11] = rows[11], rows[10]
+                    return rows
+                source.minute_edit = broken
+                record = self.run_case(source)
+                self.assertEqual(record['result']['status'], 'held')
+                self.assertIsNone(record['result']['plan'])
+
+    def test_early_close_excludes_later_trades_from_lower_bound(self):
+        source = PublicResponses()
+        source.early_closes[str(DAY-timedelta(days=1))] = 17
+        def after_close(rows):
+            for row in rows:
+                if row['xymd'] == source.bars[-1]['xymd'] and row['xhms'] >= '130000':
+                    row['eamt'] = 'invalid-after-close'
+            return rows
+        source.minute_edit = after_close
+        record = self.run_case(source)
+        self.assertEqual(record['result']['status'], 'selected')
+        self.assertEqual(record['inputs']['turnover']['bars'], 254)
+
+    def test_calendar_cannot_expand_regular_hours(self):
+        source = PublicResponses()
+        source.early_closes[str(DAY-timedelta(days=1))] = 21
+        record = self.run_case(source)
+        self.assertEqual(record['result']['status'], 'held')
+        self.assertIn('calendar:invalid_session_time', record['result']['reasons'])
+
+    def test_reference_disagreement_or_unknown_adjustment_is_held(self):
+        for mode in ['price', 'close_time', 'open_time', 'fractional_volume', 'events']:
+            with self.subTest(mode=mode):
+                source = PublicResponses()
+                def changed(data):
+                    if mode == 'price':
+                        data['indicators']['quote'][0]['high'][0] = '120'
+                    elif mode == 'close_time':
+                        data['meta']['regularMarketTime'] -= 86400
+                    elif mode == 'open_time':
+                        data['timestamp'][0] += 60
+                    elif mode == 'fractional_volume':
+                        data['indicators']['quote'][0]['volume'][-2] = '1000000.5'
+                    else:
+                        data['events'] = {'splits': []}
+                    return data
+                source.reference_edit = changed
+                self.assertEqual(self.run_case(source)['result']['status'], 'held')
+
     def test_calendar_collection_respects_three_requests_per_second(self):
         from single_run import fetch_public
         source = PublicResponses()
@@ -123,6 +230,14 @@ class SingleRunTests(unittest.TestCase):
         self.assertIn('close_not_above_breakout', record['result']['reasons'])
         self.assertIsNone(record['result']['plan'])
 
+    def test_unused_daily_turnover_does_not_replace_regular_lower_bound(self):
+        source = PublicResponses()
+        for bar in source.bars:
+            bar['tamt'] = 'unverified-daily-amount'
+        record = self.run_case(source)
+        self.assertEqual(record['result']['status'], 'selected')
+        self.assertEqual(record['result']['metrics']['average_turnover_lower_bound_usd'], '100599987')
+
     def test_volume_multiple_below_boundary_is_excluded(self):
         source = PublicResponses()
         source.bars[-1].update(tvol='1499999', tamt='149999900')
@@ -148,7 +263,7 @@ class SingleRunTests(unittest.TestCase):
 
     def test_bad_quotes_are_held_without_a_price_plan(self):
         for field, value in [('clos', '0'), ('high', '98'), ('open', '102'), ('clos', 'NaN'),
-                             ('tvol', '-1'), ('tamt', '150000'), ('open', True)]:
+                             ('tvol', '-1'), ('open', True)]:
             with self.subTest(field=field, value=value):
                 source = PublicResponses()
                 source.bars[-1][field] = value
@@ -217,18 +332,33 @@ class SingleRunTests(unittest.TestCase):
         self.assertIsNone(record['result']['plan'])
         self.assertEqual(record['inputs']['earnings']['source'], changed_url)
 
-    def test_adjustment_difference_is_held(self):
+    def test_split_window_is_held(self):
         source = PublicResponses()
-        def fetch(url):
-            body = source(url)
-            if 'MODP=1' in url:
-                value = json.loads(body)
-                value['output2'][-1]['open'] = '97.5'
-                return json.dumps(value)
-            return body
-        record = self.run_case(fetch)
+        source.splits = {'event': {'date': int(NOW.timestamp()) - 86400, 'numerator': 2, 'denominator': 1}}
+        record = self.run_case(source)
         self.assertEqual(record['result']['status'], 'held')
         self.assertIn('corporate_action_adjustment_unverified', record['result']['reasons'])
+
+    def test_report_day_split_is_checked_before_publishing_prices(self):
+        source = PublicResponses()
+        source.splits = {'today': {'date': int(NOW.replace(hour=13, minute=30).timestamp()),
+                                    'numerator': 2, 'denominator': 1}}
+        record = self.run_case(source)
+        self.assertEqual(record['result']['status'], 'held')
+        self.assertIn('corporate_action_adjustment_unverified', record['result']['reasons'])
+        self.assertIsNone(record['result']['plan'])
+
+    def test_cash_dividend_keeps_the_unadjusted_price_plan(self):
+        source = PublicResponses()
+        def dividend(data):
+            data['events']['dividends'] = {'event': {'date': int(NOW.timestamp())-86400, 'amount': '0.15'}}
+            data['indicators']['adjclose'] = [{'adjclose': ['1']*50}]
+            return data
+        source.reference_edit = dividend
+        record = self.run_case(source)
+        self.assertEqual(record['result']['status'], 'selected')
+        self.assertEqual(record['result']['plan']['entry_low'], '100')
+        self.assertEqual(Decimal(record['result']['plan']['entry_high']).quantize(Decimal('.01')), Decimal('101.04'))
 
     def test_unsupported_security_is_excluded(self):
         for field, value in [('market', 'AMEX'), ('securityType', 'ETF'),
@@ -239,20 +369,29 @@ class SingleRunTests(unittest.TestCase):
                 self.assertEqual(self.run_case(source)['result']['status'], 'excluded')
 
     def test_unverified_live_session_cannot_become_candidate(self):
+        source = PublicResponses()
+        def wrong_session(data):
+            data['meta']['exchangeTimezoneName'] = 'Asia/Seoul'
+            return data
+        source.reference_edit = wrong_session
         with tempfile.TemporaryDirectory() as tmp:
-            record = run(Path(tmp) / 'run', DAY, fetch=PublicResponses(), now=NOW)
+            record = run(Path(tmp) / 'run', DAY, fetch=source, now=NOW)
             self.assertEqual(record['result']['status'], 'held')
-            self.assertIn('kis_regular_session_unverified', record['result']['reasons'])
+            self.assertIn('price_reference:reference_identity_or_session_mismatch', record['result']['reasons'])
             self.assertIsNone(record['result']['plan'])
 
     def test_live_session_hold_does_not_hide_invalid_quotes(self):
         source = PublicResponses()
-        source.bars[-1]['tamt'] = '150000'
+        def wrong_session(data):
+            data['meta']['exchangeTimezoneName'] = 'Asia/Seoul'
+            return data
+        source.reference_edit = wrong_session
+        source.bars[-1]['open'] = '102'
         with tempfile.TemporaryDirectory() as tmp:
             record = run(Path(tmp) / 'run', DAY, fetch=source, now=NOW)
             self.assertEqual(record['result']['status'], 'held')
-            self.assertIn('kis_regular_session_unverified', record['result']['reasons'])
-            self.assertIn('turnover_unit_or_session_mismatch', record['result']['reasons'])
+            self.assertIn('price_reference:reference_identity_or_session_mismatch', record['result']['reasons'])
+            self.assertIn('invalid_ohlc', record['result']['reasons'])
             self.assertIsNone(record['result']['plan'])
 
     def test_market_closed_or_wrong_report_time_is_held(self):
@@ -306,7 +445,7 @@ class SingleRunTests(unittest.TestCase):
                      patch('single_run.time.sleep'), patch('single_run.datetime', wraps=datetime) as clock, \
                      redirect_stdout(stdout):
                     clock.now.return_value = NOW
-                    self.assertEqual(main(), 2)
+                    self.assertEqual(main(), 0 if issue else 2)
                 self.assertEqual(len(token_requests), 2 if issue else 0)
                 record = (out / 'record.json').read_text()
                 report = (out / 'report.md').read_text()
@@ -314,22 +453,22 @@ class SingleRunTests(unittest.TestCase):
                     self.assertNotIn(forbidden, record + report + stdout.getvalue())
 
     def test_turnover_inclusive_boundary(self):
-        for delta, expected in [('0', 'selected'), ('-1', 'excluded')]:
+        for delta, expected in [(0, 'selected'), (-1, 'held')]:
             with self.subTest(delta=delta):
                 source = PublicResponses()
-                for bar in source.bars:
-                    bar.update(tvol='500000', tamt='49000000')
-                source.bars[-1].update(tvol='690000', tamt=str(Decimal('69000000') + Decimal(delta)))
-                # Keep volume at exactly 1.5x the preceding 20-session average.
-                for bar in source.bars[-21:-1]:
-                    bar['tvol'] = '460000'
-                    bar.update(open='98', high='107', low='97')
-                # Separate the liquidity boundary from breakout/volume conditions.
-                source.bars[-1].update(open='109', high='111', low='97', clos='110', tamt=str(Decimal('69000000') + Decimal(delta)))
+                def amounts(rows):
+                    for row in rows:
+                        row.update(open='1', high='2', low='0.01', last='1', evol='1', eamt='1')
+                        if row['xhms'] == '093000':
+                            row.update(open='100', high='101', low='99', last='100', evol='500000', eamt=str(50000001+delta))
+                    return rows
+                source.minute_edit = amounts
                 record = self.run_case(source)
                 self.assertEqual(record['result']['status'], expected)
-                if expected == 'excluded':
-                    self.assertIn('turnover_below_minimum', record['result']['reasons'])
+                if expected == 'held':
+                    self.assertIn('turnover_lower_bound_insufficient', record['result']['reasons'])
+                else:
+                    self.assertEqual(record['result']['metrics']['average_turnover_lower_bound_usd'], '50000000')
 
 
 if __name__ == '__main__':
