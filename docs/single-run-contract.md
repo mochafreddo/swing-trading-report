@@ -14,7 +14,7 @@
 
 시가총액은 조회한 발행주식수 × 전일 정규장 종가(USD)로 계산한다. 이는 전일 종가 기준 계산값이며 제공자의 실시간 시가총액과 구분한다. 거래대금은 `tamt`를 사용하며 종가 × 거래량으로 대체하지 않는다. 거래대금 ÷ 거래량이 해당 일봉 저가~고가 범위에 있는지 확인한다. 이 검사는 금액 단위의 수치적 일관성을 확인할 뿐 정규장 세션을 입증하지 않는다.
 
-실제 응답의 단위·세션과 수정주가 특성은 문서의 필드 존재와 별도로 확인한다. 특히 현재 읽은 KIS 예제는 정규장 전용 집계 여부를 명시하지 않는다. 이 확인이 끝나기 전 실제 수집 결과는 보류하고 가격 계획을 제시하지 않는다. 수집 코드의 실제 자료 경로에 검증 완료를 임의 입력하는 옵션은 두지 않는다.
+실제 응답의 단위·세션과 수정주가 특성은 문서의 필드 존재와 별도로 확인한다. KIS 일봉 공식 설명은 무료 시세의 Nasdaq TotalView 제공 범위와 유료 시세와의 차이를 안내하지만 정규장 전용 집계 여부를 명시하지 않는다. 이 확인이 끝나기 전 실제 수집 결과는 보류하고 가격 계획을 제시하지 않는다. 수집 코드의 실제 자료 경로에 검증 완료를 임의 입력하는 옵션은 두지 않는다. 보류 사유가 이미 있어도 필수 응답이 있으면 시세의 수치 검증을 수행하고 발견한 오류를 함께 기록한다.
 
 최소 구현에서는 50거래일의 원주가·수정주가 OHLC와 거래량이 모두 같은 구간만 평가한다. 차이가 있으면 기업행사에 따른 가격·거래량·거래대금 조정 관계가 미검증된 것으로 보류한다. 수정 이력을 섞거나 누락 봉을 채우지 않는다. 후속 구현에서 기업행사별 조정 규칙과 검증을 추가하면 이 제한을 해제할 수 있다.
 
@@ -49,7 +49,9 @@
 
 - [토스 종목 API](https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Apis/StockInfoApi.md), [종목 상세 모델](https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Models/StockInfo.md)
 - [토스 거래일 API](https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Apis/MarketInfoApi.md), [미국 거래일 모델](https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Models/UsMarketCalendarResponse.md)
+- [토스 호출 한도](https://openapi.tossinvest.com/openapi-docs/overview.md): MARKET_INFO는 초당 3회다. 단일 실행의 인증 GET 요청 사이에 0.35초를 두며, 다른 프로세스와의 한도 공유나 자동 재시도는 구현하지 않는다.
 - [KIS 일봉 공식 예제](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/overseas_stock/dailyprice/chk_dailyprice.py)
+- [KIS 일봉 공식 설명](https://apiportal.koreainvestment.com/api/apis/public/detail?accessUrl=%2Fuapi%2Foverseas-price%2Fv1%2Fquotations%2Fdailyprice)
 - [Micron 공식 뉴스룸](https://www.micron.com/about/press/news)
 
-2026-09-10 문서 조사와 공개 페이지 조회로 경로를 확인했다. 인증이 필요한 시세 응답과 정규장 집계 의미는 아직 직접 검증하지 않았다. COST IR의 일정 목록은 자동 조회에서 HTTP 403이 발생했고, MU의 공식 뉴스룸과 개별 실적 공지는 직접 조회할 수 있었다.
+2026-09-10 문서 조사와 공개 페이지 조회로 경로를 확인했다. COST IR의 일정 목록은 자동 조회에서 HTTP 403이 발생했고, MU의 공식 뉴스룸과 개별 실적 공지는 직접 조회할 수 있었다. 2026-09-11에는 승인된 토큰 발급과 인증 조회로 MU 종목·거래일·일봉 응답을 수집했다. 실제 응답에서 거래대금의 수치 불일치와 수정주가 차이가 발견되어 정규장 집계 의미와 함께 미검증 항목으로 남았다. 수치와 재현 근거는 [검증 기록](issue-232-validation.md)에 있다.

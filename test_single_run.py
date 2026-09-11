@@ -10,6 +10,8 @@ from pathlib import Path
 from io import BytesIO, StringIO
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError
+from functools import partial
 
 from single_run import run, replay
 
@@ -68,6 +70,27 @@ class PublicResponses:
 
 
 class SingleRunTests(unittest.TestCase):
+    def test_calendar_collection_respects_three_requests_per_second(self):
+        from single_run import fetch_public
+        source = PublicResponses()
+        elapsed = [0.0]
+        requests = []
+        class Http:
+            def open(self, request, timeout):
+                if '/market-calendar/US' in request.full_url:
+                    recent = [value for value in requests if elapsed[0] - value < 1]
+                    if len(recent) >= 3:
+                        raise HTTPError(request.full_url, 429, 'rate limit', {}, None)
+                    requests.append(elapsed[0])
+                return BytesIO(source(request.full_url).encode())
+        credentials = {'TOSS_ACCESS_TOKEN': 'synthetic', 'KIS_ACCESS_TOKEN': 'synthetic',
+                       'KIS_APP_KEY': 'synthetic', 'KIS_APP_SECRET': 'synthetic'}
+        with patch('single_run.build_opener', return_value=Http()), \
+             patch('single_run.time.sleep', side_effect=lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds)):
+            record = self.run_case(partial(fetch_public, credentials=credentials))
+        self.assertEqual(record['result']['status'], 'selected')
+        self.assertEqual(len(record['inputs']['calendar']['past']), 50)
+
     def run_case(self, source):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'run'
@@ -220,6 +243,16 @@ class SingleRunTests(unittest.TestCase):
             record = run(Path(tmp) / 'run', DAY, fetch=PublicResponses(), now=NOW)
             self.assertEqual(record['result']['status'], 'held')
             self.assertIn('kis_regular_session_unverified', record['result']['reasons'])
+            self.assertIsNone(record['result']['plan'])
+
+    def test_live_session_hold_does_not_hide_invalid_quotes(self):
+        source = PublicResponses()
+        source.bars[-1]['tamt'] = '150000'
+        with tempfile.TemporaryDirectory() as tmp:
+            record = run(Path(tmp) / 'run', DAY, fetch=source, now=NOW)
+            self.assertEqual(record['result']['status'], 'held')
+            self.assertIn('kis_regular_session_unverified', record['result']['reasons'])
+            self.assertIn('turnover_unit_or_session_mismatch', record['result']['reasons'])
             self.assertIsNone(record['result']['plan'])
 
     def test_market_closed_or_wrong_report_time_is_held(self):

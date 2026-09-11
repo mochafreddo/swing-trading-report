@@ -64,7 +64,8 @@ def fetch_public(url: str, *, credentials: dict | None = None) -> str:
         if len(required) > 1:
             headers.update(appkey=credentials['KIS_APP_KEY'],
                            appsecret=credentials['KIS_APP_SECRET'], tr_id='HHDFS76240000', custtype='P')
-        time.sleep(0.15)
+        # Toss MARKET_INFO permits three requests per second.
+        time.sleep(0.35)
     try:
         with build_opener(NoRedirect).open(Request(url, headers=headers), timeout=20) as response:
             body = response.read(4_000_001)
@@ -72,6 +73,7 @@ def fetch_public(url: str, *, credentials: dict | None = None) -> str:
                 raise DataError('response_too_large')
             return body.decode('utf-8')
     except HTTPError as error:
+        error.close()
         raise DataError(f'http_{error.code}') from None
     except (URLError, TimeoutError, OSError, UnicodeError):
         raise DataError('network_or_encoding_error') from None
@@ -296,7 +298,7 @@ def evaluate(inputs: dict) -> dict:
     result = {'status': 'held', 'reasons': held, 'metrics': {}, 'plan': None}
     if inputs['earnings'].get('status') != 'confirmed':
         held.append('next_confirmed_earnings_unavailable')
-    if held:
+    if not all(key in inputs for key in ('stock', 'calendar', 'bars_0', 'bars_1')):
         return result
     try:
         stock = inputs['stock']
@@ -324,6 +326,8 @@ def evaluate(inputs: dict) -> dict:
             normalized.append(series)
         if normalized[0] != normalized[1]:
             raise DataError('corporate_action_adjustment_unverified')
+        if held:
+            return result
         series = normalized[1]
         last = series[-1]
         base = max(row['high'] for row in series[-21:-1])

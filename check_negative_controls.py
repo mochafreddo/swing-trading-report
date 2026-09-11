@@ -10,6 +10,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 CONTROLS = [
+    ('calendar_rate_limit', 'time.sleep(0.35)', 'time.sleep(0.15)', 'test_calendar_collection_respects_three_requests_per_second'),
+    ('held_quote_validation', "if not all(key in inputs for key in ('stock', 'calendar', 'bars_0', 'bars_1')):", 'if held:', 'test_live_session_hold_does_not_hide_invalid_quotes'),
     ('breakout_equality', "last['clos'] > base", "last['clos'] >= base", 'test_breakout_equality_is_excluded'),
     ('volume_boundary', ">= avg_volume * Decimal(RULES['volume_multiple'])", ">= avg_volume * Decimal('1.4')", 'test_volume_multiple_below_boundary_is_excluded'),
     ('market_cap_boundary', ">= Decimal(RULES['market_cap_min_usd'])", ">= Decimal('9000000000')", 'test_market_cap_below_boundary_is_excluded'),
