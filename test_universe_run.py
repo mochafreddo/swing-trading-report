@@ -76,6 +76,20 @@ class UniverseRunTests(unittest.TestCase):
         self.assertIn('earnings_source_not_configured', record['inputs']['stocks']['IBM']['result']['reasons'])
         self.assertIn('보류 1', report)
 
+    def test_known_earnings_hold_avoids_redundant_price_collection(self):
+        source = UniverseResponses()
+        requested = []
+        def fetch(url):
+            requested.append(url)
+            return source(url)
+        record, report = self.run_case(fetch)
+        self.assertEqual(record['result']['candidates'], ['MU'])
+        self.assertEqual(record['result']['counts']['total'], 2)
+        self.assertEqual(record['result']['price_collection_skipped'], 1)
+        self.assertIn('시세 조회 생략 1종목', report)
+        self.assertFalse(any('SYMB=IBM' in url or '/chart/IBM?' in url for url in requested))
+        self.assertIn('price_collection_skipped_unconfirmed_earnings', record['inputs']['stocks']['IBM']['result']['reasons'])
+
     def test_top_three_use_automatically_collected_company_announcements(self):
         source = UniverseResponses()
         for symbol, ratio in [('AAA', 2), ('BBB', 4), ('CCC', 3), ('DDD', 5)]:

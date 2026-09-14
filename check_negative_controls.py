@@ -39,6 +39,7 @@ CONTROLS = [
 ]
 
 UNIVERSE_CONTROLS = [
+    ('known_earnings_hold', 'and before_open and confirmed_earnings:', 'and before_open:', 'test_known_earnings_hold_avoids_redundant_price_collection'),
     ('malformed_listing', "or not isinstance(row['securityType'], str)", '', 'test_malformed_listing_preserves_verified_partition_and_record'),
     ('list_omission', "not lists[''] or filtered != partitioned", 'False', 'test_missing_list_entries_never_claim_complete_coverage'),
     ('partial_results', "candidates[:3]", "[] if counts['held'] else candidates[:3]", 'test_partial_hold_keeps_verified_candidate_and_replays'),

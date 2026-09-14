@@ -134,7 +134,17 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
             else:
                 stock_input['calendar'] = cal
             before_open = cal and s.timestamp(checked_at()) < s.timestamp(cal['open'])
-            if 'stock' in stock_input and before_open:
+            if symbol in earnings_sources and before_open:
+                event = attempt(stock_input['issues'], 'earnings', lambda: s.earnings(read, report_day, as_of, earnings_sources[symbol]))
+                if event is not None:
+                    stock_input['earnings'] = event
+            elif symbol not in earnings_sources:
+                stock_input['issues'].append('earnings_source_not_configured')
+            confirmed_earnings = stock_input['earnings'].get('status') == 'confirmed'
+            if not confirmed_earnings:
+                stock_input['issues'].append('price_collection_skipped_unconfirmed_earnings')
+            before_open = cal and s.timestamp(checked_at()) < s.timestamp(cal['open'])
+            if 'stock' in stock_input and before_open and confirmed_earnings:
                 market = item['market']
                 exchange = {'NASDAQ': 'NAS', 'NYSE': 'NYS'}[market]
                 def bars():
@@ -152,12 +162,6 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
                     value = attempt(stock_input['issues'], name, work)
                     if value is not None:
                         stock_input[name] = value
-            if symbol in earnings_sources and before_open:
-                event = attempt(stock_input['issues'], 'earnings', lambda: s.earnings(read, report_day, as_of, earnings_sources[symbol]))
-                if event is not None:
-                    stock_input['earnings'] = event
-            elif symbol not in earnings_sources:
-                stock_input['issues'].append('earnings_source_not_configured')
             stock_input['collected_at'] = checked_at()
             if cal and not (as_of <= s.timestamp(checked_at()) < s.timestamp(cal['open'])):
                 stock_input['issues'].append('collection_outside_premarket')
@@ -183,6 +187,8 @@ def summarize(inputs):
     return {'status': 'selected' if candidates else 'excluded' if counts['excluded'] else 'held',
             'coverage_complete': not inputs['universe']['issues'],
             'ranking_complete': not unresolved, 'ranking_held': unresolved,
+            'price_collection_skipped': sum('price_collection_skipped_unconfirmed_earnings' in row['result']['reasons']
+                                            for row in stocks.values()),
             'counts': {'total': len(stocks), **counts}, 'candidates': candidates[:3]}
 
 
@@ -197,6 +203,7 @@ def render(record):
              f"순위 범위: {'검증된 후보' if result['ranking_complete'] else '순위 미확정 종목을 보류한 부분 범위'}.", '',
              f"전체 목록 범위: {'확보' if result['coverage_complete'] else '미확보'}. 공급자 내부 누락의 부재를 보장하지 않는다.", '',
              f"전체 {counts['total']}, 선정 {counts['selected']}, 제외 {counts['excluded']}, 보류 {counts['held']}.", '',
+             f"실적 일정 미확인으로 시세 조회 생략 {result['price_collection_skipped']}종목. 이 종목의 규모·유동성·돌파 조건은 미검증이다.", '',
              f"요청 {len(record['responses'])}회. 수집 소요 시간 {record['elapsed_seconds']}초.", '']
     for market, coverage in inputs['universe']['markets'].items():
         lines += [f"- {market}: 확인 {len(coverage['symbols'])}종목. 반환 범위 {coverage['returned']}. 사유: {', '.join(coverage['issues']) or '대조 일치'}."]
