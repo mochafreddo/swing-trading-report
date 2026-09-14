@@ -38,22 +38,41 @@ CONTROLS = [
     ('minute_timezone', "raise DataError('minute_timezone_mismatch')", 'pass', 'test_invalid_regular_turnover_is_held'),
 ]
 
+UNIVERSE_CONTROLS = [
+    ('list_omission', "not lists[''] or filtered != partitioned", 'False', 'test_missing_list_entries_never_claim_complete_coverage'),
+    ('partial_results', "candidates[:3]", "[] if counts['held'] else candidates[:3]", 'test_partial_hold_keeps_verified_candidate_and_replays'),
+    ('top_three_limit', 'candidates[:3]', 'candidates[:4]', 'test_top_three_use_automatically_collected_company_announcements'),
+    ('volume_ranking', "-Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", "Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", 'test_top_three_use_automatically_collected_company_announcements'),
+    ('unverified_tie', "] > 1]", "] > 100]", 'test_equal_volume_ratios_do_not_rank_by_turnover_lower_bounds'),
+    ('no_candidates_vs_held', "else 'excluded' if counts['excluded'] else 'held'", "else 'held'", 'test_verified_no_candidates_and_all_held_are_distinct'),
+    ('exchange_identity', "data['output1']['rsym'] != 'D' + exchange + symbol", 'False', 'test_exchange_or_symbol_mismatch_is_held'),
+    ('collection_after_open', "stock_input['issues'].append('collection_outside_premarket')", 'pass', 'test_collection_crossing_open_holds_only_late_symbols'),
+    ('replay_report', "raise s.DataError('replay_report_mismatch')", 'pass', 'test_replay_rejects_modified_input_and_report_and_never_fetches'),
+    ('replay_record', "raise s.DataError('record_integrity_mismatch')", 'pass', 'test_replay_rejects_modified_input_and_report_and_never_fetches'),
+]
+
 
 def main() -> int:
-    source = (ROOT / 'single_run.py').read_text()
     results = []
-    for name, old, new, test in CONTROLS:
+    cases = [('single_run.py', 'test_single_run.SingleRunTests', control) for control in CONTROLS]
+    cases += [('universe_run.py', 'test_universe_run.UniverseRunTests', control) for control in UNIVERSE_CONTROLS]
+    cases.append(('single_run.py', 'test_universe_run.UniverseRunTests',
+                  ('universe_list_rate', 'time.sleep(1.05)', 'time.sleep(0.35)',
+                   'test_stock_all_requests_obey_separate_one_request_per_second_limit')))
+    for filename, test_class, (name, old, new, test) in cases:
+        source = (ROOT / filename).read_text()
         if source.count(old) != 1:
             raise AssertionError(f'{name}: mutation target must occur exactly once')
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             (folder / 'docs').mkdir()
-            shutil.copyfile(ROOT / 'docs/single-run-contract.md', folder / 'docs/single-run-contract.md')
-            shutil.copyfile(ROOT / 'test_single_run.py', folder / 'test_single_run.py')
-            command = [sys.executable, '-m', 'unittest', 'test_single_run.SingleRunTests.' + test]
+            for relative in ['docs/single-run-contract.md', 'docs/universe-run-contract.md',
+                             'single_run.py', 'universe_run.py', 'test_single_run.py', 'test_universe_run.py']:
+                shutil.copyfile(ROOT / relative, folder / relative)
+            command = [sys.executable, '-m', 'unittest', test_class + '.' + test]
             observations = []
             for content in [source, source.replace(old, new)]:
-                (folder / 'single_run.py').write_text(content)
+                (folder / filename).write_text(content)
                 # Disable bytecode to guarantee the same fresh-import procedure for both runs.
                 completed = subprocess.run([command[0], '-B', *command[1:]], cwd=folder,
                                            capture_output=True, text=True, timeout=30)

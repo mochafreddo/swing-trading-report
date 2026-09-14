@@ -46,7 +46,7 @@ class NoRedirect(HTTPRedirectHandler):
         raise DataError('redirect_not_allowed')
 
 
-def fetch_public(url: str, *, credentials: dict | None = None) -> str:
+def fetch_public(url: str, *, credentials: dict | None = None, public_hosts: tuple = ()) -> str:
     """Use existing tokens only, in headers; never issue or persist a token."""
     host = urlparse(url).netloc
     credentials = os.environ if credentials is None else credentials
@@ -55,7 +55,7 @@ def fetch_public(url: str, *, credentials: dict | None = None) -> str:
         required = ['TOSS_ACCESS_TOKEN']
     elif host == urlparse(KIS).netloc:
         required = ['KIS_ACCESS_TOKEN', 'KIS_APP_KEY', 'KIS_APP_SECRET']
-    elif host in {'www.micron.com', 'investors.micron.com', urlparse(YAHOO).netloc}:
+    elif host in {'www.micron.com', 'investors.micron.com', urlparse(YAHOO).netloc, *public_hosts}:
         required = []
     else:
         raise DataError('unexpected_source_host')
@@ -71,7 +71,10 @@ def fetch_public(url: str, *, credentials: dict | None = None) -> str:
             headers.update(appkey=credentials['KIS_APP_KEY'],
                            appsecret=credentials['KIS_APP_SECRET'], tr_id=transaction, custtype='P')
         # Toss MARKET_INFO permits three requests per second.
-        time.sleep(0.35)
+        if host == urlparse(TOSS).netloc and urlparse(url).path == '/api/v1/stocks/all':
+            time.sleep(1.05)
+        else:
+            time.sleep(0.35)
     try:
         with build_opener(NoRedirect).open(Request(url, headers=headers), timeout=20) as response:
             body = response.read(4_000_001)
@@ -148,17 +151,17 @@ def number(value) -> Decimal:
 
 
 class NewsPage(HTMLParser):
-    def __init__(self):
+    def __init__(self, article_prefix='https://investors.micron.com/news/press-release/'):
         super().__init__()
         self.links: list[str] = []
         self.articles: list[dict] = []
         self.in_article = False
         self.parts: list[str] = []
+        self.article_prefix = article_prefix
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
-        if tag == 'a' and attributes.get('href', '').startswith(
-                'https://investors.micron.com/news/press-release/'):
+        if tag == 'a' and attributes.get('href', '').startswith(self.article_prefix):
             self.links.append(attributes['href'])
         if tag == 'script' and attributes.get('type') == 'application/ld+json':
             self.in_article = True
@@ -176,9 +179,11 @@ class NewsPage(HTMLParser):
                 self.articles.append(value)
 
 
-def earnings(read: Callable[[str], str], report_day: date, as_of: datetime) -> dict:
-    listing = NewsPage()
-    listing.feed(read(NEWS))
+def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, source=None) -> dict:
+    source = source or {'listing_url': NEWS, 'article_prefix': 'https://investors.micron.com/news/press-release/',
+                        'company': 'Micron Technology'}
+    listing = NewsPage(source['article_prefix'])
+    listing.feed(read(source['listing_url']))
     dates = []
     changes = []
     for url in sorted(set(listing.links)):
@@ -195,7 +200,7 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime) -> d
                 changes.append({'status': 'unconfirmed', 'source': url,
                                 'published_at': published.isoformat(), 'reason': 'earnings_schedule_changed'})
             match = re.fullmatch(
-                r'Micron Technology to Report Fiscal .+?Results(?: and Full Fiscal Year \d{4})? on ([A-Za-z]+ \d{1,2}, \d{4})',
+                re.escape(source['company']) + r' to Report Fiscal .+?Results(?: and Full Fiscal Year \d{4})? on ([A-Za-z]+ \d{1,2}, \d{4})',
                 headline)
             if not match:
                 continue
@@ -208,7 +213,7 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime) -> d
                           'published_at': published.isoformat(), 'title': headline,
                           'session': 'unknown'})
     if not dates:
-        return {'status': 'unconfirmed', 'source': NEWS, 'reason': 'next_confirmed_earnings_not_found'}
+        return {'status': 'unconfirmed', 'source': source['listing_url'], 'reason': 'next_confirmed_earnings_not_found'}
     next_event = min(dates, key=lambda item: item['date'])
     newer_changes = [item for item in changes if timestamp(item['published_at']) >= timestamp(next_event['published_at'])]
     return max(newer_changes, key=lambda item: timestamp(item['published_at'])) if newer_changes else next_event
@@ -260,10 +265,11 @@ def calendar(read: Callable[[str], str], report_day: date, as_of: datetime) -> d
     return {'past': list(reversed(past)), 'future': future, 'open': opening, 'sessions': sessions}
 
 
-def price_reference(read, cal, report_day, as_of):
+def price_reference(read, cal, report_day, as_of, symbol='MU', market='NASDAQ'):
     first = datetime.combine(date.fromisoformat(cal['past'][0]), datetime.min.time(), NY)
     end = datetime.combine(report_day + timedelta(days=1), datetime.min.time(), NY)
-    url = YAHOO + '/v8/finance/chart/MU?' + urlencode({
+    reference_symbol = symbol.replace('.', '-')
+    url = YAHOO + '/v8/finance/chart/' + reference_symbol + '?' + urlencode({
         'period1': int(first.timestamp()), 'period2': int(end.timestamp()),
         'interval': '1d', 'includePrePost': 'false', 'events': 'div,splits'})
     response = json.loads(read(url), parse_float=str)['chart']
@@ -271,10 +277,12 @@ def price_reference(read, cal, report_day, as_of):
         raise DataError('reference_unavailable')
     data = response['result'][0]
     meta = data['meta']
-    required = {'symbol': 'MU', 'currency': 'USD', 'exchangeName': 'NMS',
+    required = {'symbol': reference_symbol, 'currency': 'USD',
                 'instrumentType': 'EQUITY', 'exchangeTimezoneName': 'America/New_York', 'dataGranularity': '1d'}
     if any(meta.get(key) != value for key, value in required.items()):
         raise DataError('reference_identity_or_session_mismatch')
+    if meta.get('exchangeName') not in {'NASDAQ': ('NMS', 'NGM', 'NCM'), 'NYSE': ('NYQ',)}.get(market, ()):
+        raise DataError('reference_exchange_mismatch')
     moments = [datetime.fromtimestamp(value, NY) for value in data['timestamp']]
     if [moment.date().isoformat() for moment in moments] != cal['past']:
         raise DataError('reference_dates_mismatch')
@@ -300,7 +308,8 @@ def cents(value):
     return number(value).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
 
 
-def regular_turnover(read, cal):
+def regular_turnover(read, cal, symbol='MU', market='NASDAQ'):
+    exchange = {'NASDAQ': 'NAS', 'NYSE': 'NYS'}[market]
     expected = []
     for day in cal['past'][-20:]:
         session = cal['sessions'][day]
@@ -315,10 +324,10 @@ def regular_turnover(read, cal):
     previous = None
     for _ in range(12):
         url = KIS + '/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice?' + urlencode({
-            'AUTH': '', 'EXCD': 'NAS', 'SYMB': 'MU', 'NMIN': '30', 'PINC': '1',
+            'AUTH': '', 'EXCD': exchange, 'SYMB': symbol, 'NMIN': '30', 'PINC': '1',
             'NEXT': '1' if key else '', 'NREC': '120', 'FILL': '', 'KEYB': key})
         data = json.loads(read(url))
-        if data['rt_cd'] != '0' or data['output1']['rsym'] != 'DNASMU':
+        if data['rt_cd'] != '0' or data['output1']['rsym'] != 'D' + exchange + symbol:
             raise DataError('turnover_identity_mismatch')
         rows = data['output2']
         if not rows:

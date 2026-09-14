@@ -8,3 +8,5 @@
 - [첫 보고서 구현 계획](docs/first-milestone.md)
 - [도메인 용어](CONTEXT.md)
 - [AI 입력 범위 결정](docs/adr/0001-public-data-ai.md)
+- [한 종목 평가 실행](docs/single-run.md)
+- [전체 종목군 평가 실행과 현재 한계](docs/universe-run.md)
