@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urlparse
 
 import single_run as s
 
-RULES = {'version': 1, 'calculation': s.RULES, 'markets': ['NASDAQ', 'NYSE'],
+RULES = {'version': 1, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
          'types': ['STOCK', 'FOREIGN_STOCK'], 'maximum_candidates': 3,
          'order': ['volume_ratio_desc', 'exact_average_turnover_desc', 'symbol_asc'],
          'unverified_turnover_ties': 'held'}
@@ -72,6 +72,7 @@ def discover(read):
                     symbol = row['symbol']
                     if (not isinstance(symbol, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,19}', symbol)
                             or symbol in rows or row['isCommonShare'] is not True
+                            or not isinstance(row['securityType'], str)
                             or (kind and row['securityType'] != kind)):
                         raise s.DataError('invalid_or_duplicate_listing')
                     rows[symbol] = row
@@ -210,7 +211,7 @@ def render(record):
         event = row['inputs']['earnings']
         lines += [f'## {rank}. {symbol}', '',
                   f"선정 근거: {', '.join(row['result']['reasons'])}. 거래량 증가 배율 {metrics['volume_ratio']}, 평균 거래대금 하한 {metrics['average_turnover_lower_bound_usd']} USD.", '',
-                  f"계산 지표: {metrics}.", '',
+                  f"전일 종가 기준 시가총액 {Decimal(metrics['market_cap_usd']):,.2f} USD. 돌파 기준선 {Decimal(metrics['breakout']):.2f} USD, 50일 이동평균 {Decimal(metrics['sma50']):.2f} USD, ATR(14) {Decimal(metrics['atr14']):.2f} USD.", '',
                   f"다음 확정 실적: {event['date']}. [기업 공지]({event['source']}). 발행 시각: {event.get('published_at', '확인 불가')}.", '',
                   f"진입 검토 구간: {plan['entry_low']}~{plan['entry_high']} USD = 전일 종가~전일 종가 + 0.5ATR. 구간 밖에서는 진입을 보류한다.", '',
                   f"손실 제한 기준: {plan['stop']} USD = 돌파 기준선 − ATR. 예시 1R: {plan['risk']} USD = 전일 종가 − 손실 제한 기준.", '',

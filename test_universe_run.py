@@ -128,6 +128,23 @@ class UniverseRunTests(unittest.TestCase):
         self.assertEqual(record['result']['counts']['total'], 2)
         self.assertIn('전체 목록 범위: 미확보', report)
 
+    def test_malformed_listing_preserves_verified_partition_and_record(self):
+        source = UniverseResponses()
+        def fetch(url):
+            body = source(url)
+            query = parse_qs(urlparse(url).query)
+            if '/stocks/all?' in url and query['market'] == ['NASDAQ'] and 'securityType' not in query:
+                data = json.loads(body)
+                data['result'][0].pop('securityType')
+                return json.dumps(data)
+            return body
+        try:
+            record, _ = self.run_case(fetch)
+        except KeyError:
+            self.fail('Malformed listing must preserve a report and replayable record.')
+        self.assertFalse(record['result']['coverage_complete'])
+        self.assertEqual(record['result']['candidates'], ['MU'])
+
     def test_detail_omission_holds_that_symbol_without_erasing_other_results(self):
         source = UniverseResponses()
         def fetch(url):
