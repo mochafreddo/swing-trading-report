@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urlparse
 
 import single_run as s
 
-RULES = {'version': 2, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
+RULES = {'version': 3, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
          'types': ['STOCK', 'FOREIGN_STOCK'], 'maximum_candidates': 3,
          'order': ['volume_ratio_desc', 'exact_average_turnover_desc', 'symbol_asc'],
          'unverified_turnover_ties': 'held'}
@@ -24,6 +24,20 @@ CONTRACT = Path(__file__).with_name('docs') / 'universe-run-contract.md'
 DEFAULT_EARNINGS_SOURCES = {'MU': {'listing_url': s.NEWS,
                                  'article_prefix': 'https://investors.micron.com/news/press-release/',
                                  'company': 'Micron Technology'}}
+DEFAULT_EARNINGS_SOURCES.update({symbol: {'company': company, 'listing_url': listing, 'article_prefix': prefix}
+    for symbol, company, listing, prefix in [
+        ('NVDA', 'NVIDIA', 'https://nvidianews.nvidia.com/news', 'https://nvidianews.nvidia.com/news/'),
+        ('AAPL', 'Apple', 'https://www.apple.com/newsroom/archive/', 'https://www.apple.com/newsroom/'),
+        ('MSFT', 'Microsoft', 'https://www.microsoft.com/en-us/investor/events/default', 'https://news.microsoft.com/'),
+        ('AMZN', 'Amazon.com', 'https://ir.aboutamazon.com/news-release/default.aspx', 'https://ir.aboutamazon.com/news-release/news-release-details/'),
+        ('GOOGL', 'Alphabet', 'https://abc.xyz/investor/news/default.aspx', 'https://abc.xyz/investor/news/news-details/'),
+        ('GOOG', 'Alphabet', 'https://abc.xyz/investor/news/default.aspx', 'https://abc.xyz/investor/news/news-details/'),
+        ('META', 'Meta', 'https://investor.atmeta.com/investor-news/default.aspx', 'https://investor.atmeta.com/investor-news/press-release-details/'),
+        ('JPM', 'JPMorgan', 'https://www.jpmorganchase.com/ir/news', 'https://www.jpmorganchase.com/ir/news/'),
+        ('XOM', 'ExxonMobil', 'https://corporate.exxonmobil.com/news/news-releases', 'https://corporate.exxonmobil.com/news/news-releases/'),
+        ('COST', 'Costco Wholesale Corporation', 'https://investor.costco.com/news/default.aspx', 'https://investor.costco.com/news/news-details/'),
+        ('NKE', 'NIKE, Inc.', 'https://investors.nike.com/investors/news-events-and-reports/', 'https://investors.nike.com/investors/news-events-and-reports/investor-news/investor-news-details/'),
+    ]})
 
 
 def checked_sources(sources):
@@ -84,8 +98,16 @@ def discover(read):
         if not lists[''] or filtered != partitioned:
             issues.append('list_coverage_mismatch')
         union = filtered | partitioned
+        conflicts = {}
+        for symbol in sorted(union):
+            general = lists[''].get(symbol)
+            typed = [lists[kind][symbol] for kind in RULES['types'] if symbol in lists[kind]]
+            if general != partitioned.get(symbol) or len(typed) > 1:
+                conflicts[symbol] = {'general': general, 'typed': typed,
+                                     'reason': 'typed_only' if general is None else
+                                     'general_only' if not typed else 'row_conflict'}
         universe['markets'][market] = {'returned': {kind or 'all': len(rows) for kind, rows in lists.items()},
-                                       'symbols': sorted(union), 'issues': issues}
+                                       'symbols': sorted(union), 'issues': issues, 'conflicts': conflicts}
         universe['issues'].extend(market + ':' + issue for issue in issues)
         for symbol, row in union.items():
             if symbol in universe['symbols']:
@@ -205,6 +227,8 @@ def render(record):
              f"요청 {len(record['responses'])}회. 수집 소요 시간 {record['elapsed_seconds']}초.", '']
     for market, coverage in inputs['universe']['markets'].items():
         lines += [f"- {market}: 확인 {len(coverage['symbols'])}종목. 반환 범위 {coverage['returned']}. 사유: {', '.join(coverage['issues']) or '대조 일치'}."]
+        lines += [f"  - {symbol}: {conflict['reason']}. 일반·유형별 원문은 기록에서 확인한다."
+                  for symbol, conflict in coverage['conflicts'].items()]
     lines += ['', '목록 미확보 사유: ' + (', '.join(inputs['universe']['issues']) or '없음') + '.', '']
     cal = inputs['calendar']
     if cal:

@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 from typing import Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, urljoin
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
 
@@ -27,7 +27,7 @@ YAHOO = 'https://query1.finance.yahoo.com'
 NEWS = 'https://www.micron.com/about/press/news'
 NY = ZoneInfo('America/New_York')
 RULES = {
-    'version': 3, 'symbol': 'MU', 'history_sessions': 50,
+    'version': 4, 'symbol': 'MU', 'history_sessions': 50,
     'breakout_sessions': 20, 'volume_multiple': '1.5',
     'market_cap_min_usd': '10000000000', 'turnover_min_usd': '50000000',
     'atr_period': 14, 'earnings_sessions': 5,
@@ -151,71 +151,211 @@ def number(value) -> Decimal:
 
 
 class NewsPage(HTMLParser):
-    def __init__(self, article_prefix='https://investors.micron.com/news/press-release/'):
+    def __init__(self):
         super().__init__()
         self.links: list[str] = []
         self.articles: list[dict] = []
         self.in_article = False
         self.parts: list[str] = []
-        self.article_prefix = article_prefix
+        self.next_links = []
+        self.anchor = None
+        self.metadata = {}
+        self.text = []
+        self.heading = []
+        self.in_heading = False
+        self.skip_text = 0
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
-        if tag == 'a' and attributes.get('href', '').startswith(self.article_prefix):
-            self.links.append(attributes['href'])
+        if tag == 'a':
+            self.anchor = [attributes.get('href', ''), [], attributes.get('rel', '')]
+        if tag == 'meta':
+            self.metadata[attributes.get('property', attributes.get('name', ''))] = attributes.get('content', '')
+        if tag == 'h1':
+            self.in_heading = True
+        if tag in ('p', 'div', 'br', 'h1', 'li'):
+            self.text.append('\n')
         if tag == 'script' and attributes.get('type') == 'application/ld+json':
             self.in_article = True
             self.parts = []
+        if tag in ('script', 'style'):
+            self.skip_text += 1
 
     def handle_data(self, data):
         if self.in_article:
             self.parts.append(data)
+        elif not self.skip_text:
+            self.text.append(data)
+        if self.anchor:
+            self.anchor[1].append(data)
+        if self.in_heading:
+            self.heading.append(data)
 
     def handle_endtag(self, tag):
+        if tag in ('script', 'style'):
+            self.skip_text = max(0, self.skip_text - 1)
+        if tag == 'a' and self.anchor:
+            href, label, rel = self.anchor
+            self.links.append(href)
+            if 'next' in rel.split() or ''.join(label).strip().lower() in ('next', 'next page'):
+                self.next_links.append(href)
+            self.anchor = None
+        if tag == 'h1':
+            self.in_heading = False
+        if tag in ('p', 'div', 'li', 'h1'):
+            self.text.append('\n')
         if tag == 'script' and self.in_article:
             self.in_article = False
-            value = json.loads(''.join(self.parts))
-            if isinstance(value, dict) and value.get('@type') == 'NewsArticle':
-                self.articles.append(value)
+            try:
+                value = json.loads(''.join(self.parts))
+            except ValueError:
+                return
+            def visit(value):
+                if isinstance(value, dict):
+                    if value.get('@type') in ('NewsArticle', 'Article', 'BlogPosting'):
+                        self.articles.append(value)
+                    for child in value.values():
+                        visit(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        visit(child)
+            visit(value)
 
 
 def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, source=None) -> dict:
     source = source or {'listing_url': NEWS, 'article_prefix': 'https://investors.micron.com/news/press-release/',
                         'company': 'Micron Technology'}
-    listing = NewsPage(source['article_prefix'])
-    listing.feed(read(source['listing_url']))
+    pending = [source['listing_url']]
+    visited, links, articles = set(), set(), []
+    while pending:
+        url = pending.pop(0)
+        if url in visited or len(visited) >= 10:
+            return {'status': 'unconfirmed', 'reason': 'earnings_listing_incomplete', 'collection_status': 'incomplete'}
+        visited.add(url)
+        listing = NewsPage()
+        body = read(url)
+        listing.feed(body)
+        if 'q4Api' in body:
+            seen_articles = set()
+            # TODO: #233 - Full archives can take hundreds of calls; replace with a verified date-bounded feed contract.
+            for page_number in range(200):
+                feed = urljoin(url, '/feed/PressRelease.svc/GetPressReleaseList?') + urlencode({
+                    'LanguageId': 1, 'bodyType': 2, 'pressReleaseDateFilter': 3, 'categoryId': '',
+                    'year': -1, 'pageNumber': page_number, 'pageSize': 5, 'tagList': '',
+                    'includeTags': 'true', 'excludeSelection': 1})
+                rows = json.loads(read(feed))['GetPressReleaseListResult']
+                if not isinstance(rows, list):
+                    raise DataError('earnings_feed_invalid')
+                if not rows:
+                    break
+                for row in rows:
+                    target = urljoin(url, row['LinkToDetailPage'])
+                    if not target.startswith(source['article_prefix']):
+                        continue
+                    if target in seen_articles:
+                        raise DataError('earnings_feed_did_not_progress')
+                    seen_articles.add(target)
+                    text_page = NewsPage()
+                    text_page.feed(row['Body'])
+                    articles.append((target, feed, {'headline': row['Headline'], 'datePublished': row['PressReleaseDate'],
+                                                   'articleBody': ''.join(text_page.text)}))
+            else:
+                return {'status': 'unconfirmed', 'reason': 'earnings_listing_incomplete', 'collection_status': 'incomplete'}
+            break
+        for href in listing.links:
+            target = urljoin(url, href)
+            if target.startswith(source['article_prefix']) and not urlparse(target).fragment:
+                links.add(target)
+        for href in dict.fromkeys(listing.next_links):
+            target = urljoin(url, href)
+            if urlparse(target).netloc != urlparse(source['listing_url']).netloc:
+                return {'status': 'unconfirmed', 'reason': 'earnings_listing_outside_source', 'collection_status': 'incomplete'}
+            pending.append(target)
+    if len(links) > 100:
+        return {'status': 'unconfirmed', 'reason': 'earnings_article_limit', 'collection_status': 'incomplete'}
     dates = []
     changes = []
-    for url in sorted(set(listing.links)):
+    for url in sorted(links):
         page = NewsPage()
         page.feed(read(url))
-        for article in page.articles:
-            headline = article['headline']
-            published = timestamp(article['datePublished'])
-            if published > as_of:
-                continue
-            text = headline + ' ' + article.get('description', '')
-            if (re.search(r'\b(earnings|quarterly|fiscal)\b', text, re.I)
-                    and re.search(r'\b(cancelled|canceled|postponed|rescheduled)\b', text, re.I)):
-                changes.append({'status': 'unconfirmed', 'source': url,
-                                'published_at': published.isoformat(), 'reason': 'earnings_schedule_changed'})
-            match = re.fullmatch(
-                re.escape(source['company']) + r' to Report Fiscal .+?Results(?: and Full Fiscal Year \d{4})? on ([A-Za-z]+ \d{1,2}, \d{4})',
-                headline)
-            if not match:
-                continue
-            event_day = datetime.strptime(match[1], '%B %d, %Y').date()
-            if event_day < report_day:
-                continue
-            if re.search(r'\b(estimated|expected|tentative|cancelled|canceled|postponed|rescheduled)\b', text, re.I):
-                return {'status': 'unconfirmed', 'source': url, 'reason': 'uncertain_earnings_announcement'}
-            dates.append({'status': 'confirmed', 'date': event_day.isoformat(), 'source': url,
-                          'published_at': published.isoformat(), 'title': headline,
-                          'session': 'unknown'})
+        published_metadata = next((page.metadata[key] for key in ('article:published_time', 'date', 'published_time', 'pubdate', 'publishdate')
+                                   if page.metadata.get(key)), None)
+        if not page.articles and published_metadata:
+            page.articles.append({'headline': page.metadata.get('og:title') or ''.join(page.heading),
+                                  'datePublished': published_metadata,
+                                  'articleBody': ''.join(page.text)})
+        if not page.articles:
+            return {'status': 'unconfirmed', 'source': url, 'reason': 'earnings_article_format_unsupported',
+                    'collection_status': 'unsupported'}
+        articles.extend((url, url, article | {'articleBody': article.get('articleBody', '') + '\n' + ''.join(page.text)})
+                        for article in page.articles)
+    if not articles:
+        return {'status': 'unconfirmed', 'source': source['listing_url'], 'reason': 'no_supported_listing_items',
+                'collection_status': 'unsupported'}
+    for url, evidence_url, article in articles:
+        headline = article['headline']
+        text = headline + ' ' + article.get('description', '') + ' ' + article.get('articleBody', '')
+        if not re.search(r'\b(earnings|quarterly|fiscal|results)\b', text, re.I):
+            continue
+        raw_published = article['datePublished']
+        try:
+            published = timestamp(raw_published)
+            precision = 'timestamp'
+        except ValueError:
+            try:
+                published_day = datetime.strptime(raw_published, '%m/%d/%Y %H:%M:%S').date()
+            except ValueError:
+                published_day = date.fromisoformat(raw_published)
+            if published_day >= as_of.astimezone(NY).date():
+                return {'status': 'unconfirmed', 'reason': 'publication_time_unverified', 'collection_status': 'complete'}
+            published = datetime.combine(published_day, datetime.min.time(), NY)
+            precision = 'date'
+        if published > as_of:
+            continue
+        if (re.search(r'\b(earnings|quarterly|fiscal|results)\b', text, re.I)
+                and re.search(r'\b(cancelled|canceled|postponed|rescheduled)\b', text, re.I)):
+            changes.append({'status': 'unconfirmed', 'source': url,
+                            'published_at': published.isoformat(), 'reason': 'earnings_schedule_changed'})
+        if not headline.casefold().startswith(source['company'].casefold()):
+            continue
+        match = re.fullmatch(
+            re.escape(source['company']) + r' to Report Fiscal .+?Results(?: and Full Fiscal Year \d{4})? on ([A-Za-z]+ \d{1,2}, \d{4})',
+            headline)
+        event_dates = [match[1]] if match else []
+        schedule_text = headline + ' ' + article.get('description', '')
+        for sentence in re.split(r'(?<=[.!?])\s+|\n+', text):
+            if re.search(r'\b(date|schedule|earnings|results|announce|report|release)\b', sentence, re.I):
+                schedule_text += ' ' + sentence
+            release_clause = re.split(r'\b(?:and|then)\s+(?:(?:will|to)\s+)?(?:host|hold)\b|\b(?:conference call|webcast)\b', sentence, flags=re.I)[0]
+            release_clause = re.sub(r'(\d)(?:st|nd|rd|th)\b', r'\1', release_clause)
+            date_pattern = r'(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?([A-Z][a-z]+ \d{1,2}, \d{4})\b'
+            release_clause = re.sub(r'\b(?:ending|ended|ends)\s+on\s+' + date_pattern, '', release_clause)
+            if re.search(r'\b(?:will|to)\s+(?:release|report|announce)\b.{0,120}\b(?:results|earnings)\b|\b(?:results|earnings)\b.{0,80}\bwill be (?:released|reported|announced)\b', release_clause, re.I):
+                event_dates.extend(re.findall(r'\bon\s+' + date_pattern, release_clause))
+        parsed_dates = {datetime.strptime(value, '%B %d, %Y').date() for value in event_dates}
+        if len(parsed_dates) > 1:
+            return {'status': 'unconfirmed', 'reason': 'earnings_dates_conflict', 'collection_status': 'complete'}
+        if not parsed_dates:
+            continue
+        event_day = parsed_dates.pop()
+        if event_day < report_day:
+            continue
+        if re.search(r'\b(estimated|expected|expects|tentative|cancelled|canceled|postponed|rescheduled)\b', schedule_text, re.I):
+            return {'status': 'unconfirmed', 'source': url, 'reason': 'uncertain_earnings_announcement'}
+        dates.append({'status': 'confirmed', 'date': event_day.isoformat(), 'source': url,
+                      'published_at': published.isoformat() if precision == 'timestamp' else published.date().isoformat(),
+                      'publication_precision': precision, 'evidence_url': evidence_url, 'title': headline,
+                      'session': 'unknown', 'collection_status': 'complete'})
     if not dates:
-        return {'status': 'unconfirmed', 'source': source['listing_url'], 'reason': 'next_confirmed_earnings_not_found'}
+        return {'status': 'unconfirmed', 'source': source['listing_url'], 'reason': 'next_confirmed_earnings_not_found',
+                'collection_status': 'complete'}
+    if len({item['date'] for item in dates}) > 1:
+        return {'status': 'unconfirmed', 'reason': 'earnings_dates_conflict', 'collection_status': 'complete'}
     next_event = min(dates, key=lambda item: item['date'])
-    newer_changes = [item for item in changes if timestamp(item['published_at']) >= timestamp(next_event['published_at'])]
+    event_publication = datetime.fromisoformat(next_event['published_at'])
+    if event_publication.tzinfo is None:
+        event_publication = event_publication.replace(tzinfo=NY)
+    newer_changes = [item for item in changes if timestamp(item['published_at']) >= event_publication]
     return max(newer_changes, key=lambda item: timestamp(item['published_at'])) if newer_changes else next_event
 
 
@@ -418,8 +558,14 @@ def collect_remaining(inputs, stage, read, report_day, as_of, source, symbol='MU
     if source is None:
         inputs['issues'].append('earnings_source_not_configured')
         inputs['skipped']['earnings'] = 'source_not_configured'
+        inputs['earnings'] = {'status': 'unconfirmed', 'collection_status': 'not_configured',
+                              'reason': 'earnings_source_not_configured'}
     else:
         stage('earnings', lambda: earnings(read, report_day, as_of, source))
+        errors = [reason.split(':', 1)[1] for reason in inputs['issues'] if reason.startswith('earnings:')]
+        if errors:
+            inputs['earnings'] = {'status': 'unconfirmed', 'collection_status': 'failed',
+                                  'source': source['listing_url'], 'reason': errors[-1]}
     result = evaluate(inputs)
     if result['status'] == 'excluded':
         inputs['skipped']['turnover'] = 'verified_exclusion'

@@ -1,5 +1,48 @@
 # 이슈 #233 데이터 경로 표본 검증
 
+## 2026-09-24 남은 경로의 추가 검증
+
+### 최신 목록과 충돌 근거
+
+공식 Nasdaq 디렉터리 두 파일을 다시 조회했다. 두 파일의 생성 표시는 `0924202607:00`이며 공개 GET 2회·4.702초였다. 기존 9월 14일 토스 기록의 7종목과 대조했을 때 KHC는 NYSE, PSNYW는 Class C-1 ADS (ADW), 나머지는 Nasdaq에 계속 표시됐다. 시점이 다른 자료이므로 현재 토스의 거래 가능 여부나 과거 상태를 확정하지 않는다. 런타임은 일반·유형별 목록의 충돌을 종목별 원문과 사유로 보존하도록 보강했다. 최신 토스 목록·상세 대조는 추가 토큰 발급 승인 후에 실행해야 한다.
+
+- 로컬 원문·대조 기록: `runs/issue233-listing-directory-20260924/`
+- [토스 종목 조회 명세](https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Apis/StockInfoApi.md)는 전체 목록을 페이지 없이 반환하고 일별로 갱신한다고 설명하지만 일반·유형별·상세 요청 사이의 원자적인 스냅샷은 보장하지 않는다.
+
+### 여러 기업의 공식 IR 수집
+
+공통 수집기에 상대 링크·다음 페이지·중첩 JSON-LD·발행 메타데이터와 Q4 공개 피드를 연결했다. 기본 출처는 11개 기업·12개 티커이며, GOOG와 GOOGL은 같은 Alphabet 공지를 사용한다. 출처 등록과 실제 일정 확인을 구분한다. 기업명, 발행 시각, 결과 발표 문장, 날짜 충돌과 취소·연기를 검사하며, 콜 날짜나 회계기간 종료일은 발표일로 대신하지 않는다. 시간대 없는 발행 날짜는 날짜 정밀도로 기록하고 당일 공지는 보류한다.
+
+Q4 위젯의 실제 요청과 페이지 번호별 응답으로 공개 `GetPressReleaseList` 경로를 확인했다. `year=-1`, `bodyType=2`, `pageNumber`를 사용하고 명시적인 빈 페이지까지 읽는다. 작은 페이지를 마지막으로 간주하지 않는다. 전체 응답과 25개 단위 응답은 일부 기업에서 크기 제한을 초과해 5개 단위로 줄였다. 런타임의 4 MB 응답 상한과 리다이렉트 거절을 유지했다. 기업당 최대 200페이지를 넘으면 미확보로 남긴다. [Amazon IR의 공개 Q4 위젯](https://ir.aboutamazon.com/js/module/widgets/dist/latest/evergreen.q4Api.min.js)
+
+NIKE 실제 공개 응답 137개에서 다음 결과 발표일 **2026-10-01**을 확인했다. 근거 공지의 발행 날짜는 **2026-08-28**, 발행 시각 정밀도는 날짜이며 콜 시간이 확정 발표 시각을 대신하지 않는다. 날짜를 설정에 넣지 않고 등록된 목록에서 피드를 따라 찾았다. 원본 응답과 수집 당시 소스 해시를 대조했고, 수정한 파서로 저장 응답을 재분류한 결과도 같았다. 이는 MU 외 실제 공지 수집의 근거이며 NIKE의 가격·거래량·후보 선정 성공을 뜻하지 않는다. [NIKE 공식 예고](https://investors.nike.com/investors/news-events-and-reports/investor-news/investor-news-details/2026/NIKE-Inc--Announces-First-Quarter-Fiscal-2027-Earnings-and-Conference-Call/default.aspx)
+
+- 원문·당시 코드: `runs/issue233-nke-runtime-20260924/`
+- 현재 코드 재분류: 같은 경로의 `current-reclassification.json`
+
+최종 11개 기업 실행은 2026-09-24T11:46:45.923954+00:00 기준으로 365회 요청·385.391초였다. MU와 NKE는 위 확정일, GOOGL·META·XOM·COST는 지원 경로 조회 완료 후 다음 확정일 근거 미발견, NVDA는 10페이지 한도 미확보, AAPL·JPM은 형식 미지원으로 남았다. AMZN은 5개 단위 피드의 4번째 페이지도 4 MB 상한을 넘었고 MSFT는 리다이렉트로 실패했다. 수집 당시 고정한 소스로 네트워크 없는 재현이 일치했고, 리뷰에서 수정한 파서로 저장 응답을 재분류한 결과도 같았다. 기록은 `runs/issue233-ir-runtime-final-20260924/`에 소스와 함께 보존했다.
+
+MSFT의 최초 목록 주소가 반환한 공식 목적지를 확인해 기본 설정을 `https://www.microsoft.com/en-us/investor/events/default`로 갱신했다. 새 주소로 2회 공개 요청을 실행했지만 후속 기사 링크의 리다이렉트로 계속 실패했다. 이를 일정 근거 미발견이나 수집 완료로 표시하지 않는다. 추가 기록은 `runs/issue233-msft-canonical-20260924/record.json`이다.
+
+전체 이력을 읽는 현재 Q4 방식은 NIKE 한 기업에 137회 요청이 필요했다. 날짜 범위로 제한하는 제공자 계약을 검증한 뒤 최적화해야 한다. 동적 목록과 공지 표현을 모두 처리한 것은 아니며, 형식 미지원·수집 실패·조회 완료 후 근거 미발견을 구분해 보류한다. 실제 필요한 기업 전체의 지원 여부는 전체 가격 평가 후 다시 확인해야 한다.
+
+### 체결 조건 분류와 독립 거래량 대조
+
+저장된 Alpaca 정상일 169페이지를 추가 인증 조회 없이 재분류했다. 테이프별 조건표에 따라 취소·오류, 거래량 비반영, 시간외, 마감 전, 마감 이후 종가 체결, 미지정 조건을 별도 합계로 기록한다. 미확인 ID 중복을 임의로 제거하지 않으며 모든 합계는 진단값이다. `exact_regular_turnover_verified=false`와 검증 보류를 유지한다. [Alpaca 공식 조건표](https://docs.alpaca.markets/us/docs/market-data-faq), [정정 상태에 대한 제공자 답변](https://forum.alpaca.markets/t/persistent-ionq-sip-trade-bar-mismatch-2-trades-and-2-shares/19339)
+
+| 2026-09-11 | 마감 전 + 마감 후 종가 조건 진단 거래량 | 9월 24일 조회한 Yahoo 일봉 거래량 | 차이 |
+| --- | ---: | ---: | ---: |
+| AAPL | 47,012,399 | 50,716,900 | 3,704,501 |
+| MU | 18,573,979 | 21,740,300 | 3,166,321 |
+| XOM | 10,470,270 | 11,362,400 | 892,130 |
+
+Yahoo 공개 일봉은 3회 GET으로 조회해 심볼·USD·뉴욕 시간대와 날짜를 확인했다. 양쪽의 세션·정정·지연 보고 집계 계약이 같다고 입증하지 못했으므로 차이를 곧바로 누락 체결량이라고 단정하지 않는다. 세 종목 모두 독립 합계 일치를 입증하지 못했다. 식별자 충돌, 지연 보고 종료 시점과 historical 정정 계약도 남아 있어 조기 폐장일·20거래일 수집과 정확 동률 정렬로 확대하지 않는다. 공개 논의에도 historical ID의 안전한 유일성 키가 확정되어 있지 않다. [식별자 충돌 논의](https://forum.alpaca.markets/t/which-combination-of-fields-guarantees-uniqueness-in-historical-trade-records/17728)
+
+- 조건별 진단: `runs/issue233-alpaca-normal-20260924-continued1/summary-condition-totals.json`
+- 독립 응답·대조 및 원본 해시: `runs/issue233-volume-reference-20260924/record.json`, `comparison.json`
+
+정확 거래대금의 대안은 현재 무료 경로에서 검증된 값을 찾거나, 제공자에게 식별자·정정·지연 보고 계약을 확인하는 것이다. 합계가 맞지 않는 값을 운영 순위에 넣는 것은 대안이 아니다. 외부 문의 초안은 기존 문서에 남아 있으며 이번 작업에서 문의를 발송하지 않았다.
+
 ## 2026-09-24 Alpaca 실제 조회 후속 결과
 
 ### 정상일 3종목의 요청 범위 수집 완료

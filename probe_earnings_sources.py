@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded public IR feasibility probe; no credentials or production integration.
+"""Public IR research and runtime collector verification; no credentials.
 
 Run: python3 probe_earnings_sources.py --output runs/issue233-ir-probe-20260915
 Replay: python3 probe_earnings_sources.py --replay runs/issue233-ir-probe-20260915
@@ -19,19 +19,22 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
 
+import single_run as s
+
 
 # These are source locations, not earnings dates or preselected article URLs.
 SOURCES = [
     ('MU', 'Micron', 'https://www.micron.com/about/press/news', ('micron.com',)),
     ('NVDA', 'NVIDIA', 'https://nvidianews.nvidia.com/news', ('nvidia.com',)),
     ('AAPL', 'Apple', 'https://www.apple.com/newsroom/archive/', ('apple.com',)),
-    ('MSFT', 'Microsoft', 'https://www.microsoft.com/en-us/Investor/events/default.aspx', ('microsoft.com',)),
+    ('MSFT', 'Microsoft', 'https://www.microsoft.com/en-us/investor/events/default', ('microsoft.com',)),
     ('AMZN', 'Amazon', 'https://ir.aboutamazon.com/news-release/default.aspx', ('aboutamazon.com',)),
     ('GOOGL', 'Alphabet', 'https://abc.xyz/investor/news/default.aspx', ('abc.xyz',)),
     ('META', 'Meta', 'https://investor.atmeta.com/investor-news/default.aspx', ('atmeta.com',)),
     ('JPM', 'JPMorgan', 'https://www.jpmorganchase.com/ir/news', ('jpmorganchase.com',)),
     ('XOM', 'ExxonMobil', 'https://corporate.exxonmobil.com/news/news-releases', ('exxonmobil.com',)),
     ('COST', 'Costco', 'https://investor.costco.com/news/default.aspx', ('costco.com',)),
+    ('NKE', 'NIKE', 'https://investors.nike.com/investors/news-events-and-reports/', ('nike.com',)),
 ]
 MONTHS = {name.lower(): index for index, name in enumerate(
     ('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
@@ -295,6 +298,7 @@ def main():
     mode.add_argument('--output', type=Path)
     mode.add_argument('--replay', type=Path)
     parser.add_argument('--max-articles', type=int, default=4, choices=range(1, 11))
+    parser.add_argument('--production', action='store_true', help='Exercise the runtime IR collector on registered issuers')
     args = parser.parse_args()
     controls = check()
     if args.self_check:
@@ -312,7 +316,11 @@ def main():
             raw = (args.replay / entry['body_file']).read_bytes()
             assert sha256(raw).hexdigest() == entry['sha256']
             return raw.decode('utf-8', errors='replace') if entry['status'] == 200 else None
-        results = probe(read, datetime.fromisoformat(record['as_of']), record['max_articles'])
+        if record.get('production'):
+            import universe_run as u
+            assert record['runtime_sha256'] == u.code_hash(), 'runtime changed'
+        results = (production_probe if record.get('production') else probe)(
+            read, datetime.fromisoformat(record['as_of']), record['max_articles'])
         assert next(iterator, None) is None
         assert results == record['results'], 'replay differs'
         print('Replay matched without network.')
@@ -323,6 +331,9 @@ def main():
     record = {'as_of': datetime.now(timezone.utc).isoformat(), 'sources': SOURCES,
               'max_articles': args.max_articles, 'controls': controls, 'requests': [],
               'code_sha256': sha256(Path(__file__).read_bytes()).hexdigest()}
+    if args.production:
+        import universe_run as u
+        record.update(production=True, runtime_sha256=u.code_hash())
     started = time.monotonic()
     def read(url, hosts):
         assert allowed(url, hosts)
@@ -332,14 +343,20 @@ def main():
         request_started = time.monotonic()
         raw = None
         try:
-            req = Request(url, headers={'User-Agent': 'PublicIRSourceProbe/1.0', 'Accept': 'text/html'})
-            with build_opener(Redirects(hosts)).open(req, timeout=20) as response:
-                entry.update(status=response.status, final_url=response.url,
-                             content_type=response.headers.get('Content-Type'))
-                raw = response.read(5_000_001)
-                if len(raw) > 5_000_000:
-                    entry.update(status='oversized_response', reason='body_over_5MB')
-                    raw = None
+            if args.production:
+                raw = s.fetch_public(url, credentials={}, public_hosts=hosts).encode()
+                entry.update(status=200, final_url=url)
+            else:
+                req = Request(url, headers={'User-Agent': 'PublicIRSourceProbe/1.0', 'Accept': 'text/html'})
+                with build_opener(Redirects(hosts)).open(req, timeout=20) as response:
+                    entry.update(status=response.status, final_url=response.url,
+                                 content_type=response.headers.get('Content-Type'))
+                    raw = response.read(5_000_001)
+                    if len(raw) > 5_000_000:
+                        entry.update(status='oversized_response', reason='body_over_5MB')
+                        raw = None
+        except s.DataError as error:
+            entry.update(status=str(error), reason='runtime_fetch_failed')
         except HTTPError as error:
             entry.update(status=error.code, reason='http_error')
             raw = error.read(100_000)
@@ -351,10 +368,31 @@ def main():
             (args.output / path).write_bytes(raw)
             entry.update(body_file=path, bytes=len(raw), sha256=sha256(raw).hexdigest())
         return raw.decode('utf-8', errors='replace') if raw is not None and entry['status'] == 200 else None
-    record['results'] = probe(read, datetime.fromisoformat(record['as_of']), args.max_articles)
+    record['results'] = (production_probe if args.production else probe)(
+        read, datetime.fromisoformat(record['as_of']), args.max_articles)
     record.update(request_count=len(record['requests']), elapsed_seconds=round(time.monotonic() - started, 3))
     (args.output / 'record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
     print(f'Saved {args.output}/record.json; requests={record["request_count"]}; seconds={record["elapsed_seconds"]}')
+
+
+def production_probe(read, as_of, max_articles):
+    import universe_run as u
+    results = []
+    for symbol, company, listing_url, hosts in SOURCES:
+        source = u.DEFAULT_EARNINGS_SOURCES[symbol]
+        allowed_hosts = tuple({urlsplit(source[key]).hostname for key in ('listing_url', 'article_prefix')})
+        def required_read(url):
+            body = read(url, allowed_hosts)
+            if body is None:
+                raise s.DataError('source_fetch_failed')
+            return body
+        try:
+            event = s.earnings(required_read, as_of.astimezone(s.NY).date(), as_of, source)
+        except (s.DataError, ValueError, KeyError, TypeError):
+            event = {'status': 'unconfirmed', 'collection_status': 'failed', 'reason': 'source_fetch_or_parse_failed'}
+        results.append({'symbol': symbol, 'event': event})
+        print(f'{symbol}: {event["status"]}; {event.get("reason", event.get("date"))}', flush=True)
+    return results
 
 
 if __name__ == '__main__':

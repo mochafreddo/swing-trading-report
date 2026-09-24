@@ -57,6 +57,264 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_uncertain_ir_evidence_never_selects_a_candidate(self):
+        for mode in ('call_only', 'wrong_company', 'same_day_unknown_time', 'cycle', 'changed_schedule'):
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                source.add_company('AAA', 2)
+                config = source.earnings_sources['AAA']
+                def fetch(url):
+                    if url == config['listing_url'] and mode == 'cycle':
+                        return '<a href="/releases/AAA/release">Earnings</a><a rel="next" href="/AAA">Next</a>'
+                    if url == config['article_prefix'] + 'release':
+                        body = 'AAA Corporation will release financial results on September 17, 2026.'
+                        title = 'AAA Corporation Announces Earnings Schedule'
+                        published = '2026-09-01T12:00:00Z'
+                        if mode == 'call_only':
+                            body = 'AAA Corporation will host a conference call on September 17, 2026 to discuss earnings.'
+                        if mode == 'wrong_company':
+                            title, body = title.replace('AAA', 'OTHER'), body.replace('AAA', 'OTHER')
+                        if mode == 'same_day_unknown_time':
+                            published = '2026-09-10'
+                        if mode == 'changed_schedule':
+                            body += ' The earnings announcement has been postponed.'
+                        return '<script type="application/ld+json">' + json.dumps({
+                            '@type': 'NewsArticle', 'headline': title,
+                            'datePublished': published, 'articleBody': body}) + '</script>'
+                    return source(url)
+                record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+                row = record['inputs']['stocks']['AAA']
+                self.assertEqual(row['result']['status'], 'held')
+                self.assertIsNone(row['result']['plan'])
+
+    def test_ir_uses_release_date_not_fiscal_period_end_or_forward_looking_boilerplate(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        article_url = source.earnings_sources['AAA']['article_prefix'] + 'release'
+        def fetch(url):
+            if url == article_url:
+                return '<script type="application/ld+json">' + json.dumps({
+                    '@type': 'NewsArticle', 'headline': 'AAA Corporation Announces Earnings Schedule',
+                    'datePublished': '2026-09-01T12:00:00Z',
+                    'articleBody': 'AAA Corporation will release financial results for the quarter ended August 31, 2026 on Thursday, September 17, 2026. '
+                                   'Forward-looking statements describe expected market growth.'}) + '</script>'
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'selected')
+        self.assertEqual(row['inputs']['earnings']['date'], '2026-09-17')
+
+    def test_ir_fetch_failure_is_distinct_from_completed_search_without_evidence(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                source = UniverseResponses()
+                source.add_company('AAA', 2)
+                url = source.earnings_sources['AAA']['listing_url']
+                def fetch(target):
+                    if target == url:
+                        if failed:
+                            raise u.s.DataError('http_403')
+                        return '<a href="/releases/AAA/history">Quarterly Results</a>'
+                    if target.endswith('/releases/AAA/history'):
+                        return '<script type="application/ld+json">' + json.dumps({
+                            '@type': 'NewsArticle', 'headline': 'AAA Corporation Reports Quarterly Results',
+                            'datePublished': '2026-08-01T12:00:00Z'}) + '</script>'
+                    return source(target)
+                record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+                row = record['inputs']['stocks']['AAA']
+                self.assertEqual(row['result']['status'], 'held')
+                event = row['inputs']['earnings']
+                self.assertEqual(event['collection_status'], 'failed' if failed else 'complete')
+                self.assertEqual(event['reason'], 'http_403' if failed else 'next_confirmed_earnings_not_found')
+
+    def test_unhandled_dynamic_listing_is_not_a_completed_empty_search(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        def fetch(url):
+            if url == source.earnings_sources['AAA']['listing_url']:
+                return '<div id="news"></div><script src="/custom-dynamic-news.js"></script>'
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        event = record['inputs']['stocks']['AAA']['inputs']['earnings']
+        self.assertEqual(event['collection_status'], 'unsupported')
+        self.assertEqual(event['reason'], 'no_supported_listing_items')
+
+    def test_listing_conflicts_are_preserved_per_symbol_for_reconciliation(self):
+        source = UniverseResponses()
+        def fetch(url):
+            body = source(url)
+            query = parse_qs(urlparse(url).query)
+            if '/stocks/all?' in url and query.get('market') == ['NASDAQ'] and query.get('securityType') == ['STOCK']:
+                return json.dumps({'result': []})
+            return body
+        record, report = self.run_case(fetch)
+        self.assertFalse(record['result']['coverage_complete'])
+        conflict = record['inputs']['universe']['markets']['NASDAQ']['conflicts']['MU']
+        self.assertEqual(conflict['reason'], 'general_only')
+        self.assertEqual(conflict['general']['symbol'], 'MU')
+        self.assertEqual(conflict['typed'], [])
+        self.assertIn('MU', report)
+        self.assertEqual(record['result']['candidates'], ['MU'])
+
+    def test_dynamic_ir_feed_preserves_publication_precision_and_official_evidence(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        def fetch(url):
+            if url == config['listing_url']:
+                return '<script src="/js/evergreen.q4Api.min.js"></script><script>q4News({category:"abc"})</script>'
+            if '/feed/PressRelease.svc/GetPressReleaseList?' in url:
+                if parse_qs(urlparse(url).query)['pageNumber'] != ['0']:
+                    return json.dumps({'GetPressReleaseListResult': []})
+                return json.dumps({'GetPressReleaseListResult': [{
+                    'Headline': 'AAA Corporation to Announce Quarterly Results',
+                    'PressReleaseDate': '09/01/2026 16:05:00',
+                    'LinkToDetailPage': '/releases/AAA/release',
+                    'Body': '<p>AAA Corporation financial results will be released on September 17th, 2026.</p>'}]})
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        event = record['inputs']['stocks']['AAA']['inputs']['earnings']
+        self.assertEqual(event['status'], 'confirmed')
+        self.assertEqual(event['date'], '2026-09-17')
+        self.assertEqual(event['publication_precision'], 'date')
+        self.assertEqual(event['published_at'], '2026-09-01')
+        self.assertIn('/feed/PressRelease.svc/', event['evidence_url'])
+
+    def test_ir_body_qualifications_changes_and_call_dates_cannot_confirm_an_event(self):
+        for mode in ('tentative_title', 'tentative_body', 'expected_body', 'conflicting_body', 'call_clause', 'generic_change_title', 'html_conflict', 'html_tentative', 'fiscal_ending_on', 'fiscal_ending_ordinal', 'fiscal_ending_weekday'):
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                source.add_company('AAA', 2)
+                config = source.earnings_sources['AAA']
+                def fetch(url):
+                    if url == config['listing_url']:
+                        return '<a href="/releases/AAA/release">Earnings</a>' + (
+                            '<a href="/releases/AAA/update">Update</a>' if mode == 'generic_change_title' else '')
+                    if url.startswith(config['article_prefix']):
+                        title = 'AAA Corporation to Report Fiscal Fourth Quarter Results on September 17, 2026'
+                        body = 'AAA Corporation will release financial results on September 17, 2026.'
+                        published = '2026-09-01T12:00:00Z'
+                        if mode == 'tentative_title':
+                            body += ' The date is tentative.'
+                        elif mode == 'expected_body':
+                            body = 'AAA Corporation is expected to report financial results on September 17, 2026.'
+                        elif mode == 'conflicting_body':
+                            body = 'AAA Corporation will release financial results on September 11, 2026.'
+                        elif mode == 'tentative_body':
+                            title = 'AAA Corporation Announces Earnings Schedule'
+                            body += ' This date is tentative.'
+                        elif mode == 'call_clause':
+                            title = 'AAA Corporation Announces Earnings Schedule'
+                            body = 'AAA Corporation will release financial results after market close and host a conference call on September 17, 2026.'
+                        elif url.endswith('update'):
+                            title = 'AAA Corporation Updates Announcement Date'
+                            body = 'AAA Corporation has rescheduled financial results from September 17, 2026 to September 24, 2026.'
+                            published = '2026-09-02T12:00:00Z'
+                        html = ''
+                        if mode == 'html_conflict':
+                            html = '<p>AAA Corporation will release financial results on September 11, 2026.</p>'
+                        elif mode == 'html_tentative':
+                            html = '<p>This earnings date is tentative.</p>'
+                        elif mode.startswith('fiscal_ending'):
+                            title = 'AAA Corporation Announces Earnings Schedule'
+                            body = 'AAA Corporation will report financial results for the quarter ending on ' + {
+                                'fiscal_ending_on': 'September 30, 2026.',
+                                'fiscal_ending_ordinal': 'September 30th, 2026.',
+                                'fiscal_ending_weekday': 'Wednesday, September 30, 2026.'}[mode]
+                        return '<script type="application/ld+json">' + json.dumps({
+                            '@type': 'NewsArticle', 'headline': title, 'datePublished': published, 'articleBody': body}) + '</script>' + html
+                    return source(url)
+                record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+                row = record['inputs']['stocks']['AAA']
+                self.assertEqual(row['result']['status'], 'held')
+                self.assertIsNone(row['result']['plan'])
+
+    def test_conflicting_future_ir_announcements_do_not_choose_an_arbitrary_date(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        def fetch(url):
+            if url == config['listing_url']:
+                return '<a href="/releases/AAA/one">Earnings</a><a href="/releases/AAA/two">Earnings</a>'
+            if url in (config['article_prefix'] + 'one', config['article_prefix'] + 'two'):
+                day = '17' if url.endswith('one') else '18'
+                return '<script type="application/ld+json">' + json.dumps({
+                    '@type': 'NewsArticle', 'headline': 'AAA Corporation to Announce Quarterly Results',
+                    'datePublished': '2026-09-01T12:00:00Z',
+                    'articleBody': 'AAA Corporation will release financial results on September ' + day + ', 2026.'}) + '</script>'
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'held')
+        self.assertEqual(row['inputs']['earnings']['reason'], 'earnings_dates_conflict')
+
+    def test_dynamic_ir_repeated_page_is_a_failed_collection(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        def fetch(url):
+            if url == config['listing_url']:
+                return '<script src="/q4Api.js"></script>'
+            if '/feed/PressRelease.svc/' in url:
+                return json.dumps({'GetPressReleaseListResult': [{
+                    'Headline': 'AAA Corporation to Announce Quarterly Results',
+                    'PressReleaseDate': '09/01/2026 16:05:00', 'LinkToDetailPage': '/releases/AAA/release',
+                    'Body': 'AAA Corporation will release earnings on September 17, 2026.'}]})
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'held')
+        self.assertEqual(row['inputs']['earnings']['reason'], 'earnings_feed_did_not_progress')
+        self.assertEqual(row['inputs']['earnings']['collection_status'], 'failed')
+
+    def test_dynamic_ir_walks_short_pages_until_explicit_empty_page(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        def fetch(url):
+            if url == config['listing_url']:
+                return '<script src="/js/evergreen.q4Api.min.js"></script>'
+            if '/feed/PressRelease.svc/GetPressReleaseList?' in url:
+                number = int(parse_qs(urlparse(url).query)['pageNumber'][0])
+                rows = [] if number > 1 else [{
+                    'Headline': 'AAA Corporation to Announce Quarterly Results',
+                    'PressReleaseDate': '09/01/2026 16:05:00',
+                    'LinkToDetailPage': '/releases/AAA/' + str(number),
+                    'Body': 'AAA Corporation will release financial results on ' +
+                            ('August 17, 2026.' if number == 0 else 'September 17, 2026.')}]
+                return json.dumps({'GetPressReleaseListResult': rows})
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        event = record['inputs']['stocks']['AAA']['inputs']['earnings']
+        self.assertEqual(event['status'], 'confirmed')
+        self.assertEqual(event['date'], '2026-09-17')
+        self.assertIn('pageNumber=1', event['evidence_url'])
+        self.assertTrue(any('pageNumber=2' in r['url'] for r in record['responses']))
+
+    def test_paginated_relative_ir_links_and_release_date_distinct_from_call(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        article_url = config['article_prefix'] + 'release'
+        def fetch(url):
+            if url == config['listing_url']:
+                return '<a rel="next" href="/AAA?page=2">Next</a>'
+            if url == 'https://ir.example.com/AAA?page=2':
+                return '<a href="/releases/AAA/release">AAA Corporation earnings schedule</a>'
+            if url == article_url:
+                return '<script type="application/ld+json">' + json.dumps({'@graph': [{
+                    '@type': 'NewsArticle', 'headline': 'AAA Corporation Announces Earnings Schedule',
+                    'datePublished': '2026-09-01T12:00:00Z',
+                    'articleBody': 'AAA Corporation will release financial results on September 17, 2026. '
+                                   'The conference call will be held on September 18, 2026.'}]}) + '</script>'
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'selected')
+        self.assertEqual(row['inputs']['earnings']['date'], '2026-09-17')
+        self.assertEqual(row['inputs']['earnings']['source'], article_url)
+        self.assertEqual(row['inputs']['earnings']['collection_status'], 'complete')
+
     def test_verified_exclusion_skips_earnings_and_turnover_and_replays(self):
         source = UniverseResponses()
         source.sources['IBM'].stock['sharesOutstanding'] = '99999999'

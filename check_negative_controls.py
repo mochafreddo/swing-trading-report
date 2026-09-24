@@ -65,6 +65,20 @@ def main() -> int:
         ('unverified_price_exclusion', "raise DataError('daily_price_reference_mismatch')", 'pass',
          'test_unverified_prices_or_identity_cannot_prove_small_cap_exclusion'),
     ]]
+    cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('ir_feed_terminal', '                if not rows:\n                    break', '                if len(rows) < 5:\n                    break',
+         'test_dynamic_ir_walks_short_pages_until_explicit_empty_page'),
+        ('ir_feed_repeat', "raise DataError('earnings_feed_did_not_progress')", 'pass',
+         'test_dynamic_ir_repeated_page_is_a_failed_collection'),
+        ('ir_conflicting_announcements', "if len({item['date'] for item in dates}) > 1:", 'if False:',
+         'test_conflicting_future_ir_announcements_do_not_choose_an_arbitrary_date'),
+        ('ir_uncertainty_body', "return {'status': 'unconfirmed', 'source': url, 'reason': 'uncertain_earnings_announcement'}", 'pass',
+         'test_ir_body_qualifications_changes_and_call_dates_cannot_confirm_an_event'),
+        ('ir_call_date', 'date_pattern, release_clause))', 'date_pattern, sentence))',
+         'test_ir_body_qualifications_changes_and_call_dates_cannot_confirm_an_event'),
+        ('ir_publication_time', 'if published_day >= as_of.astimezone(NY).date():', 'if False:',
+         'test_uncertain_ir_evidence_never_selects_a_candidate'),
+    ]]
     cases += [('single_run.py', 'test_single_run.SingleRunTests', control) for control in [
         ('price_exclusion_collection', "    if result['status'] == 'excluded':\n        inputs['skipped'] =", "    if False:\n        inputs['skipped'] =",
          'test_verified_price_failure_skips_remaining_sources'),

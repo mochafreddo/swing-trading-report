@@ -25,6 +25,10 @@ NY = ZoneInfo('America/New_York')
 SESSIONS = {'2026-09-11': '16:00', '2025-11-28': '13:00'}
 SYMBOLS = ['MU', 'AAPL', 'XOM']
 ENDPOINT = 'https://data.alpaca.markets/v2/stocks/trades'
+# Alpaca stock bar-condition table, 2026-09-24; these groups are diagnostics, not a turnover contract.
+CONDITIONS_BY_TAPE = {'A': set(' BCEFHIKLMNOPQRTUVXZ45679'),
+                      'B': set(' BCEFHIKLMNOPQRTUVXZ45679'),
+                      'C': set('@ABCDFGHIKLMNOPQRTUVWXYZ45679')}
 
 
 def window(day):
@@ -50,6 +54,7 @@ def inspect_pages(pages, day, feed='sip'):
     updates = Counter()
     unknown_update = False
     session_conditions, closing_examples = Counter(), {}
+    diagnostic_totals = {symbol: {} for symbol in SYMBOLS}
     amounts = {symbol: Decimal(0) for symbol in SYMBOLS}
     expected = None
     for index, page in enumerate(pages):
@@ -90,6 +95,26 @@ def inspect_pages(pages, day, feed='sip'):
                     session_conditions[symbol + '/extended_hours_before_close'] += 1
                 counts[symbol + '/' + bucket] += 1
                 conditions['/'.join([symbol, bucket, ','.join(sorted(row['c']))])] += 1
+                known = CONDITIONS_BY_TAPE.get(row['z'], set())
+                if row.get('u') in ('canceled', 'incorrect'):
+                    group = 'canceled_or_incorrect'
+                elif (not row['c'] or any(c not in known for c in row['c'])
+                      or ('u' in row and row['u'] != 'corrected')):
+                    group = 'unknown'
+                elif any(c in ('M', 'Q', '9') for c in row['c']):
+                    group = 'non_volume'
+                elif any(c in ('T', 'U') for c in row['c']):
+                    group = 'extended_hours'
+                elif stamp < close:
+                    group = 'before_close'
+                elif '6' in row['c']:
+                    group = 'closing_after_close'
+                else:
+                    group = 'other_after_close'
+                total = diagnostic_totals[symbol].setdefault(group, {'rows': 0, 'volume': Decimal(0), 'amount_usd': Decimal(0)})
+                total['rows'] += 1
+                total['volume'] += size
+                total['amount_usd'] += price * size
                 # Diagnostic sum of returned rows, deliberately not session eligibility.
                 amounts[symbol] += price * size
         expected = data.get('next_page_token')
@@ -115,6 +140,10 @@ def inspect_pages(pages, day, feed='sip'):
             'trade_update_counts': dict(updates),
             'session_condition_counts': dict(session_conditions),
             'closing_trade_examples': closing_examples,
+            'diagnostic_condition_totals': {symbol: {group: {'rows': total['rows'], 'volume': str(total['volume']),
+                                                            'amount_usd': str(total['amount_usd'])}
+                                                    for group, total in groups.items()}
+                                             for symbol, groups in diagnostic_totals.items()},
             'validation_status': 'held',
             'validation_issues': issues,
             'returned_row_amount_usd': {k: str(v) if k in observed and k not in affected else None

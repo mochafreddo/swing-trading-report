@@ -38,6 +38,26 @@ def cli(*args):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_replay_groups_condition_amounts_without_certifying_turnover(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / 'record.json'
+            rows = [ROW, dict(ROW, i=2, s=3, u='canceled'), dict(ROW, i=3, s=4, u='incorrect'),
+                    dict(ROW, i=4, p=110, s=5, u='corrected'), dict(ROW, i=5, c=['@', 'M']),
+                    dict(ROW, i=6, c=['@', 'T']),
+                    dict(ROW, i=7, p=120, s=7, t='2026-09-11T20:04:00Z', c=['@', '6']),
+                    dict(ROW, i=8, c=['unknown'])]
+            source.write_text(json.dumps(record([page(rows)])))
+            summary, _ = cli('--replay', source)
+            groups = summary['diagnostic_condition_totals']['AAPL']
+            self.assertEqual(groups['before_close'], {'rows': 2, 'volume': '7', 'amount_usd': '750'})
+            self.assertEqual(groups['closing_after_close'], {'rows': 1, 'volume': '7', 'amount_usd': '840'})
+            self.assertEqual(groups['canceled_or_incorrect']['volume'], '7')
+            self.assertEqual(groups['non_volume']['rows'], 1)
+            self.assertEqual(groups['extended_hours']['rows'], 1)
+            self.assertEqual(groups['unknown']['rows'], 1)
+            self.assertFalse(summary['exact_regular_turnover_verified'])
+            self.assertEqual(summary['validation_status'], 'held')
+
     def test_replay_observes_closing_and_extended_conditions_across_early_close(self):
         with tempfile.TemporaryDirectory() as root:
             source = Path(root) / 'record.json'
