@@ -120,7 +120,9 @@ def credentials_for_run(path: Path | None, issue_tokens: bool) -> dict:
         ]
         if any(not all(payload.values()) for _, _, _, payload in requests):
             raise DataError('oauth_credentials_missing')
+        confirmed = []
         for token_name, url, content_type, payload in requests:
+            service = token_name.split('_', 1)[0].lower()
             body = json.dumps(payload) if content_type == 'application/json' else urlencode(payload)
             try:
                 request = Request(url, data=body.encode(), headers={'Content-Type': content_type})
@@ -129,8 +131,14 @@ def credentials_for_run(path: Path | None, issue_tokens: bool) -> dict:
                 if not isinstance(token, str) or not token or '\n' in token or '\r' in token:
                     raise DataError('invalid_oauth_token')
                 credentials[token_name] = token
-            except (HTTPError, URLError, OSError, ValueError, KeyError, TypeError):
-                raise DataError('oauth_failed_no_automatic_retry') from None
+                confirmed.append(service)
+            except (HTTPError, URLError, OSError, ValueError, KeyError, TypeError) as error:
+                if isinstance(error, HTTPError):
+                    reason = f'http_{error.code}'
+                    error.close()
+                else:
+                    reason = 'transport_error' if isinstance(error, (URLError, OSError)) else 'invalid_response'
+                raise DataError(f'oauth_failed:{service}:{reason}:confirmed_before_failure={",".join(confirmed) or "none"}:no_automatic_retry') from None
     return credentials
 
 

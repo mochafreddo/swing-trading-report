@@ -10,7 +10,7 @@ from pathlib import Path
 from io import BytesIO, StringIO
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from functools import partial
 
 from single_run import run, replay
@@ -470,6 +470,46 @@ class SingleRunTests(unittest.TestCase):
                 report = (out / 'report.md').read_text()
                 for forbidden in ['synthetic-token-private', 'synthetic-private', 'synthetic-client', 'synthetic-key']:
                     self.assertNotIn(forbidden, record + report + stdout.getvalue())
+
+    def test_cli_token_failure_identifies_service_without_secrets_or_retry(self):
+        import single_run as single
+        import universe_run as universe
+        for cli in (single.main, universe.main):
+            for failed_service, reason in (('toss', 'http_401'), ('kis', 'http_403'),
+                                           ('kis', 'transport_error'), ('kis', 'invalid_response')):
+                with self.subTest(cli=cli.__module__, service=failed_service, reason=reason), tempfile.TemporaryDirectory() as tmp:
+                    requests = []
+                    class Http:
+                        def open(self, request, timeout):
+                            requests.append(request.full_url)
+                            service = 'toss' if 'tossinvest.com' in request.full_url else 'kis'
+                            if service == failed_service:
+                                if reason.startswith('http_'):
+                                    raise HTTPError(request.full_url, int(reason[5:]), 'synthetic-private', {}, BytesIO(b'synthetic-private'))
+                                if reason == 'transport_error':
+                                    raise URLError('synthetic-private')
+                                return BytesIO(b'{"access_token":null,"secret":"synthetic-private"}')
+                            return BytesIO(b'{"access_token":"synthetic-token-private"}')
+                    secret_file = Path(tmp) / 'credentials.env'
+                    secret_file.write_text('TOSS_CLIENT_ID=synthetic-client\nTOSS_CLIENT_SECRET=synthetic-private\n'
+                                           'KIS_APP_KEY=synthetic-key\nKIS_APP_SECRET=synthetic-private\n')
+                    secret_file.chmod(0o600)
+                    out = Path(tmp) / 'output'
+                    args = ['run.py', 'run', '--output', str(out), '--credentials-file', str(secret_file), '--issue-tokens']
+                    stdout = StringIO()
+                    with patch('sys.argv', args), patch('single_run.build_opener', return_value=Http()), redirect_stdout(stdout):
+                        self.assertEqual(cli(), 1)
+                    message = stdout.getvalue()
+                    self.assertIn('oauth_failed:' + failed_service + ':' + reason, message)
+                    self.assertIn('confirmed_before_failure=' + ('none' if failed_service == 'toss' else 'toss'), message)
+                    self.assertIn('no_automatic_retry', message)
+                    self.assertEqual(len(requests), 1 if failed_service == 'toss' else 2)
+                    self.assertTrue(all('/oauth2/token' in url for url in requests))
+                    self.assertFalse(out.exists())
+                    self.assertEqual(secret_file.stat().st_mode & 0o777, 0o600)
+                    self.assertNotIn('synthetic-token-private', secret_file.read_text())
+                    for forbidden in ('synthetic-private', 'synthetic-token-private', 'synthetic-client', 'synthetic-key'):
+                        self.assertNotIn(forbidden, message)
 
     def test_turnover_inclusive_boundary(self):
         for delta, expected in [(0, 'selected'), (-1, 'held')]:
