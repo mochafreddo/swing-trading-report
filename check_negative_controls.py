@@ -39,7 +39,6 @@ CONTROLS = [
 ]
 
 UNIVERSE_CONTROLS = [
-    ('known_earnings_hold', 'and before_open and confirmed_earnings:', 'and before_open:', 'test_known_earnings_hold_avoids_redundant_price_collection'),
     ('malformed_listing', "or not isinstance(row['securityType'], str)", '', 'test_malformed_listing_preserves_verified_partition_and_record'),
     ('list_omission', "not lists[''] or filtered != partitioned", 'False', 'test_missing_list_entries_never_claim_complete_coverage'),
     ('partial_results', "candidates[:3]", "[] if counts['held'] else candidates[:3]", 'test_partial_hold_keeps_verified_candidate_and_replays'),
@@ -58,6 +57,20 @@ def main() -> int:
     results = []
     cases = [('single_run.py', 'test_single_run.SingleRunTests', control) for control in CONTROLS]
     cases += [('universe_run.py', 'test_universe_run.UniverseRunTests', control) for control in UNIVERSE_CONTROLS]
+    cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('verified_exclusion', "        if excluded:\n", "        if excluded and not held:\n",
+         'test_verified_exclusion_skips_earnings_and_turnover_and_replays'),
+        ('earnings_source_skip', "        inputs['skipped']['earnings'] = 'source_not_configured'", '        pass',
+         'test_unknown_earnings_after_price_validation_skips_turnover'),
+        ('unverified_price_exclusion', "raise DataError('daily_price_reference_mismatch')", 'pass',
+         'test_unverified_prices_or_identity_cannot_prove_small_cap_exclusion'),
+    ]]
+    cases += [('single_run.py', 'test_single_run.SingleRunTests', control) for control in [
+        ('price_exclusion_collection', "    if result['status'] == 'excluded':\n        inputs['skipped'] =", "    if False:\n        inputs['skipped'] =",
+         'test_verified_price_failure_skips_remaining_sources'),
+        ('earnings_exclusion_collection', "    if result['status'] == 'excluded':\n        inputs['skipped']['turnover']",
+         "    if False:\n        inputs['skipped']['turnover']", 'test_confirmed_near_earnings_skip_turnover'),
+    ]]
     cases.append(('single_run.py', 'test_universe_run.UniverseRunTests',
                   ('universe_list_rate', 'time.sleep(1.05)', 'time.sleep(0.35)',
                    'test_stock_all_requests_obey_separate_one_request_per_second_limit')))

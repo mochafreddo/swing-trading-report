@@ -108,6 +108,25 @@ class PublicResponses:
 
 
 class SingleRunTests(unittest.TestCase):
+    def test_verified_price_failure_skips_remaining_sources(self):
+        source = PublicResponses()
+        source.stock['sharesOutstanding'] = '99999999'
+        source.earnings_note = 'Expected earnings date'
+        record = self.run_case(source)
+        self.assertEqual(record['result']['status'], 'excluded')
+        self.assertIn('market_cap_below_minimum', record['result']['reasons'])
+        self.assertEqual(record['inputs']['skipped'], {'earnings': 'verified_exclusion', 'turnover': 'verified_exclusion'})
+        self.assertFalse(any('micron.com' in r['url'] or 'inquire-time-itemchartprice' in r['url']
+                             for r in record['responses']))
+
+    def test_confirmed_near_earnings_skip_turnover(self):
+        source = PublicResponses()
+        source.earnings_day = 'September 10, 2026'
+        record = self.run_case(source)
+        self.assertEqual(record['result']['reasons'], ['earnings_within_exclusion_window'])
+        self.assertEqual(record['inputs']['skipped'], {'turnover': 'verified_exclusion'})
+        self.assertFalse(any('inquire-time-itemchartprice' in r['url'] for r in record['responses']))
+
     def test_verified_public_sources_can_evaluate_without_synthetic_bypass(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'run'

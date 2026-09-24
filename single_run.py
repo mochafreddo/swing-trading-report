@@ -27,7 +27,7 @@ YAHOO = 'https://query1.finance.yahoo.com'
 NEWS = 'https://www.micron.com/about/press/news'
 NY = ZoneInfo('America/New_York')
 RULES = {
-    'version': 2, 'symbol': 'MU', 'history_sessions': 50,
+    'version': 3, 'symbol': 'MU', 'history_sessions': 50,
     'breakout_sessions': 20, 'volume_multiple': '1.5',
     'market_cap_min_usd': '10000000000', 'turnover_min_usd': '50000000',
     'atr_period': 14, 'earnings_sessions': 5,
@@ -399,9 +399,34 @@ def collect(read: Callable[[str], str], report_day: date, as_of: datetime) -> di
     stage('bars_0', bars)
     if 'calendar' in inputs:
         stage('price_reference', lambda: price_reference(read, inputs['calendar'], report_day, as_of))
-        stage('turnover', lambda: regular_turnover(read, inputs['calendar']))
-    stage('earnings', lambda: earnings(read, report_day, as_of))
+    collect_remaining(inputs, stage, read, report_day, as_of,
+                      {'listing_url': NEWS, 'article_prefix': 'https://investors.micron.com/news/press-release/',
+                       'company': 'Micron Technology'})
     return inputs
+
+
+def collect_remaining(inputs, stage, read, report_day, as_of, source, symbol='MU', market='NASDAQ'):
+    """Collect eligibility evidence only while a candidate remains possible."""
+    inputs['skipped'] = {}
+    result = evaluate(inputs)
+    if result['status'] == 'excluded':
+        inputs['skipped'] = {'earnings': 'verified_exclusion', 'turnover': 'verified_exclusion'}
+        return
+    if not result['metrics']:
+        inputs['skipped'] = {'earnings': 'unverified_price_inputs', 'turnover': 'unverified_price_inputs'}
+        return
+    if source is None:
+        inputs['issues'].append('earnings_source_not_configured')
+        inputs['skipped']['earnings'] = 'source_not_configured'
+    else:
+        stage('earnings', lambda: earnings(read, report_day, as_of, source))
+    result = evaluate(inputs)
+    if result['status'] == 'excluded':
+        inputs['skipped']['turnover'] = 'verified_exclusion'
+    elif inputs['earnings'].get('status') != 'confirmed' or inputs['issues']:
+        inputs['skipped']['turnover'] = 'unverified_earnings'
+    else:
+        stage('turnover', lambda: regular_turnover(read, inputs['calendar'], symbol, market))
 
 
 def evaluate(inputs: dict) -> dict:
@@ -442,11 +467,10 @@ def evaluate(inputs: dict) -> dict:
                 values['tvol'] = number(reference['quote']['volume'][i])
                 if values['tvol'] != values['tvol'].to_integral_value():
                     raise DataError('invalid_daily_volume_units')
-        if held or 'turnover' not in inputs:
+        if any(not (reason.startswith(('earnings:', 'turnover:'))
+                    or reason in ('next_confirmed_earnings_unavailable', 'earnings_source_not_configured'))
+               for reason in held):
             return result
-        turnover = sum(Decimal(value) for value in inputs['turnover']['daily_lower_bounds'].values()) / 20
-        if turnover < Decimal(RULES['turnover_min_usd']):
-            raise DataError('turnover_lower_bound_insufficient')
         last = series[-1]
         base = max(row['high'] for row in series[-21:-1])
         avg_volume = sum(row['tvol'] for row in series[-21:-1]) / 20
@@ -457,7 +481,7 @@ def evaluate(inputs: dict) -> dict:
         for value in tr[14:]:
             atr = (atr * 13 + value) / 14
         cap = shares * last['clos']
-        metrics = {'market_cap_usd': cap, 'average_turnover_lower_bound_usd': turnover,
+        metrics = {'market_cap_usd': cap,
                    'breakout': base, 'volume_ratio': last['tvol'] / avg_volume, 'sma50': sma, 'atr14': atr}
         result['metrics'] = {key: str(value) for key, value in metrics.items()}
         checks = {
@@ -468,13 +492,24 @@ def evaluate(inputs: dict) -> dict:
             'volume_below_multiple': last['tvol'] >= avg_volume * Decimal(RULES['volume_multiple']),
             'close_not_above_sma50': last['clos'] > sma,
         }
-        event = date.fromisoformat(inputs['earnings']['date'])
-        if event < date.fromisoformat(inputs['calendar']['future'][0]):
-            raise DataError('earnings_date_is_past')
-        checks['earnings_within_exclusion_window'] = event > date.fromisoformat(inputs['calendar']['future'][-1])
         excluded = [reason for reason, passed in checks.items() if not passed]
         if excluded:
             return result | {'status': 'excluded', 'reasons': excluded}
+        if inputs['earnings'].get('status') == 'confirmed':
+            event = date.fromisoformat(inputs['earnings']['date'])
+            if event < date.fromisoformat(inputs['calendar']['future'][0]):
+                raise DataError('earnings_date_is_past')
+            if not (event > date.fromisoformat(inputs['calendar']['future'][-1])):
+                return result | {'status': 'excluded', 'reasons': ['earnings_within_exclusion_window']}
+        if held:
+            return result
+        if 'turnover' not in inputs:
+            held.append('regular_turnover_unavailable')
+            return result
+        turnover = sum(Decimal(value) for value in inputs['turnover']['daily_lower_bounds'].values()) / 20
+        if turnover < Decimal(RULES['turnover_min_usd']):
+            raise DataError('turnover_lower_bound_insufficient')
+        result['metrics']['average_turnover_lower_bound_usd'] = str(turnover)
         entry = last['clos']
         stop = base - atr
         risk = entry - stop
@@ -510,6 +545,8 @@ def render(record: dict) -> str:
         lines += [f"일봉 구간: {cal['past'][0]}~{cal['past'][-1]} (50거래일). 실적 제외 구간: {cal['future'][0]}~{cal['future'][-1]}.", '']
     event = inputs['earnings']
     lines += [f"다음 확정 실적 발표일: {event.get('date', '확인 불가')} ({event.get('status')}).", '']
+    if inputs.get('skipped'):
+        lines += ['조회 생략 항목과 사유: ' + ', '.join(f'{key}: {reason}' for key, reason in inputs['skipped'].items()) + '.', '']
     if event.get('source'):
         checked = next((item['checked_at'] for item in record['responses'] if item['url'] == event['source']), '확인 불가')
         lines += [f"[실적 일정 출처]({event['source']}). 확인 시각: {checked}. 공지 발행 시각: {event.get('published_at', '확인 불가')}.", '']

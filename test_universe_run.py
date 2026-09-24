@@ -57,6 +57,51 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_verified_exclusion_skips_earnings_and_turnover_and_replays(self):
+        source = UniverseResponses()
+        source.sources['IBM'].stock['sharesOutstanding'] = '99999999'
+        source.sources['MU'].bars[-1]['tvol'] = '1400000'
+        record, report = self.run_case(source)
+        self.assertEqual(record['result']['counts'], {'total': 2, 'selected': 0, 'excluded': 2, 'held': 0})
+        for symbol, reason in [('IBM', 'market_cap_below_minimum'), ('MU', 'volume_below_multiple')]:
+            row = record['inputs']['stocks'][symbol]
+            self.assertIn(reason, row['result']['reasons'])
+            self.assertEqual(row['inputs']['skipped'], {'earnings': 'verified_exclusion', 'turnover': 'verified_exclusion'})
+            self.assertIsNone(row['result']['plan'])
+            self.assertNotIn('turnover', row['inputs'])
+        urls = [item['url'] for item in record['responses']]
+        self.assertFalse(any('inquire-time-itemchartprice' in url or 'micron.com' in url for url in urls))
+        self.assertIn('실적 일정 조회 생략 2종목', report)
+        self.assertIn('거래대금 조회 생략 2종목', report)
+
+    def test_unverified_prices_or_identity_cannot_prove_small_cap_exclusion(self):
+        for mode in ('price', 'split', 'identity', 'late'):
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                source.sources['MU'].stock['sharesOutstanding'] = '1'
+                if mode == 'price':
+                    def mismatch(data):
+                        data['indicators']['quote'][0]['high'][0] = '120'
+                        return data
+                    source.sources['MU'].reference_edit = mismatch
+                if mode == 'split':
+                    source.sources['MU'].splits = {'event': {'date': int(NOW.timestamp()), 'numerator': 2, 'denominator': 1}}
+                current = [NOW]
+                def fetch(url):
+                    body = source(url)
+                    if '/dailyprice?' in url and 'SYMB=MU' in url:
+                        if mode == 'identity':
+                            return body.replace('DNASMU', 'DNASOTHER')
+                        if mode == 'late':
+                            current[0] = NOW + timedelta(hours=2)
+                    return body
+                record, _ = self.run_case(fetch, clock=lambda: current[0])
+                row = record['inputs']['stocks']['MU']
+                self.assertEqual(row['result']['status'], 'held')
+                self.assertNotIn('market_cap_below_minimum', row['result']['reasons'])
+                self.assertIsNone(row['result']['plan'])
+
+
     def run_case(self, source=None, **kwargs):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / 'run'
@@ -76,7 +121,7 @@ class UniverseRunTests(unittest.TestCase):
         self.assertIn('earnings_source_not_configured', record['inputs']['stocks']['IBM']['result']['reasons'])
         self.assertIn('보류 1', report)
 
-    def test_known_earnings_hold_avoids_redundant_price_collection(self):
+    def test_unknown_earnings_after_price_validation_skips_turnover(self):
         source = UniverseResponses()
         requested = []
         def fetch(url):
@@ -85,10 +130,12 @@ class UniverseRunTests(unittest.TestCase):
         record, report = self.run_case(fetch)
         self.assertEqual(record['result']['candidates'], ['MU'])
         self.assertEqual(record['result']['counts']['total'], 2)
-        self.assertEqual(record['result']['price_collection_skipped'], 1)
-        self.assertIn('시세 조회 생략 1종목', report)
-        self.assertFalse(any('SYMB=IBM' in url or '/chart/IBM?' in url for url in requested))
-        self.assertIn('price_collection_skipped_unconfirmed_earnings', record['inputs']['stocks']['IBM']['result']['reasons'])
+        self.assertEqual(record['result']['collection_skipped']['turnover'], 1)
+        self.assertIn('거래대금 조회 생략 1종목', report)
+        self.assertTrue(any('/chart/IBM?' in url for url in requested))
+        self.assertFalse(any('inquire-time-itemchartprice' in url and 'SYMB=IBM' in url for url in requested))
+        self.assertEqual(record['inputs']['stocks']['IBM']['inputs']['skipped'],
+                         {'earnings': 'source_not_configured', 'turnover': 'unverified_earnings'})
 
     def test_top_three_use_automatically_collected_company_announcements(self):
         source = UniverseResponses()
@@ -177,6 +224,7 @@ class UniverseRunTests(unittest.TestCase):
         self.assertEqual(record['result']['status'], 'excluded')
         self.assertEqual(record['result']['counts']['excluded'], 1)
         self.assertIn('검증된 범위의 조건 충족 후보 없음', report)
+        source.sources['MU'].bars[-1]['tvol'] = '1500000'
         source.sources['MU'].earnings_note = 'The earnings announcement is tentative.'
         record, report = self.run_case(source)
         self.assertEqual(record['result']['status'], 'held')
