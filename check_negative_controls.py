@@ -39,6 +39,8 @@ CONTROLS = [
 ]
 
 UNIVERSE_CONTROLS = [
+    ('listing_conflict_candidate', "elif symbol in universe['markets'][item['market']]['conflicts']:", 'elif False:',
+     'test_listing_conflicts_are_preserved_per_symbol_for_reconciliation'),
     ('malformed_listing', "or not isinstance(row['securityType'], str)", '', 'test_malformed_listing_preserves_verified_partition_and_record'),
     ('list_omission', "not lists[''] or filtered != partitioned", 'False', 'test_missing_list_entries_never_claim_complete_coverage'),
     ('partial_results', "candidates[:3]", "[] if counts['held'] else candidates[:3]", 'test_partial_hold_keeps_verified_candidate_and_replays'),
@@ -58,6 +60,12 @@ def main() -> int:
     cases = [('single_run.py', 'test_single_run.SingleRunTests', control) for control in CONTROLS]
     cases += [('universe_run.py', 'test_universe_run.UniverseRunTests', control) for control in UNIVERSE_CONTROLS]
     cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('ir_head_pagination', "if tag == 'link' and 'next' in attributes.get('rel', '').split():", 'if False:',
+         'test_head_next_link_cannot_hide_a_later_earnings_postponement'),
+        ('ir_listing_as_article', '    links.difference_update(visited)', '    pass',
+         'test_ir_navigation_root_and_next_page_are_not_articles'),
+        ('ir_root_as_article', " and target != source['article_prefix']", '',
+         'test_ir_navigation_root_and_next_page_are_not_articles'),
         ('verified_exclusion', "        if excluded:\n", "        if excluded and not held:\n",
          'test_verified_exclusion_skips_earnings_and_turnover_and_replays'),
         ('earnings_source_skip', "        inputs['skipped']['earnings'] = 'source_not_configured'", '        pass',

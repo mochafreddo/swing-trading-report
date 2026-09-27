@@ -27,7 +27,7 @@ YAHOO = 'https://query1.finance.yahoo.com'
 NEWS = 'https://www.micron.com/about/press/news'
 NY = ZoneInfo('America/New_York')
 RULES = {
-    'version': 4, 'symbol': 'MU', 'history_sessions': 50,
+    'version': 5, 'symbol': 'MU', 'history_sessions': 50,
     'breakout_sessions': 20, 'volume_multiple': '1.5',
     'market_cap_min_usd': '10000000000', 'turnover_min_usd': '50000000',
     'atr_period': 14, 'earnings_sessions': 5,
@@ -177,6 +177,8 @@ class NewsPage(HTMLParser):
         attributes = dict(attrs)
         if tag == 'a':
             self.anchor = [attributes.get('href', ''), [], attributes.get('rel', '')]
+        if tag == 'link' and 'next' in attributes.get('rel', '').split():
+            self.next_links.append(attributes.get('href', ''))
         if tag == 'meta':
             self.metadata[attributes.get('property', attributes.get('name', ''))] = attributes.get('content', '')
         if tag == 'h1':
@@ -272,13 +274,15 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
             break
         for href in listing.links:
             target = urljoin(url, href)
-            if target.startswith(source['article_prefix']) and not urlparse(target).fragment:
+            if (target.startswith(source['article_prefix']) and target != source['article_prefix']
+                    and not urlparse(target).fragment):
                 links.add(target)
         for href in dict.fromkeys(listing.next_links):
             target = urljoin(url, href)
             if urlparse(target).netloc != urlparse(source['listing_url']).netloc:
                 return {'status': 'unconfirmed', 'reason': 'earnings_listing_outside_source', 'collection_status': 'incomplete'}
             pending.append(target)
+    links.difference_update(visited)
     if len(links) > 100:
         return {'status': 'unconfirmed', 'reason': 'earnings_article_limit', 'collection_status': 'incomplete'}
     dates = []

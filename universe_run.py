@@ -16,7 +16,7 @@ from urllib.parse import urlencode, urlparse
 
 import single_run as s
 
-RULES = {'version': 3, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
+RULES = {'version': 4, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
          'types': ['STOCK', 'FOREIGN_STOCK'], 'maximum_candidates': 3,
          'order': ['volume_ratio_desc', 'exact_average_turnover_desc', 'symbol_asc'],
          'unverified_turnover_ties': 'held'}
@@ -144,6 +144,8 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
             row = rows.get(symbol)
             if row is None:
                 stock_input['issues'].append('stock_detail_missing')
+            elif symbol in universe['markets'][item['market']]['conflicts']:
+                stock_input['issues'].append('stock_listing_conflict')
             elif (item.get('ambiguous') or row.get('market') != item['market']
                     or row.get('securityType') != item['listing']['securityType']
                     or row.get('isCommonShare') is not True or row.get('status') != 'ACTIVE'

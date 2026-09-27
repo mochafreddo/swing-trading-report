@@ -57,6 +57,46 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_ir_navigation_root_and_next_page_are_not_articles(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        next_url = config['article_prefix'] + '?page=2'
+        def fetch(url):
+            if url == config['listing_url']:
+                return ('<a href="/releases/AAA/">News home</a>'
+                        '<a rel="next" href="/releases/AAA/?page=2">Next</a>')
+            if url == next_url:
+                return '<a href="/releases/AAA/release">Earnings</a>'
+            if url == config['article_prefix']:
+                return '<h1>News</h1>'
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'selected')
+        self.assertEqual(row['inputs']['earnings']['source'], config['article_prefix'] + 'release')
+
+    def test_head_next_link_cannot_hide_a_later_earnings_postponement(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        def fetch(url):
+            if url == config['listing_url']:
+                return ('<link rel="next" href="/AAA?page=2">'
+                        '<a href="/releases/AAA/release">Earnings</a>')
+            if url == 'https://ir.example.com/AAA?page=2':
+                return '<a href="/releases/AAA/change">Updated schedule</a>'
+            if url == config['article_prefix'] + 'change':
+                return '<script type="application/ld+json">' + json.dumps({
+                    '@type': 'NewsArticle', 'headline': 'AAA Corporation Earnings Update',
+                    'datePublished': '2026-09-09T12:00:00Z',
+                    'articleBody': 'The earnings announcement has been postponed.'}) + '</script>'
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'held')
+        self.assertEqual(row['inputs']['earnings']['reason'], 'earnings_schedule_changed')
+
     def test_uncertain_ir_evidence_never_selects_a_candidate(self):
         for mode in ('call_only', 'wrong_company', 'same_day_unknown_time', 'cycle', 'changed_schedule'):
             with self.subTest(mode=mode):
@@ -141,20 +181,23 @@ class UniverseRunTests(unittest.TestCase):
 
     def test_listing_conflicts_are_preserved_per_symbol_for_reconciliation(self):
         source = UniverseResponses()
+        source.add_company('AAA', 3)
         def fetch(url):
             body = source(url)
             query = parse_qs(urlparse(url).query)
             if '/stocks/all?' in url and query.get('market') == ['NASDAQ'] and query.get('securityType') == ['STOCK']:
-                return json.dumps({'result': []})
+                return json.dumps({'result': [row for row in json.loads(body)['result'] if row['symbol'] != 'MU']})
             return body
-        record, report = self.run_case(fetch)
+        record, report = self.run_case(fetch, earnings_sources=source.earnings_sources)
         self.assertFalse(record['result']['coverage_complete'])
         conflict = record['inputs']['universe']['markets']['NASDAQ']['conflicts']['MU']
         self.assertEqual(conflict['reason'], 'general_only')
         self.assertEqual(conflict['general']['symbol'], 'MU')
         self.assertEqual(conflict['typed'], [])
         self.assertIn('MU', report)
-        self.assertEqual(record['result']['candidates'], ['MU'])
+        self.assertEqual(record['inputs']['stocks']['MU']['result']['status'], 'held')
+        self.assertIn('stock_listing_conflict', record['inputs']['stocks']['MU']['result']['reasons'])
+        self.assertEqual(record['result']['candidates'], ['AAA'])
 
     def test_dynamic_ir_feed_preserves_publication_precision_and_official_evidence(self):
         source = UniverseResponses()
@@ -443,7 +486,8 @@ class UniverseRunTests(unittest.TestCase):
             return body
         record, report = self.run_case(fetch)
         self.assertFalse(record['result']['coverage_complete'])
-        self.assertEqual(record['result']['candidates'], ['MU'])
+        self.assertEqual(record['result']['candidates'], [])
+        self.assertEqual(record['inputs']['stocks']['MU']['result']['status'], 'held')
         self.assertEqual(record['result']['counts']['total'], 2)
         self.assertIn('전체 목록 범위: 미확보', report)
 
@@ -462,7 +506,9 @@ class UniverseRunTests(unittest.TestCase):
         except KeyError:
             self.fail('Malformed listing must preserve a report and replayable record.')
         self.assertFalse(record['result']['coverage_complete'])
-        self.assertEqual(record['result']['candidates'], ['MU'])
+        self.assertEqual(record['result']['candidates'], [])
+        self.assertIn('MU', record['inputs']['stocks'])
+        self.assertEqual(record['inputs']['stocks']['MU']['result']['status'], 'held')
 
     def test_detail_omission_holds_that_symbol_without_erasing_other_results(self):
         source = UniverseResponses()
