@@ -27,7 +27,7 @@ YAHOO = 'https://query1.finance.yahoo.com'
 NEWS = 'https://www.micron.com/about/press/news'
 NY = ZoneInfo('America/New_York')
 RULES = {
-    'version': 5, 'symbol': 'MU', 'history_sessions': 50,
+    'version': 6, 'symbol': 'MU', 'history_sessions': 50,
     'breakout_sessions': 20, 'volume_multiple': '1.5',
     'market_cap_min_usd': '10000000000', 'turnover_min_usd': '50000000',
     'atr_period': 14, 'earnings_sessions': 5,
@@ -248,12 +248,21 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
         if 'q4Api' in body:
             seen_articles = set()
             # TODO: #233 - Full archives can take hundreds of calls; replace with a verified date-bounded feed contract.
-            for page_number in range(200):
+            page_number, page_size = 0, 5
+            while page_number * page_size < 1000:
                 feed = urljoin(url, '/feed/PressRelease.svc/GetPressReleaseList?') + urlencode({
                     'LanguageId': 1, 'bodyType': 2, 'pressReleaseDateFilter': 3, 'categoryId': '',
-                    'year': -1, 'pageNumber': page_number, 'pageSize': 5, 'tagList': '',
+                    'year': -1, 'pageNumber': page_number, 'pageSize': page_size, 'tagList': '',
                     'includeTags': 'true', 'excludeSelection': 1})
-                rows = json.loads(read(feed))['GetPressReleaseListResult']
+                try:
+                    feed_body = read(feed)
+                except DataError as error:
+                    if str(error) != 'response_too_large' or page_size == 1:
+                        raise
+                    page_number *= page_size
+                    page_size = 1
+                    continue
+                rows = json.loads(feed_body)['GetPressReleaseListResult']
                 if not isinstance(rows, list):
                     raise DataError('earnings_feed_invalid')
                 if not rows:
@@ -269,6 +278,7 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
                     text_page.feed(row['Body'])
                     articles.append((target, feed, {'headline': row['Headline'], 'datePublished': row['PressReleaseDate'],
                                                    'articleBody': ''.join(text_page.text)}))
+                page_number += 1
             else:
                 return {'status': 'unconfirmed', 'reason': 'earnings_listing_incomplete', 'collection_status': 'incomplete'}
             break

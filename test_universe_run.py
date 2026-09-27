@@ -57,6 +57,52 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_ir_page_split_does_not_hide_single_item_or_http_failures(self):
+        for failure in ('response_too_large', 'http_403'):
+            with self.subTest(failure=failure):
+                source = UniverseResponses()
+                source.add_company('AAA', 2)
+                config = source.earnings_sources['AAA']
+                def fetch(url):
+                    if url == config['listing_url']:
+                        return '<script src="/q4Api.js"></script>'
+                    if '/feed/PressRelease.svc/' in url:
+                        raise u.s.DataError(failure)
+                    return source(url)
+                record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+                row = record['inputs']['stocks']['AAA']
+                self.assertEqual(row['result']['status'], 'held')
+                self.assertEqual(row['inputs']['earnings']['collection_status'], 'failed')
+                self.assertEqual(row['inputs']['earnings']['reason'], failure)
+                requests = [entry for entry in record['responses'] if '/feed/PressRelease.svc/' in entry['url']]
+                self.assertEqual(len(requests), 2 if failure == 'response_too_large' else 1)
+
+    def test_oversized_ir_page_resumes_at_same_offset_with_full_bodies(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        config = source.earnings_sources['AAA']
+        rows = [{'Headline': 'AAA Corporation Product Update',
+                 'PressReleaseDate': '09/01/2026 12:00:00',
+                 'LinkToDetailPage': '/releases/AAA/' + str(index), 'Body': '<p>Product news</p>'}
+                for index in range(8)]
+        rows[6].update(Headline='AAA Corporation Earnings Schedule',
+                       Body='<p>AAA Corporation will release financial results on September 17, 2026.</p>')
+        def fetch(url):
+            if url == config['listing_url']:
+                return '<script src="/q4Api.js"></script>'
+            if '/feed/PressRelease.svc/' in url:
+                query = parse_qs(urlparse(url).query)
+                page, size = int(query['pageNumber'][0]), int(query['pageSize'][0])
+                if page == 1 and size == 5:
+                    raise u.s.DataError('response_too_large')
+                return json.dumps({'GetPressReleaseListResult': rows[page * size:(page + 1) * size]})
+            return source(url)
+        record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'selected')
+        self.assertEqual(row['inputs']['earnings']['date'], '2026-09-17')
+        self.assertIn('pageNumber=6&pageSize=1', row['inputs']['earnings']['evidence_url'])
+
     def test_ir_navigation_root_and_next_page_are_not_articles(self):
         source = UniverseResponses()
         source.add_company('AAA', 2)

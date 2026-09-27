@@ -60,6 +60,10 @@ def main() -> int:
     cases = [('single_run.py', 'test_single_run.SingleRunTests', control) for control in CONTROLS]
     cases += [('universe_run.py', 'test_universe_run.UniverseRunTests', control) for control in UNIVERSE_CONTROLS]
     cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('ir_split_offset', '                    page_number *= page_size', '                    pass',
+         'test_oversized_ir_page_resumes_at_same_offset_with_full_bodies'),
+        ('ir_split_http_failure', "if str(error) != 'response_too_large' or page_size == 1:", 'if page_size == 1:',
+         'test_ir_page_split_does_not_hide_single_item_or_http_failures'),
         ('ir_head_pagination', "if tag == 'link' and 'next' in attributes.get('rel', '').split():", 'if False:',
          'test_head_next_link_cannot_hide_a_later_earnings_postponement'),
         ('ir_listing_as_article', '    links.difference_update(visited)', '    pass',
