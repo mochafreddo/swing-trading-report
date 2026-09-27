@@ -59,6 +59,84 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_embedded_issuer_calendar_is_collected_without_treating_calls_as_releases(self):
+        from html import escape
+        for mode in ('past', 'past_utc', 'unrelated_invalid_date', 'future_call', 'invalid_date', 'partial', 'empty'):
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                source.add_company('AAA', 2)
+                config = source.earnings_sources['AAA']
+                def fetch(url):
+                    if url == config['listing_url']:
+                        event = {'EventType': 'Earnings', 'EventName': 'AAA Corporation Earnings Conference Call',
+                                 'DateTime': {'UTC': '2026-08-20T21:30:00'}}
+                        if mode == 'future_call':
+                            event['DateTime']['UTC'] = '2026-09-17T21:30:00'
+                        elif mode == 'past_utc':
+                            event['DateTime']['UTC'] += 'Z'
+                        elif mode == 'invalid_date':
+                            event['DateTime']['UTC'] = 'unknown'
+                        data = {'Events': [] if mode == 'empty' else [event]}
+                        if mode == 'unrelated_invalid_date':
+                            data['Events'].append({'EventType': 'Conferences', 'EventName': 'Technology conference',
+                                                   'DateTime': {'UTC': '2024-08-06:00:00:00'}})
+                        section = 'recent' if mode == 'partial' else 'all'
+                        return ('<cascade-events-render-component eventssection="' + section + '" eventsdata="'
+                                + escape(json.dumps(data), quote=True) + '"></cascade-events-render-component>'
+                                + '<nav><a href="' + config['article_prefix'] + 'leadership">Leadership</a></nav>')
+                    if url.endswith('/leadership'):
+                        raise u.s.DataError('http_301')
+                    return source(url)
+                record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+                row = record['inputs']['stocks']['AAA']
+                self.assertEqual(row['result']['status'], 'held')
+                self.assertIsNone(row['result']['plan'])
+                event = row['inputs']['earnings']
+                if mode in ('past', 'past_utc', 'unrelated_invalid_date'):
+                    self.assertEqual(event['reason'], 'next_confirmed_earnings_not_found')
+                    self.assertEqual(event['collection_status'], 'complete')
+                    self.assertEqual(event['observed_events'], 2 if mode == 'unrelated_invalid_date' else 1)
+                elif mode == 'future_call':
+                    self.assertEqual(event['reason'], 'earnings_event_requires_release_announcement')
+                    self.assertEqual(event['collection_status'], 'unsupported')
+                else:
+                    self.assertNotEqual(event.get('collection_status'), 'complete')
+                self.assertFalse(any(item['url'].endswith('/leadership') for item in record['responses']))
+
+    def test_ir_article_name_and_local_publication_time_preserve_confirmed_release(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        article_url = source.earnings_sources['AAA']['article_prefix'] + 'release'
+        for mode in ('name', 'both', 'passive', 'same_day', 'postponed', 'conflicting'):
+            with self.subTest(mode=mode):
+                def fetch(url):
+                    if url == article_url:
+                        body = 'AAA Corporation will publish quarterly financial results on Thursday, September 17, 2026.'
+                        if mode == 'passive':
+                            body = 'Quarterly financial results will be published on Thursday, September 17, 2026.'
+                        if mode == 'postponed':
+                            body += ' The earnings announcement has been postponed.'
+                        article = {'@type': 'Article', 'name': 'AAA Corporation Announces Earnings Schedule',
+                                   'datePublished': '2026-09-10T08:00:00' if mode == 'same_day' else '2026-09-01T13:08:22',
+                                   'articleBody': body}
+                        articles = [article]
+                        if mode in ('both', 'conflicting'):
+                            articles.insert(0, {'@type': 'Article', 'headline': article['name'],
+                                                'datePublished': '2026-09-01T20:08:22Z',
+                                                'articleBody': body.replace('17', '18') if mode == 'conflicting' else body})
+                        return ''.join('<script type="application/ld+json">' + json.dumps(item) + '</script>'
+                                       for item in articles)
+                    return source(url)
+                record, report = self.run_case(fetch, earnings_sources=source.earnings_sources)
+                row = record['inputs']['stocks']['AAA']
+                if mode in ('same_day', 'postponed', 'conflicting'):
+                    self.assertEqual(row['result']['status'], 'held')
+                    self.assertIsNone(row['result']['plan'])
+                else:
+                    self.assertEqual(row['result']['status'], 'selected')
+                    self.assertEqual(row['inputs']['earnings']['date'], '2026-09-17')
+                    self.assertIn(article_url, report)
+
     def test_production_ir_probe_preserves_page_split_errors_and_replays(self):
         import probe_earnings_sources as probe
         source = {'company': 'AAA Corporation', 'listing_url': 'https://ir.example.com/AAA',

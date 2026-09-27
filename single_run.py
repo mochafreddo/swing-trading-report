@@ -27,7 +27,7 @@ YAHOO = 'https://query1.finance.yahoo.com'
 NEWS = 'https://www.micron.com/about/press/news'
 NY = ZoneInfo('America/New_York')
 RULES = {
-    'version': 6, 'symbol': 'MU', 'history_sessions': 50,
+    'version': 7, 'symbol': 'MU', 'history_sessions': 50,
     'breakout_sessions': 20, 'volume_multiple': '1.5',
     'market_cap_min_usd': '10000000000', 'turnover_min_usd': '50000000',
     'atr_period': 14, 'earnings_sessions': 5,
@@ -172,9 +172,12 @@ class NewsPage(HTMLParser):
         self.heading = []
         self.in_heading = False
         self.skip_text = 0
+        self.event_calendars = []
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
+        if tag == 'cascade-events-render-component':
+            self.event_calendars.append((attributes.get('eventssection'), json.loads(attributes['eventsdata'])))
         if tag == 'a':
             self.anchor = [attributes.get('href', ''), [], attributes.get('rel', '')]
         if tag == 'link' and 'next' in attributes.get('rel', '').split():
@@ -245,6 +248,29 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
         listing = NewsPage()
         body = read(url)
         listing.feed(body)
+        if listing.event_calendars:
+            if len(listing.event_calendars) != 1 or listing.next_links or pending:
+                raise DataError('earnings_event_calendar_incomplete')
+            section, payload = listing.event_calendars[0]
+            events = payload['Events']
+            if section != 'all' or not isinstance(events, list) or not events:
+                raise DataError('earnings_event_calendar_incomplete')
+            future_earnings = False
+            for event in events:
+                text = event['EventType'] + ' ' + event['EventName']
+                if not re.search(r'\b(earnings|results)\b', text, re.I):
+                    continue
+                # This issuer component labels the otherwise naive timestamp explicitly as UTC.
+                raw_date = event['DateTime']['UTC']
+                if not isinstance(raw_date, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?', raw_date):
+                    raise DataError('earnings_event_calendar_invalid_date')
+                event_day = timestamp(raw_date.removesuffix('Z') + 'Z').astimezone(NY).date()
+                future_earnings |= event_day >= report_day
+            # Calendar call dates do not establish the financial results release date.
+            return {'status': 'unconfirmed', 'source': url, 'observed_events': len(events),
+                    'collection_scope': 'issuer_event_calendar',
+                    'reason': 'earnings_event_requires_release_announcement' if future_earnings else 'next_confirmed_earnings_not_found',
+                    'collection_status': 'unsupported' if future_earnings else 'complete'}
         if 'q4Api' in body:
             seen_articles = set()
             # TODO: #233 - Full archives can take hundreds of calls; replace with a verified date-bounded feed contract.
@@ -315,7 +341,7 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
         return {'status': 'unconfirmed', 'source': source['listing_url'], 'reason': 'no_supported_listing_items',
                 'collection_status': 'unsupported'}
     for url, evidence_url, article in articles:
-        headline = article['headline']
+        headline = article.get('headline') or article['name']
         text = headline + ' ' + article.get('description', '') + ' ' + article.get('articleBody', '')
         if not re.search(r'\b(earnings|quarterly|fiscal|results)\b', text, re.I):
             continue
@@ -327,7 +353,7 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
             try:
                 published_day = datetime.strptime(raw_published, '%m/%d/%Y %H:%M:%S').date()
             except ValueError:
-                published_day = date.fromisoformat(raw_published)
+                published_day = datetime.fromisoformat(raw_published).date()
             if published_day >= as_of.astimezone(NY).date():
                 return {'status': 'unconfirmed', 'reason': 'publication_time_unverified', 'collection_status': 'complete'}
             published = datetime.combine(published_day, datetime.min.time(), NY)
@@ -352,7 +378,7 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
             release_clause = re.sub(r'(\d)(?:st|nd|rd|th)\b', r'\1', release_clause)
             date_pattern = r'(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+)?([A-Z][a-z]+ \d{1,2}, \d{4})\b'
             release_clause = re.sub(r'\b(?:ending|ended|ends)\s+on\s+' + date_pattern, '', release_clause)
-            if re.search(r'\b(?:will|to)\s+(?:release|report|announce)\b.{0,120}\b(?:results|earnings)\b|\b(?:results|earnings)\b.{0,80}\bwill be (?:released|reported|announced)\b', release_clause, re.I):
+            if re.search(r'\b(?:will|to)\s+(?:release|report|announce|publish)\b.{0,120}\b(?:results|earnings)\b|\b(?:results|earnings)\b.{0,80}\bwill be (?:released|reported|announced|published)\b', release_clause, re.I):
                 event_dates.extend(re.findall(r'\bon\s+' + date_pattern, release_clause))
         parsed_dates = {datetime.strptime(value, '%B %d, %Y').date() for value in event_dates}
         if len(parsed_dates) > 1:
