@@ -1,6 +1,8 @@
 """Exercise public-response collection through saved reports and offline replay."""
 
 import json
+from contextlib import redirect_stdout
+from io import StringIO
 import tempfile
 import unittest
 from datetime import timedelta
@@ -57,6 +59,145 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_production_ir_probe_preserves_page_split_errors_and_replays(self):
+        import probe_earnings_sources as probe
+        source = {'company': 'AAA Corporation', 'listing_url': 'https://ir.example.com/AAA',
+                  'article_prefix': 'https://ir.example.com/releases/AAA/'}
+        for failure in ('split', 'single_item_too_large', 'http_403'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                def fetch(url, **kwargs):
+                    if url == source['listing_url']:
+                        return '<script src="/q4Api.js"></script>'
+                    query = parse_qs(urlparse(url).query)
+                    if failure == 'http_403':
+                        raise u.s.DataError('http_403')
+                    if query['pageSize'] == ['5'] or failure == 'single_item_too_large':
+                        raise u.s.DataError('response_too_large')
+                    rows = [] if query['pageNumber'] != ['0'] else [{
+                        'Headline': 'AAA Corporation Earnings Schedule', 'PressReleaseDate': '09/01/2026 12:00:00',
+                        'LinkToDetailPage': '/releases/AAA/release',
+                        'Body': '<p>AAA Corporation will release financial results on September 17, 2026.</p>'}]
+                    return json.dumps({'GetPressReleaseListResult': rows})
+                output = Path(tmp) / 'probe'
+                with patch.object(probe, 'SOURCES', [('AAA', 'AAA Corporation', source['listing_url'], ('ir.example.com',))]), \
+                        patch.dict(u.DEFAULT_EARNINGS_SOURCES, {'AAA': source}), \
+                        patch.object(probe, 'datetime', wraps=probe.datetime) as clock, \
+                        patch.object(probe.time, 'sleep'), redirect_stdout(StringIO()):
+                    clock.now.return_value = NOW
+                    with patch('sys.argv', ['probe', '--production', '--output', str(output)]), \
+                            patch.object(u.s, 'fetch_public', side_effect=fetch):
+                        probe.main()
+                    record = json.loads((output / 'record.json').read_text())
+                    event = record['results'][0]['event']
+                    if failure == 'split':
+                        self.assertEqual(event['status'], 'confirmed')
+                        self.assertEqual(event['date'], '2026-09-17')
+                    else:
+                        self.assertEqual(event['collection_status'], 'failed')
+                    self.assertEqual(len(record['requests']), {'split': 4, 'single_item_too_large': 3, 'http_403': 2}[failure])
+                    with patch('sys.argv', ['probe', '--replay', str(output)]), \
+                            patch.object(u.s, 'fetch_public', side_effect=AssertionError('network during replay')):
+                        probe.main()
+
+    def test_reviewed_non_common_security_resolves_only_its_listing_conflict(self):
+        source = UniverseResponses()
+        source.add_company('AAA', 2)
+        source.sources['AAA'].stock.update(isinCode='US0000000001', englishName='AAA WARRANTS')
+        evidence_url = 'https://ir.example.com/securities/AAA'
+        evidence = {'market': 'NASDAQ', 'isin': 'US0000000001', 'english_name': 'AAA WARRANTS',
+                    'reviewed_on': '2026-09-01', 'classification': 'warrant', 'source': evidence_url,
+                    'required_text': ['AAA warrants (CUSIP 000000000)']}
+        def fetch(url):
+            if url == evidence_url:
+                return '<p>AAA warrants (CUSIP 000000000) are exercisable into common stock.</p>'
+            body = source(url)
+            query = parse_qs(urlparse(url).query)
+            if '/stocks/all?' in url and 'securityType' in query:
+                data = json.loads(body)
+                data['result'] = [row for row in data['result'] if row['symbol'] != 'AAA']
+                return json.dumps(data)
+            return body
+        with patch('universe_run.REVIEWED_NON_COMMON', {'AAA': evidence}, create=True):
+            record, report = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        row = record['inputs']['stocks']['AAA']
+        self.assertEqual(row['result']['status'], 'excluded')
+        self.assertEqual(row['result']['reasons'], ['verified_non_common_security'])
+        self.assertEqual(row['inputs']['stock_detail']['securityType'], 'STOCK')
+        self.assertEqual(row['inputs']['security_classification']['classification'], 'warrant')
+        self.assertEqual(set(row['inputs']['skipped']), {'prices', 'earnings', 'turnover'})
+        self.assertTrue(record['result']['coverage_complete'])
+        self.assertEqual(record['result']['candidates'], ['MU'])
+        self.assertIn('AAA', record['inputs']['universe']['markets']['NASDAQ']['conflicts'])
+        self.assertIn('NASDAQ:list_coverage_mismatch', record['inputs']['universe']['issues'])
+        self.assertIn(evidence_url, report)
+        self.assertFalse(any('SYMB=AAA' in item['url'] or '/chart/AAA' in item['url']
+                             or '/releases/AAA/' in item['url'] for item in record['responses']))
+
+        for quotes in source.sources.values():
+            quotes.days.remove(DAY)
+        with patch('universe_run.REVIEWED_NON_COMMON', {'AAA': evidence}):
+            closed_record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+        self.assertEqual(closed_record['result']['status'], 'held')
+        self.assertEqual(closed_record['result']['counts'], {'total': 3, 'selected': 0, 'excluded': 1, 'held': 2})
+        self.assertTrue(closed_record['result']['coverage_complete'])
+
+    def test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings(self):
+        for mode in ('detail_isin', 'list_isin', 'name', 'market', 'ambiguous', 'missing_detail',
+                     'missing_evidence', 'http_failure', 'future_review', 'other_conflict', 'empty_list'):
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                source.add_company('AAA', 2)
+                source.sources['AAA'].stock.update(isinCode='US0000000001', englishName='AAA WARRANTS')
+                evidence_url = 'https://ir.example.com/securities/AAA'
+                evidence = {'market': 'NASDAQ', 'isin': 'US0000000001', 'english_name': 'AAA WARRANTS',
+                            'reviewed_on': '2026-09-11' if mode == 'future_review' else '2026-09-01',
+                            'classification': 'warrant', 'source': evidence_url,
+                            'required_text': ['AAA warrants (CUSIP 000000000)']}
+                def fetch(url):
+                    if url == evidence_url:
+                        if mode == 'http_failure':
+                            raise u.s.DataError('http_403')
+                        return '<p>Unrelated notice.</p>' if mode == 'missing_evidence' else '<p>AAA warrants (CUSIP 000000000)</p>'
+                    body = source(url)
+                    query = parse_qs(urlparse(url).query)
+                    if '/stocks/all?' in url:
+                        data = json.loads(body)
+                        if 'securityType' in query:
+                            data['result'] = [row for row in data['result'] if row['symbol'] != 'AAA'
+                                              and not (mode == 'other_conflict' and row['symbol'] == 'MU')]
+                        elif mode == 'empty_list' and query['market'] == ['NASDAQ']:
+                            data['result'] = []
+                        elif mode == 'list_isin':
+                            for row in data['result']:
+                                if row['symbol'] == 'AAA':
+                                    row['isinCode'] = 'US0000000002'
+                        elif mode == 'ambiguous' and query['market'] == ['NYSE']:
+                            data['result'].append(source.sources['AAA'].stock)
+                        return json.dumps(data)
+                    if urlparse(url).path == '/api/v1/stocks':
+                        data = json.loads(body)
+                        if mode == 'missing_detail':
+                            data['result'] = [row for row in data['result'] if row['symbol'] != 'AAA']
+                        for row in data['result']:
+                            if row['symbol'] == 'AAA':
+                                if mode == 'detail_isin':
+                                    row['isinCode'] = 'US0000000002'
+                                elif mode == 'name':
+                                    row['englishName'] = 'AAA COMMON STOCK'
+                                elif mode == 'market':
+                                    row['market'] = 'NYSE'
+                        return json.dumps(data)
+                    return body
+                with patch('universe_run.REVIEWED_NON_COMMON', {'AAA': evidence}):
+                    record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
+                self.assertFalse(record['result']['coverage_complete'])
+                if mode not in ('other_conflict', 'empty_list'):
+                    self.assertEqual(record['inputs']['stocks']['AAA']['result']['status'], 'held')
+                    self.assertEqual(record['result']['candidates'], ['MU'])
+                else:
+                    self.assertEqual(record['inputs']['stocks']['MU']['result']['status'], 'held')
+                self.assertNotIn('AAA', record['result']['candidates'])
+
     def test_ir_page_split_does_not_hide_single_item_or_http_failures(self):
         for failure in ('response_too_large', 'http_403'):
             with self.subTest(failure=failure):

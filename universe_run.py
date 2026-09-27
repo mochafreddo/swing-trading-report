@@ -16,11 +16,29 @@ from urllib.parse import urlencode, urlparse
 
 import single_run as s
 
-RULES = {'version': 4, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
+RULES = {'version': 5, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
          'types': ['STOCK', 'FOREIGN_STOCK'], 'maximum_candidates': 3,
          'order': ['volume_ratio_desc', 'exact_average_turnover_desc', 'symbol_asc'],
          'unverified_turnover_ties': 'held'}
 CONTRACT = Path(__file__).with_name('docs') / 'universe-run-contract.md'
+# Reviewed interpretations of issuer documents, bound to the security rather than the ticker alone.
+REVIEWED_NON_COMMON = {
+    'CORZZ': {
+        'market': 'NASDAQ', 'isin': 'US21874A1300',
+        'english_name': 'CORE SCIENTIFIC INC C/WTS 23/01/2029 (TO PUR COM)',
+        'reviewed_on': '2026-09-27', 'classification': 'warrant',
+        'source': 'https://investors.corescientific.com/news-events/press-releases/detail/81/core-scientific-announces-tranche-2-warrants-triggering-event',
+        'required_text': ['Tranche 2 warrants (CORZZ, CUSIP 21874A130)'],
+    },
+    'PSNYW': {
+        'market': 'NASDAQ', 'isin': 'US7311056078',
+        'english_name': 'POLESTAR AUTOMOTIVE HOLDING UK PLC SPON ADS C-1 EACH RP 30 C',
+        'reviewed_on': '2026-09-27', 'classification': 'class_c1_ads_subscription_right',
+        'source': 'https://www.sec.gov/Archives/edgar/data/1884082/000188408226000006/polestarfy25formxex214de.htm',
+        'required_text': ['The Class A ADSs and Class C-1 ADSs are listed on Nasdaq',
+                          '“PSNY” and “PSNYW,” respectively.', 'Class C Shares may be exercised'],
+    },
+}
 DEFAULT_EARNINGS_SOURCES = {'MU': {'listing_url': s.NEWS,
                                  'article_prefix': 'https://investors.micron.com/news/press-release/',
                                  'company': 'Micron Technology'}}
@@ -142,6 +160,41 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
             inputs['stocks'][symbol] = {'inputs': stock_input}
             item = universe['symbols'][symbol]
             row = rows.get(symbol)
+            if row is not None and symbol in REVIEWED_NON_COMMON:
+                stock_input['stock_detail'] = row
+                def classify():
+                    evidence = REVIEWED_NON_COMMON[symbol]
+                    conflict = universe['markets'][item['market']]['conflicts'].get(symbol)
+                    listing_rows = [item['listing']]
+                    if conflict:
+                        listing_rows += ([conflict['general']] if conflict['general'] else []) + conflict['typed']
+                    if (item.get('ambiguous') or item['market'] != evidence['market']
+                            or row.get('market') != evidence['market'] or row.get('symbol') != symbol
+                            or row.get('isinCode') != evidence['isin']
+                            or row.get('englishName') != evidence['english_name']
+                            or row.get('status') != 'ACTIVE' or row.get('currency') != 'USD'
+                            or any(entry.get('symbol') != symbol or entry.get('isinCode') != evidence['isin']
+                                   for entry in listing_rows)):
+                        raise s.DataError('security_classification_identity_mismatch')
+                    if date.fromisoformat(evidence['reviewed_on']) > as_of.astimezone(s.NY).date():
+                        raise s.DataError('security_classification_review_in_future')
+                    body = read(evidence['source'])
+                    page = s.NewsPage()
+                    page.feed(body)
+                    text = ' '.join(''.join(page.text).split())
+                    if not all(fragment in text for fragment in evidence['required_text']):
+                        raise s.DataError('security_classification_evidence_missing')
+                    return evidence | {'body_sha256': hashlib.sha256(body.encode()).hexdigest(),
+                                       'checked_at': checked_at()}
+                classification = attempt(stock_input['issues'], 'security_classification', classify)
+                if classification:
+                    stock_input['security_classification'] = classification
+                    stock_input['skipped'] = {name: 'verified_non_common_security'
+                                              for name in ('prices', 'earnings', 'turnover')}
+                    stock_input['collected_at'] = checked_at()
+                    inputs['stocks'][symbol]['result'] = {
+                        'status': 'excluded', 'reasons': ['verified_non_common_security'], 'metrics': {}, 'plan': None}
+                    continue
             if row is None:
                 stock_input['issues'].append('stock_detail_missing')
             elif symbol in universe['markets'][item['market']]['conflicts']:
@@ -206,8 +259,16 @@ def summarize(inputs):
     candidates = [symbol for symbol in candidates if symbol not in unresolved]
     counts = {status: sum(row['result']['status'] == status for row in stocks.values())
               for status in ('selected', 'excluded', 'held')}
-    return {'status': 'selected' if candidates else 'excluded' if counts['excluded'] else 'held',
-            'coverage_complete': not inputs['universe']['issues'],
+    resolved = {symbol for symbol, row in stocks.items() if 'security_classification' in row['inputs']}
+    coverage_issues = list(inputs['universe']['issues'])
+    for market, listing in inputs['universe']['markets'].items():
+        if (listing['conflicts'] and set(listing['conflicts']) <= resolved
+                and listing['issues'] == ['list_coverage_mismatch'] and listing['returned']['all']):
+            coverage_issues.remove(market + ':list_coverage_mismatch')
+    evaluated_exclusion = counts['excluded'] > len(resolved) or bool(stocks) and len(resolved) == len(stocks)
+    return {'status': 'selected' if candidates else 'excluded' if evaluated_exclusion else 'held',
+            'coverage_complete': not coverage_issues, 'coverage_issues': coverage_issues,
+            'verified_non_common': sorted(resolved),
             'ranking_complete': not unresolved, 'ranking_held': unresolved,
             'collection_skipped': {name: sum(name in row['inputs'].get('skipped', {}) for row in stocks.values())
                                    for name in ('earnings', 'turnover')},
@@ -231,7 +292,11 @@ def render(record):
         lines += [f"- {market}: 확인 {len(coverage['symbols'])}종목. 반환 범위 {coverage['returned']}. 사유: {', '.join(coverage['issues']) or '대조 일치'}."]
         lines += [f"  - {symbol}: {conflict['reason']}. 일반·유형별 원문은 기록에서 확인한다."
                   for symbol, conflict in coverage['conflicts'].items()]
-    lines += ['', '목록 미확보 사유: ' + (', '.join(inputs['universe']['issues']) or '없음') + '.', '']
+    for symbol in result['verified_non_common']:
+        evidence = inputs['stocks'][symbol]['inputs']['security_classification']
+        lines += [f"- {symbol}: 보통주 대상 아님({evidence['classification']}). ISIN {evidence['isin']}. "
+                  f"[발행사 근거]({evidence['source']}), 확인 {evidence['checked_at']}. 원본 목록 분류·충돌은 보존한다."]
+    lines += ['', '목록 미확보 사유: ' + (', '.join(result['coverage_issues']) or '없음') + '.', '']
     cal = inputs['calendar']
     if cal:
         lines += [f"일봉 구간: {cal['past'][0]}~{cal['past'][-1]}. 실적 제외 구간: {cal['future'][0]}~{cal['future'][-1]}.", '']
@@ -357,7 +422,8 @@ def main():
             credentials = s.credentials_for_run(args.credentials_file, args.issue_tokens)
             sources = checked_sources(json.loads(args.earnings_sources.read_text()) if args.earnings_sources else None)
             hosts = tuple({urlparse(source[key]).netloc for source in sources.values()
-                           for key in ('listing_url', 'article_prefix')})
+                           for key in ('listing_url', 'article_prefix')}
+                          | {urlparse(evidence['source']).netloc for evidence in REVIEWED_NON_COMMON.values()})
             record = run(args.output, args.report_date or datetime.now(s.NY).date(),
                          fetch=partial(s.fetch_public, credentials=credentials, public_hosts=hosts),
                          earnings_sources=sources)

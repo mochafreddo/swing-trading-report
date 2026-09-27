@@ -39,6 +39,20 @@ CONTROLS = [
 ]
 
 UNIVERSE_CONTROLS = [
+    ('non_common_detail_identity', "or row.get('isinCode') != evidence['isin']", '',
+     'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
+    ('non_common_listing_identity', "entry.get('symbol') != symbol or entry.get('isinCode') != evidence['isin']", 'False',
+     'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
+    ('non_common_evidence', "if not all(fragment in text for fragment in evidence['required_text']):", 'if False:',
+     'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
+    ('non_common_review_date', "if date.fromisoformat(evidence['reviewed_on']) > as_of.astimezone(s.NY).date():", 'if False:',
+     'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
+    ('non_common_coverage', "listing['conflicts'] and set(listing['conflicts']) <= resolved", "listing['conflicts'] and resolved",
+     'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
+    ('non_common_exclusion', "if classification:", 'if False:',
+     'test_reviewed_non_common_security_resolves_only_its_listing_conflict'),
+    ('non_common_is_not_price_evaluation', 'if evaluated_exclusion else', "if counts['excluded'] else",
+     'test_reviewed_non_common_security_resolves_only_its_listing_conflict'),
     ('listing_conflict_candidate', "elif symbol in universe['markets'][item['market']]['conflicts']:", 'elif False:',
      'test_listing_conflicts_are_preserved_per_symbol_for_reconciliation'),
     ('malformed_listing', "or not isinstance(row['securityType'], str)", '', 'test_malformed_listing_preserves_verified_partition_and_record'),
@@ -47,7 +61,7 @@ UNIVERSE_CONTROLS = [
     ('top_three_limit', 'candidates[:3]', 'candidates[:4]', 'test_top_three_use_automatically_collected_company_announcements'),
     ('volume_ranking', "-Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", "Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", 'test_top_three_use_automatically_collected_company_announcements'),
     ('unverified_tie', "] > 1]", "] > 100]", 'test_equal_volume_ratios_do_not_rank_by_turnover_lower_bounds'),
-    ('no_candidates_vs_held', "else 'excluded' if counts['excluded'] else 'held'", "else 'held'", 'test_verified_no_candidates_and_all_held_are_distinct'),
+    ('no_candidates_vs_held', "else 'excluded' if evaluated_exclusion else 'held'", "else 'held'", 'test_verified_no_candidates_and_all_held_are_distinct'),
     ('exchange_identity', "data['output1']['rsym'] != 'D' + exchange + symbol", 'False', 'test_exchange_or_symbol_mismatch_is_held'),
     ('collection_after_open', "stock_input['issues'].append('collection_outside_premarket')", 'pass', 'test_collection_crossing_open_holds_only_late_symbols'),
     ('replay_report', "raise s.DataError('replay_report_mismatch')", 'pass', 'test_replay_rejects_modified_input_and_report_and_never_fetches'),
@@ -59,6 +73,12 @@ def main() -> int:
     results = []
     cases = [('single_run.py', 'test_single_run.SingleRunTests', control) for control in CONTROLS]
     cases += [('universe_run.py', 'test_universe_run.UniverseRunTests', control) for control in UNIVERSE_CONTROLS]
+    cases += [('probe_earnings_sources.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('ir_probe_live_error', "if args.production and entry['status'] != 200:", 'if False:',
+         'test_production_ir_probe_preserves_page_split_errors_and_replays'),
+        ('ir_probe_replay_error', "if record.get('production') and entry['status'] != 200:", 'if False:',
+         'test_production_ir_probe_preserves_page_split_errors_and_replays'),
+    ]]
     cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
         ('ir_split_offset', '                    page_number *= page_size', '                    pass',
          'test_oversized_ir_page_resumes_at_same_offset_with_full_bodies'),
@@ -108,7 +128,8 @@ def main() -> int:
             folder = Path(tmp)
             (folder / 'docs').mkdir()
             for relative in ['docs/single-run-contract.md', 'docs/universe-run-contract.md',
-                             'single_run.py', 'universe_run.py', 'test_single_run.py', 'test_universe_run.py']:
+                             'single_run.py', 'universe_run.py', 'probe_earnings_sources.py',
+                             'test_single_run.py', 'test_universe_run.py']:
                 shutil.copyfile(ROOT / relative, folder / relative)
             command = [sys.executable, '-m', 'unittest', test_class + '.' + test]
             observations = []

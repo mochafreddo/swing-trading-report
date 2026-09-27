@@ -311,6 +311,8 @@ def main():
         def read(url, hosts):
             entry = next(iterator)
             assert entry['url'] == url
+            if record.get('production') and entry['status'] != 200:
+                raise s.DataError(str(entry['status']))
             if not entry.get('body_file'):
                 return None
             raw = (args.replay / entry['body_file']).read_bytes()
@@ -367,6 +369,8 @@ def main():
             path = f'responses/{len(record["requests"]):03d}.html'
             (args.output / path).write_bytes(raw)
             entry.update(body_file=path, bytes=len(raw), sha256=sha256(raw).hexdigest())
+        if args.production and entry['status'] != 200:
+            raise s.DataError(str(entry['status']))
         return raw.decode('utf-8', errors='replace') if raw is not None and entry['status'] == 200 else None
     record['results'] = (production_probe if args.production else probe)(
         read, datetime.fromisoformat(record['as_of']), args.max_articles)
