@@ -43,6 +43,8 @@ UNIVERSE_CONTROLS = [
      'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
     ('non_common_listing_identity', "entry.get('symbol') != symbol or entry.get('isinCode') != evidence['isin']", 'False',
      'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
+    ('non_common_pdf_digest', "if hashlib.sha256(body.encode()).hexdigest() != evidence['required_body_sha256']:", 'if False:',
+     'test_reviewed_pdf_requires_exact_bytes_and_replays_without_network'),
     ('non_common_evidence', "if not all(fragment in text for fragment in evidence['required_text']):", 'if False:',
      'test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings'),
     ('non_common_review_date', "if date.fromisoformat(evidence['reviewed_on']) > as_of.astimezone(s.NY).date():", 'if False:',
@@ -80,6 +82,8 @@ def main() -> int:
          'test_production_ir_probe_preserves_page_split_errors_and_replays'),
     ]]
     cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('pdf_transport', "if body.startswith(b'%PDF-'):", 'if False:',
+         'test_reviewed_pdf_requires_exact_bytes_and_replays_without_network'),
         ('ir_embedded_calendar', '        if listing.event_calendars:', '        if False:',
          'test_embedded_issuer_calendar_is_collected_without_treating_calls_as_releases'),
         ('ir_calendar_call', 'future_earnings |= event_day >= report_day', 'future_earnings |= False',

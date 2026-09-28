@@ -16,12 +16,12 @@ from urllib.parse import urlencode, urlparse
 
 import single_run as s
 
-RULES = {'version': 5, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
+RULES = {'version': 6, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
          'types': ['STOCK', 'FOREIGN_STOCK'], 'maximum_candidates': 3,
          'order': ['volume_ratio_desc', 'exact_average_turnover_desc', 'symbol_asc'],
          'unverified_turnover_ties': 'held'}
 CONTRACT = Path(__file__).with_name('docs') / 'universe-run-contract.md'
-# Reviewed interpretations of issuer documents, bound to the security rather than the ticker alone.
+# Reviewed issuer/depositary terms, bound to the security rather than the ticker alone.
 REVIEWED_NON_COMMON = {
     'CORZZ': {
         'market': 'NASDAQ', 'isin': 'US21874A1300',
@@ -33,10 +33,9 @@ REVIEWED_NON_COMMON = {
     'PSNYW': {
         'market': 'NASDAQ', 'isin': 'US7311056078',
         'english_name': 'POLESTAR AUTOMOTIVE HOLDING UK PLC SPON ADS C-1 EACH RP 30 C',
-        'reviewed_on': '2026-09-27', 'classification': 'class_c1_ads_subscription_right',
-        'source': 'https://www.sec.gov/Archives/edgar/data/1884082/000188408226000006/polestarfy25formxex214de.htm',
-        'required_text': ['The Class A ADSs and Class C-1 ADSs are listed on Nasdaq',
-                          '“PSNY” and “PSNYW,” respectively.', 'Class C Shares may be exercised'],
+        'reviewed_on': '2026-09-28', 'classification': 'class_c1_ads_subscription_right',
+        'source': 'https://depositaryreceipts.citi.com/adr/common/file.aspx?idf=7428',
+        'required_body_sha256': '775abe2adbdeb6d944b82823842d7fdeda56275fcb8a099472bbad63e82ee0f6',
     },
 }
 DEFAULT_EARNINGS_SOURCES = {'MU': {'listing_url': s.NEWS,
@@ -179,11 +178,15 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
                     if date.fromisoformat(evidence['reviewed_on']) > as_of.astimezone(s.NY).date():
                         raise s.DataError('security_classification_review_in_future')
                     body = read(evidence['source'])
-                    page = s.NewsPage()
-                    page.feed(body)
-                    text = ' '.join(''.join(page.text).split())
-                    if not all(fragment in text for fragment in evidence['required_text']):
-                        raise s.DataError('security_classification_evidence_missing')
+                    if 'required_body_sha256' in evidence:
+                        if hashlib.sha256(body.encode()).hexdigest() != evidence['required_body_sha256']:
+                            raise s.DataError('security_classification_evidence_missing')
+                    else:
+                        page = s.NewsPage()
+                        page.feed(body)
+                        text = ' '.join(''.join(page.text).split())
+                        if not all(fragment in text for fragment in evidence['required_text']):
+                            raise s.DataError('security_classification_evidence_missing')
                     return evidence | {'body_sha256': hashlib.sha256(body.encode()).hexdigest(),
                                        'checked_at': checked_at()}
                 classification = attempt(stock_input['issues'], 'security_classification', classify)

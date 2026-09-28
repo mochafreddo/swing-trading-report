@@ -219,6 +219,52 @@ class UniverseRunTests(unittest.TestCase):
         self.assertEqual(closed_record['result']['counts'], {'total': 3, 'selected': 0, 'excluded': 1, 'held': 2})
         self.assertTrue(closed_record['result']['coverage_complete'])
 
+    def test_reviewed_pdf_requires_exact_bytes_and_replays_without_network(self):
+        import base64
+        import hashlib
+        from io import BytesIO
+        pdf = b'%PDF-1.7\n%\xe2\xe3\xcf\xd3\nreviewed synthetic rights notice\n%%EOF'
+        encoded = 'data:application/pdf;base64,' + base64.b64encode(pdf).decode('ascii')
+        for mode in ('matching', 'changed', 'html_error'):
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                source.add_company('AAA', 2)
+                source.sources['AAA'].stock.update(isinCode='US0000000001', englishName='AAA RIGHTS')
+                url = 'https://ir.example.com/rights.pdf'
+                evidence = {'market': 'NASDAQ', 'isin': 'US0000000001', 'english_name': 'AAA RIGHTS',
+                            'reviewed_on': '2026-09-01', 'classification': 'subscription_right', 'source': url,
+                            'required_body_sha256': hashlib.sha256(encoded.encode()).hexdigest()}
+                class Http:
+                    def open(self, request, timeout):
+                        if request.full_url == url:
+                            return BytesIO(pdf if mode == 'matching' else pdf + b'changed' if mode == 'changed'
+                                           else b'<p>Access denied</p>')
+                        body = source(request.full_url)
+                        query = parse_qs(urlparse(request.full_url).query)
+                        if '/stocks/all?' in request.full_url and 'securityType' in query:
+                            data = json.loads(body)
+                            data['result'] = [row for row in data['result'] if row['symbol'] != 'AAA']
+                            body = json.dumps(data)
+                        return BytesIO(body.encode())
+                credentials = dict.fromkeys(('TOSS_ACCESS_TOKEN', 'KIS_ACCESS_TOKEN', 'KIS_APP_KEY',
+                                             'KIS_APP_SECRET'), 'synthetic')
+                with patch('universe_run.REVIEWED_NON_COMMON', {'AAA': evidence}), \
+                     patch('single_run.build_opener', return_value=Http()), patch('single_run.time.sleep'):
+                    record, report = self.run_case(
+                        lambda link: u.s.fetch_public(link, credentials=credentials, public_hosts=('ir.example.com',)),
+                        earnings_sources=source.earnings_sources)
+                row = record['inputs']['stocks']['AAA']
+                self.assertEqual(row['result']['status'], 'excluded' if mode == 'matching' else 'held')
+                self.assertEqual(record['result']['coverage_complete'], mode == 'matching')
+                if mode == 'matching':
+                    self.assertIn(url, report)
+                    saved = next(item for item in record['responses'] if item['url'] == url)
+                    self.assertEqual(base64.b64decode(saved['body'].split(',', 1)[1]), pdf)
+                    self.assertIn('AAA', record['inputs']['universe']['markets']['NASDAQ']['conflicts'])
+                else:
+                    self.assertIn('security_classification:security_classification_evidence_missing',
+                                  row['inputs']['issues'])
+
     def test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings(self):
         for mode in ('detail_isin', 'list_isin', 'name', 'market', 'ambiguous', 'missing_detail',
                      'missing_evidence', 'http_failure', 'future_review', 'other_conflict', 'empty_list'):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -80,6 +81,8 @@ def fetch_public(url: str, *, credentials: dict | None = None, public_hosts: tup
             body = response.read(4_000_001)
             if len(body) > 4_000_000:
                 raise DataError('response_too_large')
+            if body.startswith(b'%PDF-'):
+                return 'data:application/pdf;base64,' + base64.b64encode(body).decode('ascii')
             return body.decode('utf-8')
     except HTTPError as error:
         error.close()
