@@ -177,6 +177,38 @@ class SingleRunTests(unittest.TestCase):
         self.assertEqual(record['result']['status'], 'held')
         self.assertIn('calendar:invalid_session_time', record['result']['reasons'])
 
+    def test_binary32_reference_preserves_cent_boundary_prices_without_tolerance(self):
+        for mode in ('historical_high', 'latest_close', 'different_cent', 'nearby_not_binary32', 'coarse_binary32'):
+            with self.subTest(mode=mode):
+                source = PublicResponses()
+                source.bars[0]['high'] = '98.5850'
+                if mode == 'latest_close':
+                    source.bars[-1]['clos'] = '100.0050'
+                elif mode == 'coarse_binary32':
+                    source.bars[0]['high'] = '131072.01'
+                def changed(data):
+                    quote = data['indicators']['quote'][0]
+                    quote['high'][0] = '98.58499908447266'
+                    if mode == 'latest_close':
+                        quote['close'][-1] = '100.00499725341797'
+                    elif mode == 'different_cent':
+                        quote['high'][0] = '98.58'
+                    elif mode == 'nearby_not_binary32':
+                        quote['high'][0] = '98.584998'
+                    elif mode == 'coarse_binary32':
+                        quote['high'][0] = '131072.015625'
+                    return data
+                source.reference_edit = changed
+                record = self.run_case(source)
+                if mode in ('historical_high', 'latest_close'):
+                    self.assertEqual(record['result']['status'], 'selected')
+                    self.assertEqual(record['inputs']['bars_0'][-1]['high'], '98.5850')
+                    self.assertEqual(record['result']['plan']['entry_low'],
+                                     '100.0050' if mode == 'latest_close' else '100')
+                else:
+                    self.assertEqual(record['result']['status'], 'held')
+                    self.assertIn('daily_price_reference_mismatch', record['result']['reasons'])
+
     def test_reference_disagreement_or_unknown_adjustment_is_held(self):
         for mode in ['price', 'close_time', 'open_time', 'fractional_volume', 'events']:
             with self.subTest(mode=mode):

@@ -9,6 +9,7 @@ import json
 import os
 import re
 import stat
+import struct
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
@@ -28,7 +29,7 @@ YAHOO = 'https://query1.finance.yahoo.com'
 NEWS = 'https://www.micron.com/about/press/news'
 NY = ZoneInfo('America/New_York')
 RULES = {
-    'version': 7, 'symbol': 'MU', 'history_sessions': 50,
+    'version': 8, 'symbol': 'MU', 'history_sessions': 50,
     'breakout_sessions': 20, 'volume_multiple': '1.5',
     'market_cap_min_usd': '10000000000', 'turnover_min_usd': '50000000',
     'atr_period': 14, 'earnings_sessions': 5,
@@ -487,7 +488,7 @@ def price_reference(read, cal, report_day, as_of, symbol='MU', market='NASDAQ'):
     session = cal['sessions'][cal['past'][-1]]
     if not timestamp(session['startTime']) <= last_time <= min(as_of, timestamp(session['endTime']) + timedelta(seconds=60)):
         raise DataError('reference_close_time_mismatch')
-    if cents(meta['regularMarketPrice']) != cents(quote['close'][-1]):
+    if not prices_match(meta['regularMarketPrice'], quote['close'][-1]):
         raise DataError('reference_close_mismatch')
     events = data.get('events', {})
     if not isinstance(events, dict) or any(not isinstance(events.get(key, {}), dict) for key in ('splits', 'dividends')):
@@ -497,6 +498,19 @@ def price_reference(read, cal, report_day, as_of, symbol='MU', market='NASDAQ'):
 
 def cents(value):
     return number(value).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+
+
+def prices_match(original, reference):
+    original, reference = number(original), number(reference)
+    if cents(original) == cents(reference):
+        return True
+    # Accept only the exact binary32 representation, and never a half-cent loss of precision.
+    if abs(original - reference) >= Decimal('.005'):
+        return False
+    try:
+        return struct.unpack('!f', struct.pack('!f', float(original)))[0] == float(reference)
+    except (OverflowError, struct.error):
+        return False
 
 
 def regular_turnover(read, cal, symbol='MU', market='NASDAQ'):
@@ -658,7 +672,7 @@ def evaluate(inputs: dict) -> dict:
             raise DataError('corporate_action_adjustment_unverified')
         for i, values in enumerate(series):
             for key, source in [('open', 'open'), ('high', 'high'), ('low', 'low'), ('clos', 'close')]:
-                if cents(values[key]) != cents(reference['quote'][source][i]):
+                if not prices_match(values[key], reference['quote'][source][i]):
                     raise DataError('daily_price_reference_mismatch')
             if i >= 29:
                 values['tvol'] = number(reference['quote']['volume'][i])

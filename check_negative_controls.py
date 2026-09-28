@@ -10,6 +10,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 CONTROLS = [
+    ('binary32_representation', "return struct.unpack('!f', struct.pack('!f', float(original)))[0] == float(reference)", 'return False',
+     'test_binary32_reference_preserves_cent_boundary_prices_without_tolerance'),
+    ('binary32_not_generic_tolerance', "return struct.unpack('!f', struct.pack('!f', float(original)))[0] == float(reference)", 'return True',
+     'test_binary32_reference_preserves_cent_boundary_prices_without_tolerance'),
+    ('binary32_precision_limit', "if abs(original - reference) >= Decimal('.005'):", 'if False:',
+     'test_binary32_reference_preserves_cent_boundary_prices_without_tolerance'),
     ('calendar_rate_limit', 'time.sleep(0.35)', 'time.sleep(0.15)', 'test_calendar_collection_respects_three_requests_per_second'),
     ('held_quote_validation', "if not all(key in inputs for key in ('stock', 'calendar', 'bars_0')):", 'if held:', 'test_live_session_hold_does_not_hide_invalid_quotes'),
     ('breakout_equality', "last['clos'] > base", "last['clos'] >= base", 'test_breakout_equality_is_excluded'),
