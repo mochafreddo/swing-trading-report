@@ -29,7 +29,7 @@ YAHOO = 'https://query1.finance.yahoo.com'
 NEWS = 'https://www.micron.com/about/press/news'
 NY = ZoneInfo('America/New_York')
 RULES = {
-    'version': 8, 'symbol': 'MU', 'history_sessions': 50,
+    'version': 9, 'symbol': 'MU', 'history_sessions': 50,
     'breakout_sessions': 20, 'volume_multiple': '1.5',
     'market_cap_min_usd': '10000000000', 'turnover_min_usd': '50000000',
     'atr_period': 14, 'earnings_sessions': 5,
@@ -385,13 +385,11 @@ def earnings(read: Callable[[str], str], report_day: date, as_of: datetime, sour
             if re.search(r'\b(?:will|to)\s+(?:release|report|announce|publish)\b.{0,120}\b(?:results|earnings)\b|\b(?:results|earnings)\b.{0,80}\bwill be (?:released|reported|announced|published)\b', release_clause, re.I):
                 event_dates.extend(re.findall(r'\bon\s+' + date_pattern, release_clause))
         parsed_dates = {datetime.strptime(value, '%B %d, %Y').date() for value in event_dates}
+        if not parsed_dates or max(parsed_dates) < report_day:
+            continue
         if len(parsed_dates) > 1:
             return {'status': 'unconfirmed', 'reason': 'earnings_dates_conflict', 'collection_status': 'complete'}
-        if not parsed_dates:
-            continue
         event_day = parsed_dates.pop()
-        if event_day < report_day:
-            continue
         if re.search(r'\b(estimated|expected|expects|tentative|cancelled|canceled|postponed|rescheduled)\b', schedule_text, re.I):
             return {'status': 'unconfirmed', 'source': url, 'reason': 'uncertain_earnings_announcement'}
         dates.append({'status': 'confirmed', 'date': event_day.isoformat(), 'source': url,

@@ -88,6 +88,10 @@ def main() -> int:
          'test_production_ir_probe_preserves_page_split_errors_and_replays'),
     ]]
     cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('ir_past_conflict', 'if not parsed_dates or max(parsed_dates) < report_day:', 'if not parsed_dates:',
+         'test_repligen_archive_ignores_only_wholly_past_date_conflicts'),
+        ('ir_mixed_conflict', 'max(parsed_dates) < report_day', 'min(parsed_dates) < report_day',
+         'test_repligen_archive_ignores_only_wholly_past_date_conflicts'),
         ('pdf_transport', "if body.startswith(b'%PDF-'):", 'if False:',
          'test_reviewed_pdf_requires_exact_bytes_and_replays_without_network'),
         ('ir_embedded_calendar', '        if listing.event_calendars:', '        if False:',
@@ -144,6 +148,10 @@ def main() -> int:
     cases.append(('single_run.py', 'test_universe_run.UniverseRunTests',
                   ('universe_list_rate', 'time.sleep(1.05)', 'time.sleep(0.35)',
                    'test_stock_all_requests_obey_separate_one_request_per_second_limit')))
+    cases.append(('universe_run.py', 'test_universe_run.UniverseRunTests',
+                  ('repligen_default_source',
+                   "        ('RGEN', 'Repligen', 'https://investors.repligen.com/press-releases/default.aspx', 'https://investors.repligen.com/press-releases/news-details/'),\n", '',
+                   'test_repligen_archive_ignores_only_wholly_past_date_conflicts')))
     for filename, test_class, (name, old, new, test) in cases:
         source = (ROOT / filename).read_text()
         if source.count(old) != 1:

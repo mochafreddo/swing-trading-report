@@ -59,6 +59,43 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_repligen_archive_ignores_only_wholly_past_date_conflicts(self):
+        for mode in ('past', 'future', 'mixed', 'later_announcement'):
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                source.add_company('RGEN', 2)
+                def fetch(url):
+                    if url == 'https://investors.repligen.com/press-releases/default.aspx':
+                        return '<script src="/q4Api.js"></script>'
+                    if urlparse(url).netloc == 'investors.repligen.com':
+                        rows = []
+                        if parse_qs(urlparse(url).query)['pageNumber'] == ['0']:
+                            first = 'September 17, 2026' if mode == 'future' else 'July 28, 2026'
+                            second = 'September 18, 2026' if mode in ('future', 'mixed') else 'August 6, 2026'
+                            rows.append({'Headline': 'Repligen to Acquire BioLife Solutions',
+                                         'PressReleaseDate': '07/22/2026 06:00:00',
+                                         'LinkToDetailPage': '/press-releases/news-details/2026/acquisition/default.aspx',
+                                         'Body': f'Repligen will report quarterly financial results on {first}. '
+                                                 f'BioLife will report quarterly financial results on {second}.'})
+                            if mode == 'later_announcement':
+                                rows.append({'Headline': 'Repligen to Report Third Quarter Results',
+                                             'PressReleaseDate': '09/01/2026 06:00:00',
+                                             'LinkToDetailPage': '/press-releases/news-details/2026/results/default.aspx',
+                                             'Body': 'Repligen will report quarterly financial results on September 17, 2026.'})
+                        return json.dumps({'GetPressReleaseListResult': rows})
+                    return source(url)
+                record, _ = self.run_case(fetch)
+                row = record['inputs']['stocks']['RGEN']
+                event = row['inputs']['earnings']
+                self.assertEqual(event['collection_status'], 'complete')
+                if mode == 'later_announcement':
+                    self.assertEqual(row['result']['status'], 'selected')
+                    self.assertEqual(event['date'], '2026-09-17')
+                else:
+                    self.assertEqual(row['result']['status'], 'held')
+                    self.assertEqual(event['reason'], 'next_confirmed_earnings_not_found' if mode == 'past'
+                                     else 'earnings_dates_conflict')
+
     def test_embedded_issuer_calendar_is_collected_without_treating_calls_as_releases(self):
         from html import escape
         for mode in ('past', 'past_utc', 'unrelated_invalid_date', 'future_call', 'invalid_date', 'partial', 'empty'):

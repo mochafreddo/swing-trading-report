@@ -54,6 +54,7 @@ DEFAULT_EARNINGS_SOURCES.update({symbol: {'company': company, 'listing_url': lis
         ('XOM', 'ExxonMobil', 'https://corporate.exxonmobil.com/news/news-releases', 'https://corporate.exxonmobil.com/news/news-releases/'),
         ('COST', 'Costco Wholesale Corporation', 'https://investor.costco.com/news/default.aspx', 'https://investor.costco.com/news/news-details/'),
         ('NKE', 'NIKE, Inc.', 'https://investors.nike.com/investors/news-events-and-reports/', 'https://investors.nike.com/investors/news-events-and-reports/investor-news/investor-news-details/'),
+        ('RGEN', 'Repligen', 'https://investors.repligen.com/press-releases/default.aspx', 'https://investors.repligen.com/press-releases/news-details/'),
     ]})
 
 
