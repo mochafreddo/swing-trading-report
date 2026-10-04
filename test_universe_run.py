@@ -1,6 +1,7 @@
 """Exercise public-response collection through saved reports and offline replay."""
 
 import json
+from copy import deepcopy
 from contextlib import redirect_stdout
 from io import StringIO
 import tempfile
@@ -863,6 +864,29 @@ class UniverseRunTests(unittest.TestCase):
             self.assertEqual(record['inputs']['stocks'][symbol]['result']['status'], 'held')
             self.assertIsNone(record['inputs']['stocks'][symbol]['result']['plan'])
         self.assertIn('순위 미확정', report)
+
+    def test_ranking_preserves_collected_inputs_and_repeats_final_decisions(self):
+        inputs = {'universe': {'issues': [], 'markets': {}}, 'stocks': {
+            symbol: {'inputs': {}, 'result': {
+                'status': 'selected', 'reasons': ['all_conditions_met'],
+                'metrics': {'volume_ratio': ratio}, 'plan': {'entry_low': '100'}}}
+            for symbol, ratio in [('AAA', '2'), ('BBB', '2.0'), ('CCC', '3')]}}
+        original = deepcopy(inputs)
+
+        first = u.finalize(inputs)
+        self.assertEqual(inputs, original)
+        self.assertEqual(u.finalize(inputs), first)
+        finalized, summary = first
+        self.assertEqual(summary['candidates'], ['CCC'])
+        self.assertEqual(summary['ranking_held'], ['AAA', 'BBB'])
+        self.assertFalse(summary['ranking_complete'])
+        self.assertEqual(summary['counts'], {'total': 3, 'selected': 1, 'excluded': 0, 'held': 2})
+        for symbol in ('AAA', 'BBB'):
+            result = finalized['stocks'][symbol]['result']
+            self.assertEqual(result['status'], 'held')
+            self.assertIsNone(result['plan'])
+            self.assertEqual(result['reasons'], ['all_conditions_met', 'exact_turnover_ranking_unavailable'])
+        self.assertEqual(finalized['stocks']['CCC'], original['stocks']['CCC'])
 
     def test_collection_crossing_open_holds_only_late_symbols(self):
         source = UniverseResponses()

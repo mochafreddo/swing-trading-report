@@ -222,8 +222,9 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
     return inputs
 
 
-def summarize(inputs):
-    stocks = inputs['stocks']
+def finalize(inputs):
+    """Return final per-stock decisions and their summary without changing collected inputs."""
+    stocks = dict(inputs['stocks'])
     candidates = sorted((symbol for symbol, row in stocks.items() if row['result']['status'] == 'selected'),
                         key=lambda symbol: (-Decimal(stocks[symbol]['result']['metrics']['volume_ratio']), symbol))
     ratios = Counter(Decimal(stocks[symbol]['result']['metrics']['volume_ratio']) for symbol in candidates)
@@ -232,8 +233,9 @@ def summarize(inputs):
     # TODO: #233 - validate an exact consolidated turnover source before resolving tied ratios.
     for symbol in unresolved:
         result = stocks[symbol]['result']
-        stocks[symbol]['result'] = result | {'status': 'held', 'plan': None,
-                                            'reasons': result['reasons'] + ['exact_turnover_ranking_unavailable']}
+        stocks[symbol] = stocks[symbol] | {'result': result | {
+            'status': 'held', 'plan': None,
+            'reasons': result['reasons'] + ['exact_turnover_ranking_unavailable']}}
     candidates = [symbol for symbol in candidates if symbol not in unresolved]
     counts = {status: sum(row['result']['status'] == status for row in stocks.values())
               for status in ('selected', 'excluded', 'held')}
@@ -244,13 +246,14 @@ def summarize(inputs):
                 and listing['issues'] == ['list_coverage_mismatch'] and listing['returned']['all']):
             coverage_issues.remove(market + ':list_coverage_mismatch')
     evaluated_exclusion = counts['excluded'] > len(resolved) or bool(stocks) and len(resolved) == len(stocks)
-    return {'status': 'selected' if candidates else 'excluded' if evaluated_exclusion else 'held',
+    summary = {'status': 'selected' if candidates else 'excluded' if evaluated_exclusion else 'held',
             'coverage_complete': not coverage_issues, 'coverage_issues': coverage_issues,
             'verified_non_common': sorted(resolved),
             'ranking_complete': not unresolved, 'ranking_held': unresolved,
             'collection_skipped': {name: sum(name in row['inputs'].get('skipped', {}) for row in stocks.values())
                                    for name in ('earnings', 'turnover')},
             'counts': {'total': len(stocks), **counts}, 'candidates': candidates[:3]}
+    return inputs | {'stocks': stocks}, summary
 
 
 def render(record):
@@ -325,7 +328,7 @@ def run(output, report_day, *, fetch=s.fetch_public, now=None, synthetic=False, 
     with localcontext() as context:
         context.prec = 28
         inputs = collect(execution.read, report_day, as_of, sources, lambda: execution.checked_at)
-        result = summarize(inputs)
+        inputs, result = finalize(inputs)
     return execution.save(inputs, result, render, elapsed_seconds=round(time.monotonic() - start, 3))
 
 
@@ -337,7 +340,7 @@ def replay(output):
         context.prec = 28
         inputs = collect(execution.read, date.fromisoformat(record['report_date']), s.timestamp(record['as_of']),
                          checked_sources(record['earnings_sources']), lambda: execution.checked_at)
-        result = summarize(inputs)
+        inputs, result = finalize(inputs)
     return execution.verify(inputs, result, render)
 
 

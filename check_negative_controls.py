@@ -69,6 +69,8 @@ UNIVERSE_CONTROLS = [
     ('top_three_limit', 'candidates[:3]', 'candidates[:4]', 'test_top_three_use_automatically_collected_company_announcements'),
     ('volume_ranking', "-Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", "Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", 'test_top_three_use_automatically_collected_company_announcements'),
     ('unverified_tie', "] > 1]", "] > 100]", 'test_equal_volume_ratios_do_not_rank_by_turnover_lower_bounds'),
+    ('ranking_input_preservation', "stocks = dict(inputs['stocks'])", "stocks = inputs['stocks']",
+     'test_ranking_preserves_collected_inputs_and_repeats_final_decisions'),
     ('no_candidates_vs_held', "else 'excluded' if evaluated_exclusion else 'held'", "else 'held'", 'test_verified_no_candidates_and_all_held_are_distinct'),
 ]
 
