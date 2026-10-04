@@ -430,7 +430,17 @@ class UniverseRunTests(unittest.TestCase):
                         self.assertEqual(event["status"], "confirmed")
                         self.assertEqual(event["date"], "2026-09-17")
                     else:
-                        self.assertEqual(event["collection_status"], "failed")
+                        self.assertEqual(
+                            event,
+                            {
+                                "status": "unconfirmed",
+                                "collection_status": "failed",
+                                "source": source["listing_url"],
+                                "reason": "response_too_large"
+                                if failure == "single_item_too_large"
+                                else "http_403",
+                            },
+                        )
                     self.assertEqual(
                         len(record["requests"]),
                         {"split": 4, "single_item_too_large": 3, "http_403": 2}[
@@ -972,6 +982,12 @@ class UniverseRunTests(unittest.TestCase):
                     event["reason"],
                     "http_403" if failed else "next_confirmed_earnings_not_found",
                 )
+                if failed:
+                    self.assertEqual(row["inputs"]["issues"], ["earnings:http_403"])
+                    self.assertEqual(event["source"], url)
+                    self.assertEqual(
+                        row["inputs"]["skipped"], {"turnover": "unverified_earnings"}
+                    )
 
     def test_unhandled_dynamic_listing_is_not_a_completed_empty_search(self):
         source = UniverseResponses()

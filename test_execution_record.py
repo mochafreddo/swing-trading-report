@@ -91,6 +91,8 @@ class ExecutionRecordTests(unittest.TestCase):
                 ("order", "replay_request_mismatch"),
                 ("missing", "replay_response_missing"),
                 ("extra", "replay_result_mismatch"),
+                ("ir_order", "replay_request_mismatch"),
+                ("ir_missing", "replay_response_missing"),
             ):
                 with (
                     self.subTest(module=module.__name__, change=change),
@@ -107,8 +109,18 @@ class ExecutionRecordTests(unittest.TestCase):
                         )
                     elif change == "missing":
                         record["responses"].pop()
-                    else:
+                    elif change == "extra":
                         record["responses"].append(record["responses"][0])
+                    else:
+                        index = next(
+                            i
+                            for i, item in enumerate(record["responses"])
+                            if item["url"] == s.NEWS
+                        )
+                        if change == "ir_order":
+                            record["responses"][index]["url"] += "/unexpected"
+                        else:
+                            record["responses"] = record["responses"][:index]
                     record.pop("sha256")
                     record["sha256"] = s.digest(record)
                     (output / "record.json").write_text(json.dumps(record))

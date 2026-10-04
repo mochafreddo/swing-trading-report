@@ -320,11 +320,29 @@ class NewsPage(HTMLParser):
 def earnings(
     read: Callable[[str], str], report_day: date, as_of: datetime, source=None
 ) -> dict:
+    """Return IR collection outcomes; replay and execution failures still propagate."""
     source = source or {
         "listing_url": NEWS,
         "article_prefix": "https://investors.micron.com/news/press-release/",
         "company": "Micron Technology",
     }
+    try:
+        return _earnings(read, report_day, as_of, source)
+    except DataError as error:
+        reason = str(error)
+        if reason in ("replay_response_missing", "replay_request_mismatch"):
+            raise
+    except KeyError, IndexError, TypeError, ValueError, InvalidOperation:
+        reason = "invalid_response"
+    return {
+        "status": "unconfirmed",
+        "collection_status": "failed",
+        "source": source["listing_url"],
+        "reason": reason,
+    }
+
+
+def _earnings(read, report_day, as_of, source):
     pending = [source["listing_url"]]
     visited, links, articles = set(), set(), []
     while pending:
@@ -1062,19 +1080,9 @@ def _collect_remaining(inputs, stage, read, report_day, as_of, source, symbol, m
             "reason": "earnings_source_not_configured",
         }
     else:
-        stage("earnings", lambda: earnings(read, report_day, as_of, source))
-        errors = [
-            reason.split(":", 1)[1]
-            for reason in inputs["issues"]
-            if reason.startswith("earnings:")
-        ]
-        if errors:
-            inputs["earnings"] = {
-                "status": "unconfirmed",
-                "collection_status": "failed",
-                "source": source["listing_url"],
-                "reason": errors[-1],
-            }
+        inputs["earnings"] = earnings(read, report_day, as_of, source)
+        if inputs["earnings"].get("collection_status") == "failed":
+            inputs["issues"].append("earnings:" + inputs["earnings"]["reason"])
     result = evaluate(inputs)
     if result["status"] == "excluded":
         inputs["skipped"]["turnover"] = "verified_exclusion"

@@ -643,16 +643,7 @@ def production_probe(read, as_of, max_articles):
                 raise s.DataError("source_fetch_failed")
             return body
 
-        try:
-            event = s.earnings(
-                required_read, as_of.astimezone(s.NY).date(), as_of, source
-            )
-        except s.DataError, ValueError, KeyError, TypeError:
-            event = {
-                "status": "unconfirmed",
-                "collection_status": "failed",
-                "reason": "source_fetch_or_parse_failed",
-            }
+        event = s.earnings(required_read, as_of.astimezone(s.NY).date(), as_of, source)
         results.append({"symbol": symbol, "event": event})
         print(
             f"{symbol}: {event['status']}; {event.get('reason', event.get('date'))}",

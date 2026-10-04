@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from functools import partial
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -13,7 +13,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
-from single_run import replay, run
+from single_run import DataError, earnings, replay, run
 
 NOW = datetime(2026, 9, 10, 12, tzinfo=UTC)
 DAY = NOW.date()
@@ -205,6 +205,71 @@ class PublicResponses:
 
 
 class SingleRunTests(unittest.TestCase):
+    def test_earnings_replay_and_execution_errors_propagate(self):
+        for failure in (
+            DataError("replay_response_missing"),
+            DataError("replay_request_mismatch"),
+            AssertionError("replay body integrity"),
+            StopIteration("replay response missing"),
+            OSError("replay file unavailable"),
+        ):
+            with self.subTest(failure=str(failure)):
+
+                def read(url, *, failure=failure):
+                    raise failure
+
+                with self.assertRaises(type(failure)) as caught:
+                    earnings(read, DAY, NOW)
+                self.assertIs(caught.exception, failure)
+
+    def test_earnings_fetch_failure_returns_complete_result(self):
+        def read(url):
+            raise DataError("http_403")
+
+        self.assertEqual(
+            earnings(read, DAY, NOW),
+            {
+                "status": "unconfirmed",
+                "collection_status": "failed",
+                "source": "https://www.micron.com/about/press/news",
+                "reason": "http_403",
+            },
+        )
+
+    def test_earnings_invalid_responses_hide_upstream_details(self):
+        for failure in (
+            KeyError("private upstream detail"),
+            IndexError("private upstream detail"),
+            TypeError("private upstream detail"),
+            ValueError("private upstream detail"),
+            InvalidOperation("private upstream detail"),
+        ):
+            with self.subTest(failure=type(failure).__name__):
+
+                def read(url, *, failure=failure):
+                    raise failure
+
+                self.assertEqual(
+                    earnings(read, DAY, NOW),
+                    {
+                        "status": "unconfirmed",
+                        "collection_status": "failed",
+                        "source": "https://www.micron.com/about/press/news",
+                        "reason": "invalid_response",
+                    },
+                )
+
+        def read_malformed_feed(url):
+            return (
+                '<script src="/q4Api.js"></script>'
+                if url == "https://www.micron.com/about/press/news"
+                else "{private upstream detail"
+            )
+
+        self.assertEqual(
+            earnings(read_malformed_feed, DAY, NOW)["reason"], "invalid_response"
+        )
+
     def test_initial_failures_preserve_price_requests_and_replay(self):
         from single_run import DataError
 

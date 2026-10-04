@@ -638,6 +638,41 @@ def main() -> int:
         )
         for name, old, new, test in RECORD_CONTROLS
     ]
+    cases += [
+        ("single_run.py", "test_single_run.SingleRunTests", control)
+        for control in [
+            (
+                "ir_failure_reason",
+                "        reason = str(error)",
+                '        reason = "source_fetch_or_parse_failed"',
+                "test_earnings_fetch_failure_returns_complete_result",
+            ),
+            (
+                "ir_invalid_response_details",
+                '        reason = "invalid_response"',
+                '        reason = "private upstream detail"',
+                "test_earnings_invalid_responses_hide_upstream_details",
+            ),
+            (
+                "ir_replay_error_propagation",
+                '        if reason in ("replay_response_missing", "replay_request_mismatch")',
+                "        if False",
+                "test_earnings_replay_and_execution_errors_propagate",
+            ),
+        ]
+    ]
+    cases.append(
+        (
+            "single_run.py",
+            "test_universe_run.UniverseRunTests",
+            (
+                "ir_failed_issue",
+                '            inputs["issues"].append("earnings:" + inputs["earnings"]["reason"])',
+                "            pass",
+                "test_ir_fetch_failure_is_distinct_from_completed_search_without_evidence",
+            ),
+        )
+    )
     for filename, test_class, (name, old, new, test) in cases:
         source = (ROOT / filename).read_text()
         if source.count(old) != 1:
