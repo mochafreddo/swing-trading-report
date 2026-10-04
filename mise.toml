@@ -23,3 +23,8 @@ run = ["ruff check .", "ruff format --check .", "actionlint"]
 [tasks.check]
 description = "CI와 같은 전체 로컬 검증"
 depends = ["lint", "test", "negative-controls"]
+
+[tasks.health]
+description = "기존 검사별 상태·종료 코드·소요 시간 보고"
+env.MISE_AUTO_INSTALL = "0"
+run = "python -B check_health.py"
