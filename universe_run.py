@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
 import single_run as s
+import execution_record as records
 
 RULES = {'version': 6, 'calculation': {key: value for key, value in s.RULES.items() if key != 'symbol'}, 'markets': ['NASDAQ', 'NYSE'],
          'types': ['STOCK', 'FOREIGN_STOCK'], 'maximum_candidates': 3,
@@ -308,8 +309,7 @@ def render(record):
 
 
 def code_hash():
-    return {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-            for path in (Path(__file__), Path(s.__file__))}
+    return records.code_hash((Path(__file__), Path(s.__file__)))
 
 
 def run(output, report_day, *, fetch=s.fetch_public, now=None, synthetic=False, earnings_sources=None, clock=None):
@@ -317,65 +317,28 @@ def run(output, report_day, *, fetch=s.fetch_public, now=None, synthetic=False, 
     clock = clock or (lambda: now or datetime.now(timezone.utc))
     as_of = clock()
     s.timestamp(as_of.isoformat())
-    output.mkdir(parents=True, exist_ok=False)
-    responses = []
+    metadata = records.identity(RULES, (Path(__file__), Path(s.__file__)), CONTRACT)
+    metadata.update(report_date=str(report_day), as_of=as_of.isoformat(), synthetic=synthetic,
+                    earnings_sources=sources)
+    execution = records.ExecutionRecord.start(output, metadata, fetch, clock)
     start = time.monotonic()
-    def read(url):
-        item = {'url': url}
-        try:
-            item['body'] = fetch(url)
-        except s.DataError as error:
-            item['error'] = str(error)
-            raise
-        finally:
-            item['checked_at'] = clock().isoformat()
-            responses.append(item)
-        return item['body']
     with localcontext() as context:
         context.prec = 28
-        inputs = collect(read, report_day, as_of, sources, lambda: responses[-1]['checked_at'])
+        inputs = collect(execution.read, report_day, as_of, sources, lambda: execution.checked_at)
         result = summarize(inputs)
-    record = {'format_version': 1, 'rules': RULES, 'code_sha256': code_hash(),
-              'contract': CONTRACT.read_text(), 'report_date': str(report_day),
-              'as_of': as_of.isoformat(), 'synthetic': synthetic, 'earnings_sources': sources,
-              'elapsed_seconds': round(time.monotonic() - start, 3),
-              'responses': responses, 'inputs': inputs, 'result': result}
-    record['sha256'] = s.digest(record)
-    (output / 'record.json').write_text(json.dumps(record, indent=2, ensure_ascii=False) + '\n')
-    (output / 'report.md').write_text(render(record))
-    return record
+    return execution.save(inputs, result, render, elapsed_seconds=round(time.monotonic() - start, 3))
 
 
 def replay(output):
-    record = json.loads((output / 'record.json').read_text())
-    checksum = record.pop('sha256')
-    if s.digest(record) != checksum:
-        raise s.DataError('record_integrity_mismatch')
-    if (record['code_sha256'] != code_hash() or record['rules'] != RULES
-            or record['format_version'] != 1 or record['contract'] != CONTRACT.read_text()):
-        raise s.DataError('replay_version_mismatch')
-    remaining = iter(record['responses'])
-    checked_at = record['as_of']
-    def read(url):
-        nonlocal checked_at
-        item = next(remaining)
-        checked_at = item['checked_at']
-        if item['url'] != url:
-            raise s.DataError('replay_request_mismatch')
-        if 'error' in item:
-            raise s.DataError(item['error'])
-        return item['body']
+    expected = records.identity(RULES, (Path(__file__), Path(s.__file__)), CONTRACT)
+    execution = records.ExecutionRecord.load(output, expected)
+    record = execution.record
     with localcontext() as context:
         context.prec = 28
-        inputs = collect(read, date.fromisoformat(record['report_date']), s.timestamp(record['as_of']),
-                         checked_sources(record['earnings_sources']), lambda: checked_at)
+        inputs = collect(execution.read, date.fromisoformat(record['report_date']), s.timestamp(record['as_of']),
+                         checked_sources(record['earnings_sources']), lambda: execution.checked_at)
         result = summarize(inputs)
-    if next(remaining, None) is not None or inputs != record['inputs'] or result != record['result']:
-        raise s.DataError('replay_result_mismatch')
-    if (output / 'report.md').read_text() != render(record):
-        raise s.DataError('replay_report_mismatch')
-    record['sha256'] = checksum
-    return record
+    return execution.verify(inputs, result, render)
 
 
 def main():

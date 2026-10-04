@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import json
 import os
 import re
@@ -22,6 +21,8 @@ from urllib.parse import urlencode, urlparse, urljoin
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
 
+from execution_record import DataError, ExecutionRecord, digest, identity
+
 
 TOSS = 'https://openapi.tossinvest.com'
 KIS = 'https://openapi.koreainvestment.com:9443'
@@ -37,10 +38,6 @@ RULES = {
     'adjustment': 'cash_dividend_unadjusted_split_window_held',
     'liquidity': 'nasdaq_regular_continuous_lower_bound',
 }
-
-
-class DataError(ValueError):
-    """A safe diagnostic code, containing no upstream response or credentials."""
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -763,10 +760,6 @@ def evaluate(inputs: dict) -> dict:
     return result | {'metrics': {}}
 
 
-def digest(value) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-
-
 def render(record: dict) -> str:
     result = record['result']
     inputs = record['inputs']
@@ -812,57 +805,25 @@ def run(output: Path, report_day: date, *, fetch: Callable[[str], str] = fetch_p
         now: datetime | None = None, synthetic: bool = False) -> dict:
     as_of = now or datetime.now(timezone.utc)
     timestamp(as_of.isoformat())
-    output.mkdir(parents=True, exist_ok=False)
-    responses = []
-    def read(url):
-        item = {'url': url}
-        try:
-            item['body'] = fetch(url)
-        except DataError as error:
-            item['error'] = str(error)
-            raise
-        finally:
-            item['checked_at'] = (now or datetime.now(timezone.utc)).isoformat()
-            responses.append(item)
-        return item['body']
+    metadata = identity(RULES, (Path(__file__),),
+                        Path(__file__).with_name('docs') / 'single-run-contract.md')
+    metadata.update(report_date=str(report_day), as_of=as_of.isoformat(), synthetic=synthetic)
+    execution = ExecutionRecord.start(output, metadata, fetch, lambda: now or datetime.now(timezone.utc))
     with localcontext() as context:
         context.prec = 28
-        inputs, result = collect(read, report_day, as_of)
-    record = {'format_version': 1, 'rules': RULES, 'code_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-              'contract': Path(__file__).with_name('docs').joinpath('single-run-contract.md').read_text(),
-              'report_date': str(report_day), 'as_of': as_of.isoformat(), 'synthetic': synthetic,
-              'responses': responses, 'inputs': inputs, 'result': result}
-    record['sha256'] = digest(record)
-    (output / 'record.json').write_text(json.dumps(record, indent=2, ensure_ascii=False) + '\n')
-    (output / 'report.md').write_text(render(record))
-    return record
+        inputs, result = collect(execution.read, report_day, as_of)
+    return execution.save(inputs, result, render)
 
 
 def replay(output: Path) -> dict:
-    record = json.loads((output / 'record.json').read_text())
-    checksum = record.pop('sha256')
-    if digest(record) != checksum:
-        raise DataError('record_integrity_mismatch')
-    if (record['code_sha256'] != hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-            or record['rules'] != RULES or record['format_version'] != 1):
-        raise DataError('replay_version_mismatch')
-    remaining = iter(record['responses'])
-    def read(url):
-        item = next(remaining)
-        if item['url'] != url:
-            raise DataError('replay_request_mismatch')
-        if 'error' in item:
-            raise DataError(item['error'])
-        return item['body']
+    expected = identity(RULES, (Path(__file__),),
+                        Path(__file__).with_name('docs') / 'single-run-contract.md')
+    execution = ExecutionRecord.load(output, expected)
+    record = execution.record
     with localcontext() as context:
         context.prec = 28
-        inputs, result = collect(read, date.fromisoformat(record['report_date']), timestamp(record['as_of']))
-    if next(remaining, None) is not None or inputs != record['inputs'] or result != record['result']:
-        raise DataError('replay_result_mismatch')
-    if (output / 'report.md').read_text() != render(record):
-        raise DataError('replay_report_mismatch')
-    record['sha256'] = checksum
-    return record
+        inputs, result = collect(execution.read, date.fromisoformat(record['report_date']), timestamp(record['as_of']))
+    return execution.verify(inputs, result, render)
 
 
 def main() -> int:

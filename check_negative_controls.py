@@ -70,8 +70,31 @@ UNIVERSE_CONTROLS = [
     ('volume_ranking', "-Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", "Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", 'test_top_three_use_automatically_collected_company_announcements'),
     ('unverified_tie', "] > 1]", "] > 100]", 'test_equal_volume_ratios_do_not_rank_by_turnover_lower_bounds'),
     ('no_candidates_vs_held', "else 'excluded' if evaluated_exclusion else 'held'", "else 'held'", 'test_verified_no_candidates_and_all_held_are_distinct'),
-    ('replay_report', "raise s.DataError('replay_report_mismatch')", 'pass', 'test_replay_rejects_modified_input_and_report_and_never_fetches'),
-    ('replay_record', "raise s.DataError('record_integrity_mismatch')", 'pass', 'test_replay_rejects_modified_input_and_report_and_never_fetches'),
+]
+
+
+RECORD_CONTROLS = [
+    ('replay_report', "raise DataError('replay_report_mismatch')", 'pass',
+     'test_universe_run.UniverseRunTests.test_replay_rejects_modified_input_and_report_and_never_fetches'),
+    ('replay_record', "raise DataError('record_integrity_mismatch')", 'pass',
+     'test_universe_run.UniverseRunTests.test_replay_rejects_modified_input_and_report_and_never_fetches'),
+    ('replay_contract', "'contract': contract.read_text()", "'contract': ''",
+     'test_execution_record.ExecutionRecordTests.test_both_replays_reject_changed_contract'),
+    ('replay_shared_code', '(*paths, Path(__file__))', 'paths',
+     'test_execution_record.ExecutionRecordTests.test_v2_records_include_shared_code_and_reject_its_changes'),
+    ('replay_identity', 'if any(record.get(key) != value for key, value in expected.items()):', 'if False:',
+     'test_execution_record.ExecutionRecordTests.test_replays_reject_changed_rules_and_format'),
+    ('replay_response_order', "item is None or item['url'] != url", 'item is None',
+     'test_execution_record.ExecutionRecordTests.test_replays_reject_response_sequence_changes'),
+    ('replay_response_missing', '        if self._replay_failure:\n            raise DataError(self._replay_failure)',
+     '        if False:\n            raise DataError(self._replay_failure)',
+     'test_execution_record.ExecutionRecordTests.test_replays_reject_response_sequence_changes'),
+    ('replay_remaining', 'next(self._remaining, None) is not None or inputs !=', 'inputs !=',
+     'test_execution_record.ExecutionRecordTests.test_replays_reject_response_sequence_changes'),
+    ('replay_inputs', "inputs != self.record['inputs']", 'False',
+     'test_execution_record.ExecutionRecordTests.test_replays_reject_rechecksummed_inputs_and_results'),
+    ('replay_results', "result != self.record['result']", 'False',
+     'test_execution_record.ExecutionRecordTests.test_replays_reject_rechecksummed_inputs_and_results'),
 ]
 
 
@@ -155,6 +178,12 @@ def main() -> int:
         ('earnings_exclusion_collection', "    if result['status'] == 'excluded':\n        inputs['skipped']['turnover']",
          "    if False:\n        inputs['skipped']['turnover']", 'test_confirmed_near_earnings_skip_turnover'),
     ]]
+    cases += [('single_run.py', 'test_execution_record.ExecutionRecordTests', control) for control in [
+        ('single_response_time', 'lambda: now or datetime.now(timezone.utc)', 'lambda: now or as_of',
+         'test_single_evaluation_keeps_start_time_when_responses_cross_open'),
+        ('single_replay_clock', "timestamp(record['as_of']))", 'datetime.now(timezone.utc))',
+         'test_single_evaluation_keeps_start_time_when_responses_cross_open'),
+    ]]
     cases.append(('single_run.py', 'test_universe_run.UniverseRunTests',
                   ('universe_list_rate', 'time.sleep(1.05)', 'time.sleep(0.35)',
                    'test_stock_all_requests_obey_separate_one_request_per_second_limit')))
@@ -162,6 +191,8 @@ def main() -> int:
                   ('repligen_default_source',
                    "        ('RGEN', 'Repligen', 'https://investors.repligen.com/press-releases/default.aspx', 'https://investors.repligen.com/press-releases/news-details/'),\n", '',
                    'test_repligen_archive_ignores_only_wholly_past_date_conflicts')))
+    cases += [('execution_record.py', test.rsplit('.', 1)[0], (name, old, new, test.rsplit('.', 1)[1]))
+              for name, old, new, test in RECORD_CONTROLS]
     for filename, test_class, (name, old, new, test) in cases:
         source = (ROOT / filename).read_text()
         if source.count(old) != 1:
@@ -170,8 +201,8 @@ def main() -> int:
             folder = Path(tmp)
             (folder / 'docs').mkdir()
             for relative in ['docs/single-run-contract.md', 'docs/universe-run-contract.md',
-                             'single_run.py', 'universe_run.py', 'probe_earnings_sources.py',
-                             'test_single_run.py', 'test_universe_run.py']:
+                             'single_run.py', 'universe_run.py', 'execution_record.py', 'probe_earnings_sources.py',
+                             'test_single_run.py', 'test_universe_run.py', 'test_execution_record.py']:
                 shutil.copyfile(ROOT / relative, folder / relative)
             command = [sys.executable, '-m', 'unittest', test_class + '.' + test]
             observations = []
