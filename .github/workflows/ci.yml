@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
+        with:
+          version: 2026.10.0
+      - name: Tool versions
+        run: |
+          mise --version
+          mise exec -- python --version
+          mise exec -- ruff --version
+          mise exec -- actionlint -version
+          mise exec -- shellcheck --version
+      - run: mise run lint
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@94c60b39bc2d90ab2f9bab27f38d3cc4812c1834 # v5.1.0
+        with:
+          version: 2026.10.0
+      - name: Python version
+        run: mise exec -- python --version
+      - run: mise run test
+      - name: Negative controls
+        if: matrix.os == 'ubuntu-latest'
+        run: mise run negative-controls
+
+  result:
+    name: CI result
+    if: always()
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require every check to succeed
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          test "$LINT_RESULT" = success
+          test "$TEST_RESULT" = success

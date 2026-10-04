@@ -1,0 +1,25 @@
+[tools]
+python = "3.14"
+ruff = "0.16.10"
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+
+[tasks.test]
+description = "전체 테스트와 프로브 자체 검증"
+run = [
+  "python -B -m unittest discover -v",
+  "python -B probe_alpaca_trades.py --self-check",
+  "python -B probe_earnings_sources.py --self-check",
+]
+
+[tasks.negative-controls]
+description = "정상 구현과 오류 주입 구현의 탐지 검사"
+run = "python -B check_negative_controls.py"
+
+[tasks.lint]
+description = "Python 린트·포맷과 워크플로·셸 검사"
+run = ["ruff check .", "ruff format --check .", "actionlint"]
+
+[tasks.check]
+description = "CI와 같은 전체 로컬 검증"
+depends = ["lint", "test", "negative-controls"]

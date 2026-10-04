@@ -2,7 +2,7 @@
 
 MU 한 종목의 공개 자료를 자동 수집하고 로컬 보고서와 재현 기록을 만드는 개발 검증입니다. 전체 종목군 탐색과 첫 마일스톤 완료를 의미하지 않습니다. 계산 규칙과 미검증 항목은 [데이터·계산 계약](single-run-contract.md)을 확인하세요.
 
-Python 3.11 이상에서 저장소 루트를 작업 디렉터리로 사용하세요. 별도 패키지 설치는 필요하지 않습니다.
+Python 3.14에서 저장소 루트를 작업 디렉터리로 사용하세요. 실행 코드에는 표준 라이브러리만 필요합니다. Python과 검증 도구는 [mise 설정과 CI 안내](ci-design.md#로컬-검증)에 따라 준비하세요.
 
 ## 인증정보 준비
 
@@ -41,9 +41,9 @@ KIS 원주가를 Yahoo 정규장 일봉과 대조하고, 거래량은 Yahoo 일�
 
 ```sh
 python3 single_run.py replay runs/mu-first
-python3 -m unittest discover -v
-python3 check_negative_controls.py
-python3 -m py_compile single_run.py test_single_run.py check_negative_controls.py
+mise run test
+mise run negative-controls
+mise run lint
 ```
 
 재현은 네트워크·인증정보 없이 보존된 응답을 다시 처리합니다. 원래 코드 버전과 규칙이 일치해야 하며 자료 또는 보고서가 바뀌면 실패합니다. SHA-256은 우발적인 변경을 확인하는 무결성 검사로, 작성자 인증 서명이 아닙니다. 기존 기록은 덮어쓰지 않습니다.

@@ -1,0 +1,7 @@
+target-version = "py314"
+include = ["*.py"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "RUF"]
+# 보고서의 곱셈 기호와 수학적 빼기 기호를 보존한다.
+allowed-confusables = ["×", "−"]

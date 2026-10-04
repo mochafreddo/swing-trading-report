@@ -5,4 +5,5 @@
 .envrc.local
 *.local.md
 __pycache__/
+.ruff_cache/
 runs/

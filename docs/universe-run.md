@@ -1,6 +1,6 @@
 # 전체 종목군 평가 실행
 
-NYSE·Nasdaq의 토스 거래 가능 보통주 목록을 구성하고, 종목별 판정과 최대 3개 후보의 기본 보고서를 만듭니다. 전체 탐색 범위와 보류 사유는 [평가 계약](universe-run-contract.md)을 확인하세요. Python 3.11 이상과 표준 라이브러리를 사용합니다.
+NYSE·Nasdaq의 토스 거래 가능 보통주 목록을 구성하고, 종목별 판정과 최대 3개 후보의 기본 보고서를 만듭니다. 전체 탐색 범위와 보류 사유는 [평가 계약](universe-run-contract.md)을 확인하세요. Python 3.14와 표준 라이브러리를 사용합니다. Python과 검증 도구는 [mise 설정과 CI 안내](ci-design.md#로컬-검증)에 따라 준비하세요.
 
 ## 실행
 
@@ -47,9 +47,9 @@ python3 universe_run.py run \
 ```sh
 python3 universe_run.py replay runs/universe-first
 python3 -m unittest test_universe_run -v
-python3 -m unittest discover -v
-python3 check_negative_controls.py
-python3 -m py_compile single_run.py universe_run.py test_single_run.py test_universe_run.py check_negative_controls.py
+mise run test
+mise run negative-controls
+mise run lint
 ```
 
 재현은 인증정보와 네트워크를 사용하지 않습니다. 원본 응답·판정·순위·계산 가격·보고서와 코드·규칙·계약의 일치를 확인합니다. `runs/`는 Git에서 제외되므로 다른 체크아웃에서 재현하려면 실행 기록과 동일한 코드 버전을 함께 준비하세요. 문법 검사는 정적 타입 검사를 대신하지 않습니다.
