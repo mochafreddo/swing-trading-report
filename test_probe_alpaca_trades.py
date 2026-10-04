@@ -59,6 +59,51 @@ def cli(*args):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_credential_echo_is_rejected_without_saving_or_exposing_it(self):
+        for echoed in ("test-key", "test-secret"):
+            with self.subTest(echoed=echoed), tempfile.TemporaryDirectory() as root:
+                output = Path(root) / "run"
+                first = page([ROW], "next")
+                data = json.loads(page([dict(ROW, i=2)], requested="next")["body"])
+                data["echo"] = echoed
+                responses = iter([first["body"].encode(), json.dumps(data).encode()])
+                with (
+                    patch.object(probe.sys.stdin, "isatty", return_value=True),
+                    patch.object(
+                        probe.getpass,
+                        "getpass",
+                        side_effect=["test-key", "test-secret"],
+                    ),
+                    patch.object(
+                        probe,
+                        "build_opener",
+                        return_value=SimpleNamespace(
+                            open=lambda *args, responses=responses, **kwargs: BytesIO(
+                                next(responses)
+                            )
+                        ),
+                    ),
+                    patch.object(probe.time, "sleep"),
+                ):
+                    summary, progress = cli(
+                        "--day", "2026-09-11", "--max-pages", 2, "--output", output
+                    )
+                saved = json.loads((output / "record.json").read_text())
+                self.assertEqual(len(saved["pages"]), 1)
+                self.assertEqual(saved["pages"][0]["body"], first["body"])
+                self.assertEqual(saved["error"], "transport_or_response_invalid")
+                self.assertEqual(summary["collection_status"], "failed")
+                self.assertFalse(summary["pagination_complete"])
+                artifacts = "".join(path.read_text() for path in output.iterdir())
+                for secret in ("test-key", "test-secret"):
+                    self.assertNotIn(secret, artifacts + progress + json.dumps(summary))
+                with patch.object(
+                    probe, "build_opener", side_effect=AssertionError("offline only")
+                ) as network:
+                    replay, _ = cli("--replay", output / "record.json")
+                    self.assertEqual(summary, replay)
+                    network.assert_not_called()
+
     def test_replay_groups_condition_amounts_without_certifying_turnover(self):
         with tempfile.TemporaryDirectory() as root:
             source = Path(root) / "record.json"

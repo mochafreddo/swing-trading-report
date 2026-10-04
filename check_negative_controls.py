@@ -366,6 +366,166 @@ def main() -> int:
         for control in UNIVERSE_CONTROLS
     ]
     cases += [
+        ("single_run.py", "test_single_run.SingleRunTests", control)
+        for control in [
+            (
+                "atr_simple_average",
+                "        atr = sum(tr[:14]) / 14\n        for value in tr[14:]:\n            atr = (atr * 13 + value) / 14",
+                "        atr = sum(tr[-14:]) / 14",
+                "test_atr_wilder_seed_and_both_gap_directions",
+            ),
+            (
+                "atr_upward_gap",
+                '                abs(row["high"] - previous["clos"]),',
+                "                Decimal(0),",
+                "test_atr_wilder_seed_and_both_gap_directions",
+            ),
+            (
+                "atr_downward_gap",
+                '                abs(row["low"] - previous["clos"]),',
+                "                Decimal(0),",
+                "test_atr_wilder_seed_and_both_gap_directions",
+            ),
+            (
+                "sma20_instead_of_50",
+                '        sma = sum(row["clos"] for row in series) / 50',
+                '        sma = sum(row["clos"] for row in series[-20:]) / 20',
+                "test_sma50_includes_the_oldest_close",
+            ),
+            (
+                "sma49_instead_of_50",
+                '        sma = sum(row["clos"] for row in series) / 50',
+                '        sma = sum(row["clos"] for row in series[-49:]) / 49',
+                "test_sma50_includes_the_oldest_close",
+            ),
+            (
+                "breakout_19_sessions",
+                '        base = max(row["high"] for row in series[-21:-1])',
+                '        base = max(row["high"] for row in series[-20:-1])',
+                "test_breakout_window_includes_twentieth_but_not_twenty_first_prior_bar",
+            ),
+            (
+                "breakout_21_sessions",
+                '        base = max(row["high"] for row in series[-21:-1])',
+                '        base = max(row["high"] for row in series[-22:-1])',
+                "test_breakout_window_includes_twentieth_but_not_twenty_first_prior_bar",
+            ),
+            (
+                "volume_19_sessions",
+                '        avg_volume = sum(row["tvol"] for row in series[-21:-1]) / 20',
+                '        avg_volume = sum(row["tvol"] for row in series[-20:-1]) / 19',
+                "test_volume_window_includes_twentieth_but_not_twenty_first_prior_bar",
+            ),
+            (
+                "volume_21_sessions",
+                '        avg_volume = sum(row["tvol"] for row in series[-21:-1]) / 20',
+                '        avg_volume = sum(row["tvol"] for row in series[-22:-1]) / 21',
+                "test_volume_window_includes_twentieth_but_not_twenty_first_prior_bar",
+            ),
+            (
+                "kis_duplicate_or_order_guard",
+                '        if len(days) != len(set(days)) or days != sorted(days, reverse=True):\n            raise DataError("duplicate_or_unordered_bars")',
+                "        pass",
+                "test_stale_missing_duplicate_and_future_quotes_are_held",
+            ),
+            (
+                "kis_session_window_guard",
+                '        if days[:50] != list(reversed(expected)):\n            raise DataError("missing_stale_or_future_bars")',
+                "        pass",
+                "test_stale_missing_duplicate_and_future_quotes_are_held",
+            ),
+        ]
+    ]
+    cases += [
+        ("single_run.py", "test_universe_run.UniverseRunTests", control)
+        for control in [
+            (
+                "nyse_daily_exchange",
+                '"EXCD": exchange,\n                    "SYMB": symbol,\n                    "GUBN": "0",',
+                '"EXCD": "NAS",\n                    "SYMB": symbol,\n                    "GUBN": "0",',
+                "test_nyse_candidate_uses_nys_for_daily_and_intraday_prices",
+            ),
+            (
+                "nyse_intraday_exchange",
+                '"EXCD": exchange,\n                    "SYMB": symbol,\n                    "NMIN": "30",',
+                '"EXCD": "NAS",\n                    "SYMB": symbol,\n                    "NMIN": "30",',
+                "test_nyse_candidate_uses_nys_for_daily_and_intraday_prices",
+            ),
+        ]
+    ]
+    cases += [
+        ("universe_run.py", "test_universe_run.UniverseRunTests", control)
+        for control in [
+            (
+                "foreign_stock_partition",
+                '            for kind in RULES["types"]\n            for symbol, row in lists[kind].items()',
+                '            for kind in ("STOCK",)\n            for symbol, row in lists[kind].items()',
+                "test_foreign_common_stock_reconciles_and_is_selected",
+            ),
+            (
+                "stock_detail_batch_limit",
+                "    for start in range(0, len(symbols), 200):\n        batch = symbols[start : start + 200]",
+                "    for start in range(0, len(symbols), 2000):\n        batch = symbols[start : start + 2000]",
+                "test_stock_detail_batches_cover_201_symbols_once",
+            ),
+        ]
+    ]
+    cases.append(
+        (
+            "probe_alpaca_trades.py",
+            "test_probe_alpaca_trades.ProbeTests",
+            (
+                "credential_echo_guard",
+                '                if key in body or secret in body:\n                    raise ValueError("credential_echo_rejected")',
+                "                pass",
+                "test_credential_echo_is_rejected_without_saving_or_exposing_it",
+            ),
+        )
+    )
+    for filename, signature, call, error in (
+        (
+            "single_run.py",
+            "def replay(output: Path) -> dict:",
+            'run.__kwdefaults__["fetch"](NEWS, credentials={})',
+            "DataError",
+        ),
+        (
+            "universe_run.py",
+            "def replay(output):",
+            'run.__kwdefaults__["fetch"](s.NEWS, credentials={})',
+            "s.DataError",
+        ),
+    ):
+        for test in (
+            "test_both_replays_succeed_without_network",
+            "test_both_replays_reject_record_and_report_changes_without_network",
+        ):
+            cases.append(
+                (
+                    filename,
+                    "test_execution_record.ExecutionRecordTests",
+                    (
+                        filename + "_" + test + "_bound_network",
+                        signature,
+                        signature
+                        + f"\n    try:\n        {call}\n    except ({error}, AssertionError):\n        pass",
+                        test,
+                    ),
+                )
+            )
+    cases.append(
+        (
+            "execution_record.py",
+            "test_execution_record.ExecutionRecordTests",
+            (
+                "replay_direct_socket",
+                "    def verify(self, inputs, result, render):",
+                '    def verify(self, inputs, result, render):\n        import socket\n        try:\n            with socket.socket() as connection:\n                connection.connect(("127.0.0.1", 1))\n        except AssertionError:\n            pass',
+                "test_both_replays_succeed_without_network",
+            ),
+        )
+    )
+    cases += [
         ("probe_earnings_sources.py", "test_universe_run.UniverseRunTests", control)
         for control in [
             (
@@ -687,9 +847,11 @@ def main() -> int:
                 "universe_run.py",
                 "execution_record.py",
                 "probe_earnings_sources.py",
+                "probe_alpaca_trades.py",
                 "test_single_run.py",
                 "test_universe_run.py",
                 "test_execution_record.py",
+                "test_probe_alpaca_trades.py",
             ]:
                 shutil.copyfile(ROOT / relative, folder / relative)
             command = [sys.executable, "-m", "unittest", test_class + "." + test]

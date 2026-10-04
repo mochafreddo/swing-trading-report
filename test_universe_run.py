@@ -52,20 +52,26 @@ class UniverseResponses:
                 s.stock
                 for s in self.sources.values()
                 if s.stock["market"] == query["market"][0]
-                and s.stock["securityType"] == query.get("securityType", ["STOCK"])[0]
+                and (
+                    "securityType" not in query
+                    or s.stock["securityType"] == query["securityType"][0]
+                )
             ]
             return json.dumps({"result": sorted(rows, key=lambda r: r["symbol"])})
         if path.endswith("/stocks"):
-            return json.dumps(
-                {
-                    "result": [
-                        self.sources[s].stock for s in query["symbols"][0].split(",")
-                    ]
-                }
-            )
+            symbols = query["symbols"][0].split(",")
+            if not 1 <= len(symbols) <= 200:
+                raise AssertionError("stock detail request exceeds 200 symbols")
+            return json.dumps({"result": [self.sources[s].stock for s in symbols]})
         symbol = query.get("SYMB", [path.rsplit("/", 1)[-1]])[0]
         if symbol in self.sources:
             source = self.sources[symbol]
+            if path.endswith(("/dailyprice", "/inquire-time-itemchartprice")):
+                exchange = {"NASDAQ": "NAS", "NYSE": "NYS"}[source.stock["market"]]
+                if query.get("EXCD") != [exchange]:
+                    raise AssertionError(
+                        f"wrong KIS exchange for {symbol}: {query.get('EXCD')}"
+                    )
             body = source(url.replace("/chart/" + symbol, "/chart/MU"))
             if symbol != "MU":
                 exchange = "DNYS" if source.stock["market"] == "NYSE" else "DNAS"
@@ -1383,8 +1389,78 @@ class UniverseRunTests(unittest.TestCase):
             )
             saved = json.loads((out / "record.json").read_text())
             self.assertEqual(saved, record)
-            self.assertEqual(u.replay(out), record)
+            with patch(
+                "single_run.build_opener",
+                side_effect=AssertionError("network during replay"),
+            ) as network:
+                self.assertEqual(u.replay(out), record)
+                network.assert_not_called()
             return record, (out / "report.md").read_text()
+
+    def test_nyse_candidate_uses_nys_for_daily_and_intraday_prices(self):
+        source = UniverseResponses()
+        source.add_company("IBM", 2)
+        source.sources["IBM"].stock["market"] = "NYSE"
+        record, _ = self.run_case(source, earnings_sources=source.earnings_sources)
+        self.assertEqual(record["result"]["candidates"], ["IBM", "MU"])
+        self.assertEqual(
+            record["inputs"]["stocks"]["IBM"]["result"]["status"], "selected"
+        )
+        requests = [
+            (
+                urlparse(item["url"]).path.rsplit("/", 1)[-1],
+                parse_qs(urlparse(item["url"]).query),
+            )
+            for item in record["responses"]
+            if parse_qs(urlparse(item["url"]).query).get("SYMB") == ["IBM"]
+        ]
+        self.assertEqual(
+            {path for path, _ in requests},
+            {"dailyprice", "inquire-time-itemchartprice"},
+        )
+        for _, query in requests:
+            self.assertEqual(query["EXCD"], ["NYS"])
+
+    def test_foreign_common_stock_reconciles_and_is_selected(self):
+        source = UniverseResponses()
+        source.add_company("AAA", 2)
+        source.sources["AAA"].stock["securityType"] = "FOREIGN_STOCK"
+        record, _ = self.run_case(source, earnings_sources=source.earnings_sources)
+        self.assertTrue(record["result"]["coverage_complete"])
+        self.assertEqual(
+            record["inputs"]["universe"]["markets"]["NASDAQ"]["returned"],
+            {"all": 2, "STOCK": 1, "FOREIGN_STOCK": 1},
+        )
+        row = record["inputs"]["stocks"]["AAA"]
+        self.assertEqual(row["inputs"]["stock"]["securityType"], "FOREIGN_STOCK")
+        self.assertEqual(row["result"]["status"], "selected")
+        self.assertEqual(record["result"]["candidates"], ["AAA", "MU"])
+
+    def test_stock_detail_batches_cover_201_symbols_once(self):
+        source = UniverseResponses()
+        for index in range(199):
+            source.add_company(f"T{index:03}", 2)
+
+        def fetch(url):
+            if "/market-calendar/" in url:
+                raise u.s.DataError("source_fetch_failed")
+            return source(url)
+
+        record, _ = self.run_case(fetch)
+        batches = [
+            parse_qs(urlparse(item["url"]).query)["symbols"][0].split(",")
+            for item in record["responses"]
+            if urlparse(item["url"]).path.endswith("/stocks")
+        ]
+        self.assertEqual([len(batch) for batch in batches], [200, 1])
+        self.assertEqual(
+            [symbol for batch in batches for symbol in batch], sorted(source.sources)
+        )
+        self.assertEqual(sorted(record["inputs"]["stocks"]), sorted(source.sources))
+        for symbol, row in record["inputs"]["stocks"].items():
+            with self.subTest(symbol=symbol):
+                self.assertEqual(row["inputs"]["stock"]["symbol"], symbol)
+                self.assertNotIn("stock_detail_missing", row["inputs"]["issues"])
 
     def test_partial_hold_keeps_verified_candidate_and_replays(self):
         record, report = self.run_case()
@@ -1632,14 +1708,16 @@ class UniverseRunTests(unittest.TestCase):
         )
 
     def test_replay_rejects_modified_input_and_report_and_never_fetches(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch(
+                "single_run.build_opener",
+                side_effect=AssertionError("network during replay"),
+            ) as network,
+        ):
             out = Path(tmp) / "run"
             record = u.run(out, DAY, fetch=UniverseResponses(), now=NOW, synthetic=True)
-            with patch(
-                "single_run.fetch_public",
-                side_effect=AssertionError("network during replay"),
-            ):
-                self.assertEqual(u.replay(out), record)
+            self.assertEqual(u.replay(out), record)
             original = (out / "report.md").read_text()
             (out / "report.md").write_text(original + "changed")
             with self.assertRaisesRegex(u.s.DataError, "replay_report_mismatch"):
@@ -1649,6 +1727,7 @@ class UniverseRunTests(unittest.TestCase):
             (out / "record.json").write_text(json.dumps(record))
             with self.assertRaisesRegex(u.s.DataError, "record_integrity_mismatch"):
                 u.replay(out)
+            network.assert_not_called()
 
     def test_stock_all_requests_obey_separate_one_request_per_second_limit(self):
         from io import BytesIO

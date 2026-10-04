@@ -512,8 +512,87 @@ class SingleRunTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "run"
             record = run(out, DAY, fetch=source, now=NOW, synthetic=True)
-            self.assertEqual(replay(out)["result"], record["result"])
+            with patch(
+                "single_run.build_opener",
+                side_effect=AssertionError("network during replay"),
+            ) as network:
+                self.assertEqual(replay(out)["result"], record["result"])
+                network.assert_not_called()
             return record
+
+    def test_atr_wilder_seed_and_both_gap_directions(self):
+        # Independent closed form: 2 + (seed - 2) * (13/14)^35 + 1/14.
+        for close, high, low, expected in (
+            ("80", "81", "79", "2.162180730841244405107496"),
+            ("120", "121", "119", "2.183534180114814517233629"),
+        ):
+            with self.subTest(first_close=close):
+                source = PublicResponses()
+                source.bars[0].update(open=close, clos=close, high=high, low=low)
+                result = self.run_case(source)["result"]
+                self.assertEqual(result["status"], "selected")
+                atr = Decimal(expected)
+                self.assertAlmostEqual(
+                    Decimal(result["metrics"]["atr14"]), atr, places=24
+                )
+                for key, value in (
+                    ("entry_high", Decimal(100) + atr / 2),
+                    ("stop", Decimal(99) - atr),
+                    ("risk", Decimal(1) + atr),
+                    ("target", Decimal(102) + atr * 2),
+                ):
+                    self.assertAlmostEqual(
+                        Decimal(result["plan"][key]), value, places=23
+                    )
+
+    def test_sma50_includes_the_oldest_close(self):
+        for close, expected, status in (
+            ("196", "100", "excluded"),
+            ("195.99", "99.9998", "selected"),
+        ):
+            with self.subTest(first_close=close):
+                source = PublicResponses()
+                source.bars[0].update(open=close, clos=close, high="197", low="195")
+                result = self.run_case(source)["result"]
+                self.assertEqual(Decimal(result["metrics"]["sma50"]), Decimal(expected))
+                self.assertEqual(result["status"], status)
+                if status == "excluded":
+                    self.assertEqual(result["reasons"], ["close_not_above_sma50"])
+                    self.assertIsNone(result["plan"])
+
+    def test_breakout_window_includes_twentieth_but_not_twenty_first_prior_bar(self):
+        for index, expected, status in (
+            (-21, "101", "excluded"),
+            (-22, "99", "selected"),
+        ):
+            with self.subTest(index=index):
+                source = PublicResponses()
+                source.bars[index]["high"] = "101"
+                result = self.run_case(source)["result"]
+                self.assertEqual(
+                    Decimal(result["metrics"]["breakout"]), Decimal(expected)
+                )
+                self.assertEqual(result["status"], status)
+                if status == "excluded":
+                    self.assertEqual(result["reasons"], ["close_not_above_breakout"])
+                    self.assertIsNone(result["plan"])
+
+    def test_volume_window_includes_twentieth_but_not_twenty_first_prior_bar(self):
+        for index, expected, status in (
+            (-21, "1.428571428571428571428571429", "excluded"),
+            (-22, "1.5", "selected"),
+        ):
+            with self.subTest(index=index):
+                source = PublicResponses()
+                source.bars[index]["tvol"] = "2000000"
+                result = self.run_case(source)["result"]
+                self.assertEqual(result["status"], status)
+                self.assertEqual(
+                    Decimal(result["metrics"]["volume_ratio"]), Decimal(expected)
+                )
+                if status == "excluded":
+                    self.assertEqual(result["reasons"], ["volume_below_multiple"])
+                    self.assertIsNone(result["plan"])
 
     def test_selected_report_and_offline_replay(self):
         source = PublicResponses()
@@ -538,7 +617,12 @@ class SingleRunTests(unittest.TestCase):
             report = (out / "report.md").read_text()
             self.assertIn("검증용 사례", report)
             self.assertIn("실제 체결", report)
-            self.assertEqual(replay(out)["result"], record["result"])
+            with patch(
+                "single_run.build_opener",
+                side_effect=AssertionError("network during replay"),
+            ) as network:
+                self.assertEqual(replay(out)["result"], record["result"])
+                network.assert_not_called()
 
     def test_breakout_equality_is_excluded(self):
         source = PublicResponses()
@@ -603,18 +687,39 @@ class SingleRunTests(unittest.TestCase):
                 self.assertIsNone(record["result"]["plan"])
 
     def test_stale_missing_duplicate_and_future_quotes_are_held(self):
-        for mode in ["stale", "missing", "duplicate", "future"]:
+        for mode in ["stale", "missing", "duplicate", "unordered", "future"]:
             with self.subTest(mode=mode):
                 source = PublicResponses()
-                if mode == "stale":
-                    source.bars.pop()
-                elif mode == "missing":
-                    source.bars.pop(20)
-                elif mode == "duplicate":
-                    source.bars[-1]["xymd"] = source.bars[-2]["xymd"]
-                else:
-                    source.bars[-1]["xymd"] = "20260910"
-                self.assertEqual(self.run_case(source)["result"]["status"], "held")
+
+                def fetch(url, *, source=source, mode=mode):
+                    body = source(url)
+                    if "/dailyprice?" not in url:
+                        return body
+                    data = json.loads(body)
+                    rows = data["output2"]
+                    if mode == "stale":
+                        rows.pop(0)
+                    elif mode == "missing":
+                        rows.pop(20)
+                    elif mode == "duplicate":
+                        rows[25]["xymd"] = rows[26]["xymd"]
+                    elif mode == "unordered":
+                        rows[20], rows[21] = rows[21], rows[20]
+                    else:
+                        rows[0]["xymd"] = DAY.strftime("%Y%m%d")
+                    return json.dumps(data)
+
+                record = self.run_case(fetch)
+                self.assertIn("price_reference", record["inputs"])
+                result = record["result"]
+                self.assertEqual(result["status"], "held")
+                self.assertIn(
+                    "duplicate_or_unordered_bars"
+                    if mode in ("duplicate", "unordered")
+                    else "missing_stale_or_future_bars",
+                    result["reasons"],
+                )
+                self.assertIsNone(result["plan"])
 
     def test_unconfirmed_and_estimated_earnings_are_held(self):
         for note in [

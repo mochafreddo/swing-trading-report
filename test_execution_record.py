@@ -14,6 +14,34 @@ from test_universe_run import UniverseResponses
 
 
 class ExecutionRecordTests(unittest.TestCase):
+    def setUp(self):
+        self.network = self.enterContext(
+            patch(
+                "single_run.build_opener",
+                side_effect=AssertionError("network during replay"),
+            )
+        )
+        self.connection = self.enterContext(
+            patch(
+                "socket.socket.connect",
+                side_effect=AssertionError("socket during replay"),
+            )
+        )
+
+    def tearDown(self):
+        self.network.assert_not_called()
+        self.connection.assert_not_called()
+
+    def test_both_replays_succeed_without_network(self):
+        for module, fetch in ((s, PublicResponses), (u, UniverseResponses)):
+            with (
+                self.subTest(module=module.__name__),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
+                output = Path(tmp) / "run"
+                record = module.run(output, DAY, fetch=fetch(), now=NOW, synthetic=True)
+                self.assertEqual(module.replay(output), record)
+
     def test_single_evaluation_keeps_start_time_when_responses_cross_open(self):
         source = PublicResponses()
         current = [NOW]
@@ -75,14 +103,7 @@ class ExecutionRecordTests(unittest.TestCase):
                         path.write_text(json.dumps(record))
                     else:
                         path.write_text(path.read_text() + "Changed report.\n")
-                    with (
-                        patch.object(
-                            s,
-                            "fetch_public",
-                            side_effect=AssertionError("network during replay"),
-                        ),
-                        self.assertRaisesRegex(s.DataError, error),
-                    ):
+                    with self.assertRaisesRegex(s.DataError, error):
                         module.replay(output)
 
     def test_replays_reject_response_sequence_changes(self):
