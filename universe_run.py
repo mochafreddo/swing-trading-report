@@ -214,37 +214,10 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
                 stock_input['issues'].extend(inputs['issues'])
             else:
                 stock_input['calendar'] = cal
-            before_open = cal and s.timestamp(checked_at()) < s.timestamp(cal['open'])
-            if 'stock' in stock_input and before_open:
-                market = item['market']
-                exchange = {'NASDAQ': 'NAS', 'NYSE': 'NYS'}[market]
-                def bars():
-                    query = {'AUTH': '', 'EXCD': exchange, 'SYMB': symbol, 'GUBN': '0',
-                             'BYMD': cal['past'][-1].replace('-', ''), 'MODP': '0'}
-                    data = json.loads(read(s.KIS + '/uapi/overseas-price/v1/quotations/dailyprice?' + urlencode(query)))
-                    if data['rt_cd'] != '0' or data['output1']['rsym'] != 'D' + exchange + symbol:
-                        raise s.DataError('price_identity_mismatch')
-                    return data['output2']
-                for name, work in [
-                    ('bars_0', bars),
-                    ('price_reference', lambda: s.price_reference(read, cal, report_day, as_of, symbol, market)),
-                ]:
-                    value = attempt(stock_input['issues'], name, work)
-                    if value is not None:
-                        stock_input[name] = value
-            def stage(name, work):
-                value = attempt(stock_input['issues'], name, work)
-                if value is not None:
-                    stock_input[name] = value
-            if cal and as_of <= s.timestamp(checked_at()) < s.timestamp(cal['open']):
-                s.collect_remaining(stock_input, stage, read, report_day, as_of,
-                                    earnings_sources.get(symbol), symbol, item['market'])
-            else:
-                stock_input['skipped'] = {'earnings': 'unverified_session', 'turnover': 'unverified_session'}
-            stock_input['collected_at'] = checked_at()
-            if cal and not (as_of <= s.timestamp(checked_at()) < s.timestamp(cal['open'])):
-                stock_input['issues'].append('collection_outside_premarket')
-            inputs['stocks'][symbol]['result'] = s.evaluate(stock_input)
+            evidence, result = s.collect_candidate(stock_input, read, report_day, as_of,
+                                                   earnings_sources.get(symbol), symbol, item['market'],
+                                                   execution='universe', checked_at=checked_at)
+            inputs['stocks'][symbol] = {'inputs': evidence, 'result': result}
     return inputs
 
 

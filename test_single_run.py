@@ -108,6 +108,44 @@ class PublicResponses:
 
 
 class SingleRunTests(unittest.TestCase):
+    def test_initial_failures_preserve_price_requests_and_replay(self):
+        from single_run import DataError
+        for mode, issues in [
+            ('stock', ['stock:source_fetch_failed']),
+            ('calendar', ['calendar:source_fetch_failed']),
+            ('rejected', ['bars_0:provider_rejected_request']),
+            ('null', []),
+        ]:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                source = PublicResponses()
+                def fetch(url):
+                    if (mode == 'stock' and '/api/v1/stocks?symbols=' in url
+                            or mode == 'calendar' and '/market-calendar/' in url):
+                        raise DataError('source_fetch_failed')
+                    body = source(url)
+                    if '/dailyprice?' in url:
+                        data = json.loads(body)
+                        if mode == 'rejected':
+                            data['rt_cd'] = '1'
+                        elif mode == 'null':
+                            data['output2'] = None
+                        body = json.dumps(data)
+                    return body
+                out = Path(tmp) / 'run'
+                record = run(out, DAY, fetch=fetch, now=NOW, synthetic=True)
+                self.assertEqual(record['inputs']['issues'], issues)
+                self.assertEqual(record['result']['status'], 'held')
+                self.assertEqual(record['inputs']['skipped'],
+                                 {'earnings': 'unverified_price_inputs', 'turnover': 'unverified_price_inputs'})
+                urls = [item['url'] for item in record['responses']]
+                self.assertTrue(any('/dailyprice?' in url for url in urls))
+                self.assertEqual(any('/chart/MU?' in url for url in urls), mode != 'calendar')
+                self.assertEqual('bars_0' in record['inputs'], mode != 'rejected')
+                if mode == 'null':
+                    self.assertIsNone(record['inputs']['bars_0'])
+                    self.assertIn('invalid_required_data', record['result']['reasons'])
+                self.assertEqual(replay(out), record)
+
     def test_verified_price_failure_skips_remaining_sources(self):
         source = PublicResponses()
         source.stock['sharesOutstanding'] = '99999999'

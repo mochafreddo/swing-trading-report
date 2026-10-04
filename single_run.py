@@ -564,15 +564,20 @@ def regular_turnover(read, cal, symbol='MU', market='NASDAQ'):
             'coverage': 'Nasdaq TotalView; regular continuous trading; excludes closing auction and other venues'}
 
 
-def collect(read: Callable[[str], str], report_day: date, as_of: datetime) -> dict:
+def _collect_stage(inputs, name, work, *, execution):
+    try:
+        value = work()
+        if execution == 'single' or value is not None:
+            inputs[name] = value
+    except DataError as error:
+        inputs['issues'].append(name + ':' + str(error))
+    except (KeyError, IndexError, TypeError, ValueError, InvalidOperation):
+        inputs['issues'].append(name + ':invalid_response')
+
+
+def collect(read: Callable[[str], str], report_day: date, as_of: datetime) -> tuple[dict, dict]:
     inputs: dict = {'issues': [], 'earnings': {'status': 'unconfirmed'}}
-    def stage(name, work):
-        try:
-            inputs[name] = work()
-        except DataError as error:
-            inputs['issues'].append(name + ':' + str(error))
-        except (KeyError, IndexError, TypeError, ValueError, InvalidOperation):
-            inputs['issues'].append(name + ':invalid_response')
+    stage = partial(_collect_stage, inputs, execution='single')
 
     def stock():
         listed = json.loads(read(TOSS + '/api/v1/stocks/all?' + urlencode(
@@ -588,27 +593,50 @@ def collect(read: Callable[[str], str], report_day: date, as_of: datetime) -> di
 
     stage('stock', stock)
     stage('calendar', lambda: calendar(read, report_day, as_of))
-    previous = inputs.get('calendar', {}).get('past', [str(report_day - timedelta(days=1))])[-1]
+    return collect_candidate(inputs, read, report_day, as_of,
+                             {'listing_url': NEWS, 'article_prefix': 'https://investors.micron.com/news/press-release/',
+                              'company': 'Micron Technology'}, execution='single')
+
+
+def collect_candidate(inputs, read, report_day, as_of, source, symbol='MU', market='NASDAQ',
+                      *, execution, checked_at=None) -> tuple[dict, dict]:
+    """Enrich the supplied per-stock inputs and return them with their final evaluation.
+
+    Execution preserves the two collection contracts. Universe collection uses
+    the last response timestamp, including during replay, rather than a new clock.
+    """
+    if execution not in ('single', 'universe') or execution == 'universe' and checked_at is None:
+        raise DataError('invalid_collection_execution')
+    stage = partial(_collect_stage, inputs, execution=execution)
+    cal = inputs.get('calendar')
     def bars():
+        previous = cal['past'][-1] if cal else str(report_day - timedelta(days=1))
+        exchange = {'NASDAQ': 'NAS', 'NYSE': 'NYS'}[market]
         url = KIS + '/uapi/overseas-price/v1/quotations/dailyprice?' + urlencode(
-            {'AUTH': '', 'EXCD': 'NAS', 'SYMB': 'MU', 'GUBN': '0',
+            {'AUTH': '', 'EXCD': exchange, 'SYMB': symbol, 'GUBN': '0',
              'BYMD': previous.replace('-', ''), 'MODP': '0'})
         data = json.loads(read(url))
         if data['rt_cd'] != '0':
-            raise DataError('provider_rejected_request')
-        if data['output1']['rsym'] != 'DNASMU':
+            raise DataError('provider_rejected_request' if execution == 'single' else 'price_identity_mismatch')
+        if data['output1']['rsym'] != 'D' + exchange + symbol:
             raise DataError('price_identity_mismatch')
         return data['output2']
-    stage('bars_0', bars)
-    if 'calendar' in inputs:
-        stage('price_reference', lambda: price_reference(read, inputs['calendar'], report_day, as_of))
-    collect_remaining(inputs, stage, read, report_day, as_of,
-                      {'listing_url': NEWS, 'article_prefix': 'https://investors.micron.com/news/press-release/',
-                       'company': 'Micron Technology'})
-    return inputs
+    if execution == 'single' or (cal and timestamp(checked_at()) < timestamp(cal['open']) and 'stock' in inputs):
+        stage('bars_0', bars)
+        if cal:
+            stage('price_reference', lambda: price_reference(read, cal, report_day, as_of, symbol, market))
+    if execution == 'single' or cal and as_of <= timestamp(checked_at()) < timestamp(cal['open']):
+        _collect_remaining(inputs, stage, read, report_day, as_of, source, symbol, market)
+    else:
+        inputs['skipped'] = {'earnings': 'unverified_session', 'turnover': 'unverified_session'}
+    if execution == 'universe':
+        inputs['collected_at'] = checked_at()
+        if cal and not (as_of <= timestamp(checked_at()) < timestamp(cal['open'])):
+            inputs['issues'].append('collection_outside_premarket')
+    return inputs, evaluate(inputs)
 
 
-def collect_remaining(inputs, stage, read, report_day, as_of, source, symbol='MU', market='NASDAQ'):
+def _collect_remaining(inputs, stage, read, report_day, as_of, source, symbol, market):
     """Collect eligibility evidence only while a candidate remains possible."""
     inputs['skipped'] = {}
     result = evaluate(inputs)
@@ -799,8 +827,7 @@ def run(output: Path, report_day: date, *, fetch: Callable[[str], str] = fetch_p
         return item['body']
     with localcontext() as context:
         context.prec = 28
-        inputs = collect(read, report_day, as_of)
-        result = evaluate(inputs)
+        inputs, result = collect(read, report_day, as_of)
     record = {'format_version': 1, 'rules': RULES, 'code_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'contract': Path(__file__).with_name('docs').joinpath('single-run-contract.md').read_text(),
               'report_date': str(report_day), 'as_of': as_of.isoformat(), 'synthetic': synthetic,
@@ -829,8 +856,7 @@ def replay(output: Path) -> dict:
         return item['body']
     with localcontext() as context:
         context.prec = 28
-        inputs = collect(read, date.fromisoformat(record['report_date']), timestamp(record['as_of']))
-        result = evaluate(inputs)
+        inputs, result = collect(read, date.fromisoformat(record['report_date']), timestamp(record['as_of']))
     if next(remaining, None) is not None or inputs != record['inputs'] or result != record['result']:
         raise DataError('replay_result_mismatch')
     if (output / 'report.md').read_text() != render(record):

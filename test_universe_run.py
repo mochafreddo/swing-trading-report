@@ -59,6 +59,61 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_initial_failures_preserve_per_stock_price_collection_and_replay(self):
+        for mode, issues, prices, skipped in [
+            ('stock', ['stock:source_fetch_failed', 'stock_detail_missing'], False, 'unverified_price_inputs'),
+            ('calendar', ['calendar:source_fetch_failed'], False, 'unverified_session'),
+            ('rejected', ['bars_0:price_identity_mismatch'], True, 'unverified_price_inputs'),
+            ('null', [], True, 'unverified_price_inputs'),
+        ]:
+            with self.subTest(mode=mode):
+                source = UniverseResponses()
+                def fetch(url):
+                    if (mode == 'stock' and '/api/v1/stocks?symbols=' in url
+                            or mode == 'calendar' and '/market-calendar/' in url):
+                        raise u.s.DataError('source_fetch_failed')
+                    body = source(url)
+                    if '/dailyprice?' in url and 'SYMB=MU' in url:
+                        data = json.loads(body)
+                        if mode == 'rejected':
+                            data['rt_cd'] = '1'
+                        elif mode == 'null':
+                            data['output2'] = None
+                        body = json.dumps(data)
+                    return body
+                record, _ = self.run_case(fetch)
+                row = record['inputs']['stocks']['MU']
+                self.assertEqual(row['inputs']['issues'], issues)
+                self.assertEqual(row['result']['status'], 'held')
+                self.assertEqual(row['inputs']['skipped'], {'earnings': skipped, 'turnover': skipped})
+                urls = [item['url'] for item in record['responses']]
+                self.assertEqual(any('/dailyprice?' in url and 'SYMB=MU' in url for url in urls), prices)
+                self.assertEqual(any('/chart/MU?' in url for url in urls), prices)
+                self.assertNotIn('bars_0', row['inputs'])
+                if mode == 'null':
+                    self.assertNotIn('invalid_required_data', row['result']['reasons'])
+
+    def test_common_stock_evaluation_agrees_with_single_run(self):
+        for mode in ('normal', 'small_cap', 'near_earnings', 'bad_prices'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                single = PublicResponses()
+                universe = UniverseResponses()
+                for source in (single, universe.sources['MU']):
+                    if mode == 'small_cap':
+                        source.stock['sharesOutstanding'] = '99999999'
+                    elif mode == 'near_earnings':
+                        source.earnings_day = 'September 10, 2026'
+                    elif mode == 'bad_prices':
+                        source.bars[-1]['open'] = '102'
+                out = Path(tmp) / 'single'
+                record = u.s.run(out, DAY, fetch=single, now=NOW, synthetic=True)
+                self.assertEqual(u.s.replay(out), record)
+                whole, _ = self.run_case(universe)
+                row = whole['inputs']['stocks']['MU']
+                self.assertEqual(row['result'], record['result'])
+                self.assertEqual({key: value for key, value in row['inputs'].items() if key != 'collected_at'},
+                                 record['inputs'])
+
     def test_repligen_archive_ignores_only_wholly_past_date_conflicts(self):
         for mode in ('past', 'future', 'mixed', 'later_announcement'):
             with self.subTest(mode=mode):
@@ -822,7 +877,27 @@ class UniverseRunTests(unittest.TestCase):
             record = u.run(out, DAY, fetch=fetch, clock=lambda: current[0], synthetic=True)
             self.assertEqual(record['result']['candidates'], [])
             self.assertIn('collection_outside_premarket', record['inputs']['stocks']['MU']['result']['reasons'])
+            self.assertEqual(record['inputs']['stocks']['MU']['inputs']['skipped'],
+                             {'earnings': 'unverified_session', 'turnover': 'unverified_session'})
+            self.assertTrue(any('/chart/MU?' in item['url'] for item in record['responses']))
             self.assertEqual(u.replay(out), record)
+
+    def test_open_crossing_during_earnings_preserves_turnover_evidence_and_replays(self):
+        source = UniverseResponses()
+        current = [NOW]
+        def fetch(url):
+            body = source(url)
+            if 'micron.com' in url:
+                current[0] = NOW + timedelta(hours=2)
+            return body
+        record, _ = self.run_case(fetch, clock=lambda: current[0])
+        row = record['inputs']['stocks']['MU']
+        self.assertEqual(row['inputs']['skipped'], {})
+        self.assertIn('turnover', row['inputs'])
+        self.assertEqual(row['inputs']['collected_at'], current[0].isoformat())
+        self.assertEqual(row['result']['status'], 'held')
+        self.assertEqual(row['result']['reasons'], ['collection_outside_premarket'])
+        self.assertIsNone(row['result']['plan'])
 
     def test_missing_list_entries_never_claim_complete_coverage(self):
         source = UniverseResponses()

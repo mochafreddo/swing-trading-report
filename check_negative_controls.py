@@ -70,8 +70,6 @@ UNIVERSE_CONTROLS = [
     ('volume_ranking', "-Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", "Decimal(stocks[symbol]['result']['metrics']['volume_ratio'])", 'test_top_three_use_automatically_collected_company_announcements'),
     ('unverified_tie', "] > 1]", "] > 100]", 'test_equal_volume_ratios_do_not_rank_by_turnover_lower_bounds'),
     ('no_candidates_vs_held', "else 'excluded' if evaluated_exclusion else 'held'", "else 'held'", 'test_verified_no_candidates_and_all_held_are_distinct'),
-    ('exchange_identity', "data['output1']['rsym'] != 'D' + exchange + symbol", 'False', 'test_exchange_or_symbol_mismatch_is_held'),
-    ('collection_after_open', "stock_input['issues'].append('collection_outside_premarket')", 'pass', 'test_collection_crossing_open_holds_only_late_symbols'),
     ('replay_report', "raise s.DataError('replay_report_mismatch')", 'pass', 'test_replay_rejects_modified_input_and_report_and_never_fetches'),
     ('replay_record', "raise s.DataError('record_integrity_mismatch')", 'pass', 'test_replay_rejects_modified_input_and_report_and_never_fetches'),
 ]
@@ -126,6 +124,16 @@ def main() -> int:
          'test_unverified_prices_or_identity_cannot_prove_small_cap_exclusion'),
     ]]
     cases += [('single_run.py', 'test_universe_run.UniverseRunTests', control) for control in [
+        ('exchange_identity', "        if data['output1']['rsym'] != 'D' + exchange + symbol:", '        if False:',
+         'test_exchange_or_symbol_mismatch_is_held'),
+        ('collection_after_open', "inputs['issues'].append('collection_outside_premarket')", 'pass',
+         'test_collection_crossing_open_holds_only_late_symbols'),
+        ('universe_null_inputs', "if execution == 'single' or value is not None:", 'if True:',
+         'test_initial_failures_preserve_per_stock_price_collection_and_replay'),
+        ('universe_rejected_price', "'provider_rejected_request' if execution == 'single' else 'price_identity_mismatch'",
+         "'provider_rejected_request'", 'test_initial_failures_preserve_per_stock_price_collection_and_replay'),
+        ('earnings_open_crossing', "inputs['issues'].append('collection_outside_premarket')", 'pass',
+         'test_open_crossing_during_earnings_preserves_turnover_evidence_and_replays'),
         ('ir_feed_terminal', '                if not rows:\n                    break', '                if len(rows) < 5:\n                    break',
          'test_dynamic_ir_walks_short_pages_until_explicit_empty_page'),
         ('ir_feed_repeat', "raise DataError('earnings_feed_did_not_progress')", 'pass',
@@ -140,6 +148,8 @@ def main() -> int:
          'test_uncertain_ir_evidence_never_selects_a_candidate'),
     ]]
     cases += [('single_run.py', 'test_single_run.SingleRunTests', control) for control in [
+        ('single_null_inputs', "if execution == 'single' or value is not None:", 'if value is not None:',
+         'test_initial_failures_preserve_price_requests_and_replay'),
         ('price_exclusion_collection', "    if result['status'] == 'excluded':\n        inputs['skipped'] =", "    if False:\n        inputs['skipped'] =",
          'test_verified_price_failure_skips_remaining_sources'),
         ('earnings_exclusion_collection', "    if result['status'] == 'excluded':\n        inputs['skipped']['turnover']",
