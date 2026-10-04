@@ -162,7 +162,7 @@ def inspect_pages(pages, day, feed="sip"):
         "pages": len(pages),
         "counts": dict(counts),
         "condition_counts": dict(conditions),
-        "observed_symbols": sorted({i[0] for i in ids}),
+        "observed_symbols": observed,
         "symbols_without_observed_trades": sorted(set(SYMBOLS) - set(observed)),
         "identity_recurrences": dict(recurrences),
         "trade_update_counts": dict(updates),
@@ -396,7 +396,6 @@ def load_record(path):
     for page in record["pages"]:
         if hashlib.sha256(page["body"].encode()).hexdigest() != page["sha256"]:
             raise ValueError("saved_body_hash_mismatch")
-    inspect_pages(record["pages"], record["day"], record["feed"])
     return record, hashlib.sha256(raw).hexdigest()
 
 
@@ -404,6 +403,7 @@ def collect(day, output, max_pages, resume=None):
     pages, token, parent_hash, previous_elapsed = [], None, None, 0
     if resume is not None:
         previous, parent_hash = load_record(resume)
+        inspect_pages(previous["pages"], previous["day"], previous["feed"])
         day, pages = previous["day"], previous["pages"]
         previous_elapsed = previous["elapsed_seconds"]
         if pages:

@@ -161,7 +161,7 @@ CONTROLS = [
     ),
     (
         "missing_minutes",
-        "    if set(found) != set(expected)",
+        "    if set(found) != expected_set",
         "    if False",
         "test_invalid_regular_turnover_is_held",
     ),
@@ -188,32 +188,32 @@ CONTROLS = [
 UNIVERSE_CONTROLS = [
     (
         "non_common_detail_identity",
-        '                        or row.get("isinCode") != evidence["isin"]\n                        or row.get("',
-        '                        or row.get("',
+        '        or row.get("isinCode") != evidence["isin"]\n        or row.get("',
+        '        or row.get("',
         "test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings",
     ),
     (
         "non_common_listing_identity",
-        '                        or any(\n                            entry.get("symbol") != symbol\n                            or entry.get("isinCode") != evidence["isin"]\n                            for entry in listing_rows\n                        ',
-        "                        or any(False for entry in listing_rows",
+        '            entry.get("symbol") != symbol or entry.get("isinCode") != evidence["isin"]',
+        "            False",
         "test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings",
     ),
     (
         "non_common_pdf_digest",
-        '                        if (\n                            hashlib.sha256(body.encode()).hexdigest()\n                            != evidence["required_body_sha256"]\n                        ):',
-        "                        if False:",
+        '        if body_sha256 != evidence["required_body_sha256"]:',
+        "        if False:",
         "test_reviewed_pdf_requires_exact_bytes_and_replays_without_network",
     ),
     (
         "non_common_evidence",
-        '                        if not all(\n                            fragment in text for fragment in evidence["required_text"]\n                        )',
-        "                        if False",
+        '        if not all(fragment in text for fragment in evidence["required_text"])',
+        "        if False",
         "test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings",
     ),
     (
         "non_common_review_date",
-        '                    if (\n                        date.fromisoformat(evidence["reviewed_on"])\n                        > as_of.astimezone(s.NY).date()\n                    ):',
-        "                    if False:",
+        '    if date.fromisoformat(evidence["reviewed_on"]) > as_of.astimezone(s.NY).date():',
+        "    if False:",
         "test_non_common_review_cannot_hide_missing_identity_evidence_or_other_listings",
     ),
     (
@@ -266,14 +266,14 @@ UNIVERSE_CONTROLS = [
     ),
     (
         "volume_ranking",
-        "            -",
-        "            ",
+        "(-volume_ratios[symbol], symbol)",
+        "(volume_ratios[symbol], symbol)",
         "test_top_three_use_automatically_collected_company_announcements",
     ),
     (
         "unverified_tie",
-        '        if ratios[Decimal(stocks[symbol]["result"]["metrics"]["volume_ratio"])] > 1',
-        '        if ratios[Decimal(stocks[symbol]["result"]["metrics"]["volume_ratio"])] > 100',
+        "if ratios[volume_ratios[symbol]] > 1",
+        "if ratios[volume_ratios[symbol]] > 100",
         "test_equal_volume_ratios_do_not_rank_by_turnover_lower_bounds",
     ),
     (

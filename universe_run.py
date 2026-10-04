@@ -252,6 +252,49 @@ def discover(read):
     return universe
 
 
+def classify_non_common(read, universe, item, row, symbol, as_of, checked_at):
+    """Verify reviewed security identity and its source before excluding it."""
+    evidence = REVIEWED_NON_COMMON[symbol]
+    conflict = universe["markets"][item["market"]]["conflicts"].get(symbol)
+    listing_rows = [item["listing"]]
+    if conflict:
+        listing_rows += (
+            [conflict["general"]] if conflict["general"] else []
+        ) + conflict["typed"]
+    if (
+        item.get("ambiguous")
+        or item["market"] != evidence["market"]
+        or row.get("market") != evidence["market"]
+        or row.get("symbol") != symbol
+        or row.get("isinCode") != evidence["isin"]
+        or row.get("englishName") != evidence["english_name"]
+        or row.get("status") != "ACTIVE"
+        or row.get("currency") != "USD"
+        or any(
+            entry.get("symbol") != symbol or entry.get("isinCode") != evidence["isin"]
+            for entry in listing_rows
+        )
+    ):
+        raise s.DataError("security_classification_identity_mismatch")
+    if date.fromisoformat(evidence["reviewed_on"]) > as_of.astimezone(s.NY).date():
+        raise s.DataError("security_classification_review_in_future")
+    body = read(evidence["source"])
+    body_sha256 = hashlib.sha256(body.encode()).hexdigest()
+    if "required_body_sha256" in evidence:
+        if body_sha256 != evidence["required_body_sha256"]:
+            raise s.DataError("security_classification_evidence_missing")
+    else:
+        page = s.NewsPage()
+        page.feed(body)
+        text = " ".join("".join(page.text).split())
+        if not all(fragment in text for fragment in evidence["required_text"]):
+            raise s.DataError("security_classification_evidence_missing")
+    return evidence | {
+        "body_sha256": body_sha256,
+        "checked_at": checked_at(),
+    }
+
+
 def collect(read, report_day, as_of, earnings_sources, checked_at):
     universe = discover(read)
     inputs = {"universe": universe, "issues": [], "stocks": {}}
@@ -290,63 +333,19 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
             if row is not None and symbol in REVIEWED_NON_COMMON:
                 stock_input["stock_detail"] = row
 
-                def classify(*, item=item, row=row, symbol=symbol):
-                    evidence = REVIEWED_NON_COMMON[symbol]
-                    conflict = universe["markets"][item["market"]]["conflicts"].get(
-                        symbol
-                    )
-                    listing_rows = [item["listing"]]
-                    if conflict:
-                        listing_rows += (
-                            [conflict["general"]] if conflict["general"] else []
-                        ) + conflict["typed"]
-                    if (
-                        item.get("ambiguous")
-                        or item["market"] != evidence["market"]
-                        or row.get("market") != evidence["market"]
-                        or row.get("symbol") != symbol
-                        or row.get("isinCode") != evidence["isin"]
-                        or row.get("englishName") != evidence["english_name"]
-                        or row.get("status") != "ACTIVE"
-                        or row.get("currency") != "USD"
-                        or any(
-                            entry.get("symbol") != symbol
-                            or entry.get("isinCode") != evidence["isin"]
-                            for entry in listing_rows
-                        )
-                    ):
-                        raise s.DataError("security_classification_identity_mismatch")
-                    if (
-                        date.fromisoformat(evidence["reviewed_on"])
-                        > as_of.astimezone(s.NY).date()
-                    ):
-                        raise s.DataError("security_classification_review_in_future")
-                    body = read(evidence["source"])
-                    if "required_body_sha256" in evidence:
-                        if (
-                            hashlib.sha256(body.encode()).hexdigest()
-                            != evidence["required_body_sha256"]
-                        ):
-                            raise s.DataError(
-                                "security_classification_evidence_missing"
-                            )
-                    else:
-                        page = s.NewsPage()
-                        page.feed(body)
-                        text = " ".join("".join(page.text).split())
-                        if not all(
-                            fragment in text for fragment in evidence["required_text"]
-                        ):
-                            raise s.DataError(
-                                "security_classification_evidence_missing"
-                            )
-                    return evidence | {
-                        "body_sha256": hashlib.sha256(body.encode()).hexdigest(),
-                        "checked_at": checked_at(),
-                    }
-
                 classification = attempt(
-                    stock_input["issues"], "security_classification", classify
+                    stock_input["issues"],
+                    "security_classification",
+                    partial(
+                        classify_non_common,
+                        read,
+                        universe,
+                        item,
+                        row,
+                        symbol,
+                        as_of,
+                        checked_at,
+                    ),
                 )
                 if classification:
                     stock_input["security_classification"] = classification
@@ -399,26 +398,16 @@ def collect(read, report_day, as_of, earnings_sources, checked_at):
 def finalize(inputs):
     """Return final per-stock decisions and their summary without changing collected inputs."""
     stocks = dict(inputs["stocks"])
+    volume_ratios = {
+        symbol: Decimal(row["result"]["metrics"]["volume_ratio"])
+        for symbol, row in stocks.items()
+        if row["result"]["status"] == "selected"
+    }
     candidates = sorted(
-        (
-            symbol
-            for symbol, row in stocks.items()
-            if row["result"]["status"] == "selected"
-        ),
-        key=lambda symbol: (
-            -Decimal(stocks[symbol]["result"]["metrics"]["volume_ratio"]),
-            symbol,
-        ),
+        volume_ratios, key=lambda symbol: (-volume_ratios[symbol], symbol)
     )
-    ratios = Counter(
-        Decimal(stocks[symbol]["result"]["metrics"]["volume_ratio"])
-        for symbol in candidates
-    )
-    unresolved = [
-        symbol
-        for symbol in candidates
-        if ratios[Decimal(stocks[symbol]["result"]["metrics"]["volume_ratio"])] > 1
-    ]
+    ratios = Counter(volume_ratios.values())
+    unresolved = [symbol for symbol in candidates if ratios[volume_ratios[symbol]] > 1]
     # TODO: #233 - validate an exact consolidated turnover source before resolving tied ratios.
     for symbol in unresolved:
         result = stocks[symbol]["result"]
@@ -430,10 +419,11 @@ def finalize(inputs):
                 "reasons": result["reasons"] + ["exact_turnover_ranking_unavailable"],
             }
         }
-    candidates = [symbol for symbol in candidates if symbol not in unresolved]
+    unresolved_set = set(unresolved)
+    candidates = [symbol for symbol in candidates if symbol not in unresolved_set]
+    status_counts = Counter(row["result"]["status"] for row in stocks.values())
     counts = {
-        status: sum(row["result"]["status"] == status for row in stocks.values())
-        for status in ("selected", "excluded", "held")
+        status: status_counts[status] for status in ("selected", "excluded", "held")
     }
     resolved = {
         symbol

@@ -562,9 +562,7 @@ def _earnings(read, report_day, as_of, source):
             precision = "date"
         if published > as_of:
             continue
-        if re.search(
-            r"\b(earnings|quarterly|fiscal|results)\b", text, re.I
-        ) and re.search(r"\b(cancelled|canceled|postponed|rescheduled)\b", text, re.I):
+        if re.search(r"\b(cancelled|canceled|postponed|rescheduled)\b", text, re.I):
             changes.append(
                 {
                     "status": "unconfirmed",
@@ -833,6 +831,7 @@ def regular_turnover(read, cal, symbol="MU", market="NASDAQ"):
             current += timedelta(minutes=30)
         if current != end:
             raise DataError("unsupported_session_interval")
+    expected_set = set(expected)
     found = {}
     key = ""
     previous = None
@@ -867,7 +866,7 @@ def regular_turnover(read, cal, symbol="MU", market="NASDAQ"):
             if previous is not None and moment >= previous:
                 raise DataError("duplicate_or_unordered_minutes")
             previous = moment
-            if moment not in expected:
+            if moment not in expected_set:
                 continue
             korean = datetime.strptime(
                 row["kymd"] + row["khms"], "%Y%m%d%H%M%S"
@@ -897,19 +896,13 @@ def regular_turnover(read, cal, symbol="MU", market="NASDAQ"):
         if previous <= expected[0]:
             break
         key = (previous - timedelta(minutes=30)).strftime("%Y%m%d%H%M%S")
-    if set(found) != set(expected):
+    if set(found) != expected_set:
         raise DataError("missing_regular_turnover")
+    daily_totals = {day: Decimal(0) for day in cal["past"][-20:]}
+    for moment, value in found.items():
+        daily_totals[moment.date().isoformat()] += value
     return {
-        "daily_lower_bounds": {
-            day: str(
-                sum(
-                    value
-                    for moment, value in found.items()
-                    if moment.date().isoformat() == day
-                )
-            )
-            for day in cal["past"][-20:]
-        },
+        "daily_lower_bounds": {day: str(value) for day, value in daily_totals.items()},
         "bars": len(found),
         "coverage": "Nasdaq TotalView; regular continuous trading; excludes closing auction and other venues",
     }

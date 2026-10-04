@@ -59,6 +59,27 @@ def cli(*args):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_replay_inspects_trade_pages_once_without_network(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "record.json"
+            source.write_text(json.dumps(record([page([ROW])])))
+            with (
+                patch.object(
+                    probe, "inspect_pages", wraps=probe.inspect_pages
+                ) as inspect,
+                patch.object(
+                    probe, "build_opener", side_effect=AssertionError("no network")
+                ),
+                patch.object(
+                    probe.getpass,
+                    "getpass",
+                    side_effect=AssertionError("no credentials"),
+                ),
+            ):
+                summary, _ = cli("--replay", source)
+            inspect.assert_called_once()
+            self.assertTrue(summary["pagination_complete"])
+
     def test_credential_echo_is_rejected_without_saving_or_exposing_it(self):
         for echoed in ("test-key", "test-secret"):
             with self.subTest(echoed=echoed), tempfile.TemporaryDirectory() as root:
