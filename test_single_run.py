@@ -13,11 +13,30 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
+import earnings as ir
 from single_run import DataError, earnings, replay, run
 
 NOW = datetime(2026, 9, 10, 12, tzinfo=UTC)
 DAY = NOW.date()
 NEWS_URL = "https://investors.micron.com/news/press-release/2026/Micron-Technology-to-Report-Fiscal-Fourth-Quarter-Results/default.aspx"
+
+
+def reviewed_archive(source):
+    """Synthetic issuer configuration, never evidence for a live source."""
+    return {
+        tuple(source[key] for key in ("company", "listing_url", "article_prefix")): {
+            "reviewed_on": "2026-09-09",
+            "source": source["listing_url"],
+            "required_text": ["q4Api"],
+        }
+    }
+
+
+MU_SOURCE = {
+    "company": "Micron Technology",
+    "listing_url": ir.NEWS,
+    "article_prefix": "https://investors.micron.com/news/press-release/",
+}
 
 
 class PublicResponses:
@@ -63,6 +82,7 @@ class PublicResponses:
         self.reference_edit = lambda data: data
         self.minute_edit = lambda rows: rows
         self.early_closes = {}
+        self.html_earnings = False
 
     def __call__(self, url):
         self.calls.append(url)
@@ -207,7 +227,25 @@ class PublicResponses:
                 '<script type="application/ld+json">' + json.dumps(value) + "</script>"
             )
         elif path == "/about/press/news":
-            return f'<a href="{NEWS_URL}">Micron Technology to Report Fiscal Fourth Quarter Results</a>'
+            return (
+                ("" if self.html_earnings else '<script src="/q4Api.js"></script>')
+                + f'<a href="{NEWS_URL}">Micron Technology to Report Fiscal Fourth Quarter Results</a>'
+            )
+        elif path.endswith("/GetPressReleaseListCount"):
+            value = {"GetPressReleaseListCountResult": 1}
+        elif path.endswith("/GetPressReleaseList"):
+            value = {
+                "GetPressReleaseListResult": []
+                if query["pageNumber"] != ["0"]
+                else [
+                    {
+                        "Headline": f"Micron Technology to Report Fiscal Fourth Quarter Results on {self.earnings_day}",
+                        "PressReleaseDate": "2026-08-26T15:01:00Z",
+                        "LinkToDetailPage": NEWS_URL,
+                        "Body": self.earnings_note,
+                    }
+                ]
+            }
         else:
             raise AssertionError(f"unexpected public request: {url}")
         if path.endswith("/chart/MU"):
@@ -218,6 +256,11 @@ class PublicResponses:
 
 
 class SingleRunTests(unittest.TestCase):
+    def setUp(self):
+        review = patch.dict(ir.REVIEWED_ARCHIVES, reviewed_archive(MU_SOURCE))
+        review.start()
+        self.addCleanup(review.stop)
+
     def test_earnings_replay_and_execution_errors_propagate(self):
         for failure in (
             DataError("replay_response_missing"),
@@ -775,6 +818,7 @@ class SingleRunTests(unittest.TestCase):
 
     def test_newer_earnings_postponement_invalidates_original_announcement(self):
         source = PublicResponses()
+        source.html_earnings = True
         changed_url = "https://investors.micron.com/news/press-release/2026/Micron-Updates-Quarterly-Call/default.aspx"
 
         def fetch(url):

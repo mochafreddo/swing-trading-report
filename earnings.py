@@ -1,18 +1,59 @@
 """Collect issuer IR evidence and judge the next confirmed results release."""
 
+import base64
+import binascii
 import json
 import re
+import subprocess
+import tempfile
 from collections.abc import Callable
 from datetime import date, datetime
 from decimal import InvalidOperation
 from html.parser import HTMLParser
-from urllib.parse import urlencode, urljoin, urlparse
+from urllib.parse import unquote, urlencode, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 from execution_record import DataError
 
 NEWS = "https://www.micron.com/about/press/news"
 NY = ZoneInfo("America/New_York")
+# Human-reviewed issuer paths; matching a Q4 endpoint alone is not a scope review.
+REVIEWED_ARCHIVES = {
+    (
+        "Repligen",
+        "https://investors.repligen.com/press-releases/default.aspx",
+        "https://investors.repligen.com/press-releases/news-details/",
+    ): {
+        "reviewed_on": "2026-10-10",
+        "source": "https://investors.repligen.com/financials/quarterly-results/default.aspx",
+        "document_routes": {
+            "https://investors.repligen.com/files/doc_news/": "https://s205.q4cdn.com/906585988/files/doc_news/",
+        },
+        "required_text": [
+            '"News": {',
+            "type: 'news'",
+            "tags: ['earnings', 'financials']",
+        ],
+    }
+}
+
+
+def source_review(source):
+    return REVIEWED_ARCHIVES.get(
+        tuple(source[key] for key in ("company", "listing_url", "article_prefix")), {}
+    )
+
+
+def public_hosts(source):
+    review = source_review(source)
+    return tuple(
+        {urlparse(source[key]).netloc for key in ("listing_url", "article_prefix")}
+        | {
+            urlparse(value).netloc
+            for value in review.get("document_routes", {}).values()
+        }
+        | ({urlparse(review["source"]).netloc} if review else set())
+    )
 
 
 def timestamp(value: str) -> datetime:
@@ -22,6 +63,39 @@ def timestamp(value: str) -> datetime:
     if parsed.tzinfo is None:
         raise DataError("timezone_missing")
     return parsed
+
+
+def document_text(body):
+    """Extract complete issuer text; unsupported or oversized documents stay held."""
+    if body.startswith("data:application/pdf;base64,"):
+        try:
+            raw = base64.b64decode(body.split(",", 1)[1], validate=True)
+            if not raw.startswith(b"%PDF-"):
+                raise DataError("earnings_pdf_invalid")
+            with tempfile.TemporaryFile() as output:
+                process = subprocess.run(
+                    ["pdftotext", "-", "-"],
+                    input=raw,
+                    stdout=output,
+                    stderr=subprocess.DEVNULL,
+                    timeout=20,
+                    check=False,
+                )
+                if process.returncode:
+                    raise DataError("earnings_pdf_extraction_failed")
+                output.seek(0)
+                text = output.read(4_000_001).decode("utf-8")
+        except OSError, subprocess.TimeoutExpired, UnicodeError, binascii.Error:
+            raise DataError("earnings_pdf_extraction_unavailable") from None
+        if len(text.encode("utf-8")) > 4_000_000:
+            raise DataError("earnings_document_too_large")
+    else:
+        page = NewsPage()
+        page.feed(body)
+        text = "".join(page.text)
+    if not text.strip():
+        raise DataError("earnings_document_empty")
+    return text
 
 
 class NewsPage(HTMLParser):
@@ -121,9 +195,23 @@ def earnings(
     }
     try:
         collected = _collect_articles(read, report_day, as_of, source)
-        if isinstance(collected, dict):
+        if "articles" not in collected:
             return collected
-        return evaluate_articles(collected, report_day, as_of, source)
+        result = evaluate_articles(collected["articles"], report_day, as_of, source)
+        scope = collected["scope"]
+        if scope["status"] == "verified" and not collected["articles"]:
+            result = {
+                "status": "unconfirmed",
+                "source": source["listing_url"],
+                "collection_status": "complete",
+                "reason": "next_confirmed_earnings_not_found",
+            }
+        if scope["status"] != "verified" and result["status"] == "confirmed":
+            result = result | {
+                "status": "unconfirmed",
+                "reason": scope["reason"],
+            }
+        return result | {"scope_status": scope["status"], "scope": scope}
     except DataError as error:
         reason = str(error)
         if reason in ("replay_response_missing", "replay_request_mismatch"):
@@ -140,8 +228,8 @@ def earnings(
 
 def _collect_articles(
     read: Callable[[str], str], report_day: date, as_of: datetime, source: dict
-) -> list[tuple[str, str, dict]] | dict:
-    """Return normalized articles, or a terminal collection outcome."""
+) -> dict:
+    """Return article evidence and its scope, or a terminal collection outcome."""
     pending = [source["listing_url"]]
     visited, links, articles = set(), set(), []
     while pending:
@@ -225,21 +313,61 @@ def _collect_articles(
                     break
                 for row in rows:
                     target = urljoin(url, row["LinkToDetailPage"])
-                    if not target.startswith(source["article_prefix"]):
-                        continue
+                    parsed = urlparse(target)
+                    if (
+                        parsed.scheme != "https"
+                        or parsed.netloc
+                        not in {
+                            urlparse(source["listing_url"]).netloc,
+                            urlparse(source["article_prefix"]).netloc,
+                        }
+                        or parsed.username
+                        or parsed.password
+                        or parsed.fragment
+                    ):
+                        raise DataError("earnings_feed_article_outside_source")
                     if target in seen_articles:
                         raise DataError("earnings_feed_did_not_progress")
                     seen_articles.add(target)
-                    text_page = NewsPage()
-                    text_page.feed(row["Body"])
+                    article_body = row["Body"]
+                    evidence_url = feed
+                    if not article_body:
+                        evidence_url = target
+                        review = source_review(source)
+                        if (
+                            review
+                            and date.fromisoformat(review["reviewed_on"])
+                            <= as_of.astimezone(NY).date()
+                        ):
+                            for original, canonical in review.get(
+                                "document_routes", {}
+                            ).items():
+                                if target.startswith(original):
+                                    suffix = unquote(target.removeprefix(original))
+                                    if (
+                                        parsed.query
+                                        or "\\" in suffix
+                                        or any(
+                                            part in {".", ".."}
+                                            for part in suffix.split("/")
+                                        )
+                                    ):
+                                        raise DataError(
+                                            "earnings_document_route_invalid"
+                                        )
+                                    evidence_url = canonical + target.removeprefix(
+                                        original
+                                    )
+                                    break
+                        article_body = read(evidence_url)
                     articles.append(
                         (
                             target,
-                            feed,
+                            evidence_url,
                             {
                                 "headline": row["Headline"],
                                 "datePublished": row["PressReleaseDate"],
-                                "articleBody": "".join(text_page.text),
+                                "articleBody": document_text(article_body),
                             },
                         )
                     )
@@ -250,7 +378,50 @@ def _collect_articles(
                     "reason": "earnings_listing_incomplete",
                     "collection_status": "incomplete",
                 }
-            break
+            count_url = urljoin(
+                url, "/feed/PressRelease.svc/GetPressReleaseListCount?"
+            ) + urlencode(
+                {
+                    "LanguageId": 1,
+                    "pressReleaseDateFilter": 3,
+                    "categoryId": "",
+                    "year": -1,
+                    "tagList": "",
+                    "excludeSelection": 1,
+                }
+            )
+            count = json.loads(read(count_url))["GetPressReleaseListCountResult"]
+            if type(count) is not int or count < 0:
+                raise DataError("earnings_scope_invalid_count")
+            matched = count == len(seen_articles)
+            scope = {
+                "status": "unverified",
+                "kind": "issuer_press_release_archive",
+                "count_source": count_url,
+                "expected_items": count,
+                "observed_items": len(seen_articles),
+                "archive_verified": matched,
+                "reason": "earnings_scope_unreviewed_source",
+            }
+            if not matched:
+                scope["reason"] = "earnings_scope_count_mismatch"
+            else:
+                review = source_review(source)
+                if (
+                    review
+                    and date.fromisoformat(review["reviewed_on"])
+                    <= as_of.astimezone(NY).date()
+                ):
+                    scope["source_review"] = review
+                    review_body = (
+                        body if review["source"] == url else read(review["source"])
+                    )
+                    if all(text in review_body for text in review["required_text"]):
+                        scope["status"] = "verified"
+                        del scope["reason"]
+                    else:
+                        scope["reason"] = "earnings_scope_review_changed"
+            return {"articles": articles, "scope": scope}
         for href in listing.links:
             target = urljoin(url, href)
             if (
@@ -320,7 +491,14 @@ def _collect_articles(
             )
             for article in page.articles
         )
-    return articles
+    return {
+        "articles": articles,
+        "scope": {
+            "status": "unverified",
+            "kind": "issuer_link_traversal",
+            "reason": "earnings_scope_unverified",
+        },
+    }
 
 
 def evaluate_articles(
@@ -329,10 +507,10 @@ def evaluate_articles(
     as_of: datetime,
     source: dict,
 ) -> dict:
-    """Judge complete issuer article evidence without reading a URL or clock.
+    """Judge collected issuer articles without reading a URL or clock.
 
     Each article carries its URL, evidence URL and announcement fields. The
-    collector must establish completeness before calling this interface.
+    collector applies its separately verified scope to the resulting judgment.
     """
     dates = []
     changes = []

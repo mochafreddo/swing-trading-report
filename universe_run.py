@@ -19,7 +19,7 @@ import execution_record as records
 import single_run as s
 
 RULES = {
-    "version": 6,
+    "version": 7,
     "calculation": {key: value for key, value in s.RULES.items() if key != "symbol"},
     "markets": ["NASDAQ", "NYSE"],
     "types": ["STOCK", "FOREIGN_STOCK"],
@@ -684,9 +684,9 @@ def main():
             )
             hosts = tuple(
                 {
-                    urlparse(source[key]).netloc
+                    host
                     for source in sources.values()
-                    for key in ("listing_url", "article_prefix")
+                    for host in ir.public_hosts(source)
                 }
                 | {
                     urlparse(evidence["source"]).netloc

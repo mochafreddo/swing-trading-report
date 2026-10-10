@@ -4,9 +4,18 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import earnings as ir
 from single_run import replay, run
-from test_single_run import DAY, NEWS_URL, NOW, PublicResponses
+from test_single_run import (
+    DAY,
+    MU_SOURCE,
+    NEWS_URL,
+    NOW,
+    PublicResponses,
+    reviewed_archive,
+)
 
 SEC = "https://data.sec.gov/submissions/CIK0000723125.json"
 ARTICLE = "https://investors.micron.com/news/press-release/2026/recent/default.aspx"
@@ -34,7 +43,7 @@ class Sources(PublicResponses):
                 }
             )
         if url.endswith("/about/press/news"):
-            return f'<a href="{NEWS_URL}">earnings</a><a href="{ARTICLE}">news</a>'
+            return f'<script src="/q4Api.js"></script><a href="{NEWS_URL}">earnings</a><a href="{ARTICLE}">news</a>'
         if url == ARTICLE:
             return (
                 '<script type="application/ld+json">'
@@ -52,6 +61,11 @@ class Sources(PublicResponses):
 
 
 class ExplanationTests(unittest.TestCase):
+    def setUp(self):
+        review = patch.dict(ir.REVIEWED_ARCHIVES, reviewed_archive(MU_SOURCE))
+        review.start()
+        self.addCleanup(review.stop)
+
     def test_news_window_is_closed_at_start_and_open_at_as_of(self):
         for published, expected in [
             ("2026-09-03T11:59:59Z", 0),

@@ -103,7 +103,7 @@ CONTROLS = [
     (
         "single_run.py",
         "missing_earnings",
-        '    if inputs["earnings"].get("status") != "confirmed"',
+        "    if not earnings_confirmed",
         "    if False",
         "test_unconfirmed_and_estimated_earnings_are_held",
     ),

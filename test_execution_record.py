@@ -9,12 +9,15 @@ from unittest.mock import patch
 
 import single_run as s
 import universe_run as u
-from test_single_run import DAY, NOW, PublicResponses
+from test_single_run import DAY, MU_SOURCE, NOW, PublicResponses, reviewed_archive
 from test_universe_run import UniverseResponses
 
 
 class ExecutionRecordTests(unittest.TestCase):
     def setUp(self):
+        self.enterContext(
+            patch.dict(u.ir.REVIEWED_ARCHIVES, reviewed_archive(MU_SOURCE))
+        )
         self.network = self.enterContext(
             patch(
                 "single_run.build_opener",

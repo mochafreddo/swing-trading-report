@@ -39,7 +39,7 @@ TOSS = "https://openapi.tossinvest.com"
 KIS = "https://openapi.koreainvestment.com:9443"
 YAHOO = "https://query1.finance.yahoo.com"
 RULES = {
-    "version": 9,
+    "version": 10,
     "symbol": "MU",
     "history_sessions": 50,
     "breakout_sessions": 20,
@@ -647,6 +647,8 @@ def _collect_remaining(inputs, stage, read, report_day, as_of, source, symbol, m
         inputs["earnings"] = earnings(read, report_day, as_of, source)
         if inputs["earnings"].get("collection_status") == "failed":
             inputs["issues"].append("earnings:" + inputs["earnings"]["reason"])
+        elif inputs["earnings"].get("scope_status") == "unverified":
+            inputs["issues"].append("earnings:" + inputs["earnings"]["scope"]["reason"])
     result = evaluate(inputs)
     if result["status"] == "excluded":
         inputs["skipped"]["turnover"] = "verified_exclusion"
@@ -662,7 +664,11 @@ def _collect_remaining(inputs, stage, read, report_day, as_of, source, symbol, m
 def evaluate(inputs: dict) -> dict:
     held = list(inputs["issues"])
     result = {"status": "held", "reasons": held, "metrics": {}, "plan": None}
-    if inputs["earnings"].get("status") != "confirmed":
+    earnings_confirmed = (
+        inputs["earnings"].get("status") == "confirmed"
+        and inputs["earnings"].get("scope_status") == "verified"
+    )
+    if not earnings_confirmed:
         held.append("next_confirmed_earnings_unavailable")
     if not all(key in inputs for key in ("stock", "calendar", "bars_0")):
         return result
@@ -760,7 +766,7 @@ def evaluate(inputs: dict) -> dict:
         excluded = [reason for reason, passed in checks.items() if not passed]
         if excluded:
             return result | {"status": "excluded", "reasons": excluded}
-        if inputs["earnings"].get("status") == "confirmed":
+        if earnings_confirmed:
             event = date.fromisoformat(inputs["earnings"]["date"])
             if event < date.fromisoformat(inputs["calendar"]["future"][0]):
                 raise DataError("earnings_date_is_past")

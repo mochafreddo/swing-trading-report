@@ -631,12 +631,7 @@ def production_probe(read, as_of, max_articles):
     results = []
     for symbol, _company, _listing_url, _hosts in SOURCES:
         source = u.DEFAULT_EARNINGS_SOURCES[symbol]
-        allowed_hosts = tuple(
-            {
-                urlsplit(source[key]).hostname
-                for key in ("listing_url", "article_prefix")
-            }
-        )
+        allowed_hosts = ir.public_hosts(source)
 
         def required_read(url, *, allowed_hosts=allowed_hosts):
             body = read(url, allowed_hosts)

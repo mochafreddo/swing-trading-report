@@ -1,6 +1,8 @@
 """Exercise public-response collection through saved reports and offline replay."""
 
+import base64
 import json
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -12,7 +14,14 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
 import universe_run as u
-from test_single_run import DAY, NEWS_URL, NOW, PublicResponses
+from test_single_run import (
+    DAY,
+    MU_SOURCE,
+    NEWS_URL,
+    NOW,
+    PublicResponses,
+    reviewed_archive,
+)
 
 
 class UniverseResponses:
@@ -28,14 +37,43 @@ class UniverseResponses:
         self.sources[symbol] = source
         self.earnings_sources[symbol] = {
             "company": symbol + " Corporation",
-            "listing_url": "https://ir.example.com/" + symbol,
-            "article_prefix": "https://ir.example.com/releases/" + symbol + "/",
+            "listing_url": "https://" + symbol.lower() + ".ir.example.com/" + symbol,
+            "article_prefix": "https://"
+            + symbol.lower()
+            + ".ir.example.com/releases/"
+            + symbol
+            + "/",
         }
 
     def __call__(self, url):
         query = parse_qs(urlparse(url).query)
         path = urlparse(url).path
-        if urlparse(url).netloc == "ir.example.com":
+        if urlparse(url).netloc.endswith(".ir.example.com"):
+            symbol = urlparse(url).netloc.split(".")[0].upper()
+            config = self.earnings_sources[symbol]
+            if path.endswith("/GetPressReleaseListCount"):
+                return json.dumps({"GetPressReleaseListCountResult": 1})
+            if path.endswith("/GetPressReleaseList"):
+                source = self.sources[symbol]
+                return json.dumps(
+                    {
+                        "GetPressReleaseListResult": []
+                        if query["pageNumber"] != ["0"]
+                        else [
+                            {
+                                "Headline": config["company"]
+                                + " to Report Fiscal Fourth Quarter Results on "
+                                + source.earnings_day,
+                                "PressReleaseDate": "2026-08-26T15:01:00Z",
+                                "LinkToDetailPage": config["article_prefix"]
+                                + "release",
+                                "Body": source.earnings_note.replace(
+                                    "Micron Technology", config["company"]
+                                ),
+                            }
+                        ]
+                    }
+                )
             symbol = (
                 path.rstrip("/").rsplit("/", 1)[-1]
                 if not path.endswith("/release")
@@ -43,7 +81,16 @@ class UniverseResponses:
             )
             config = self.earnings_sources[symbol]
             if url == config["listing_url"]:
-                return '<a href="' + config["article_prefix"] + 'release">Earnings</a>'
+                return (
+                    (
+                        ""
+                        if self.sources[symbol].html_earnings
+                        else '<script src="/q4Api.js"></script>'
+                    )
+                    + '<a href="'
+                    + config["article_prefix"]
+                    + 'release">Earnings</a>'
+                )
             return self.sources[symbol](NEWS_URL).replace(
                 "Micron Technology", config["company"]
             )
@@ -85,6 +132,108 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def setUp(self):
+        sources = UniverseResponses()
+        for symbol in ("AAA", "BBB", "CCC", "DDD", "IBM"):
+            sources.add_company(symbol, 2)
+        reviews = reviewed_archive(MU_SOURCE)
+        for source in [
+            *sources.earnings_sources.values(),
+            *(
+                [u.DEFAULT_EARNINGS_SOURCES["RGEN"]]
+                if "RGEN" in u.DEFAULT_EARNINGS_SOURCES
+                else []
+            ),
+            {
+                "company": "AAA Corporation",
+                "listing_url": "https://ir.example.com/AAA",
+                "article_prefix": "https://ir.example.com/releases/AAA/",
+            },
+        ]:
+            reviews.update(reviewed_archive(source))
+        review = patch.dict(u.ir.REVIEWED_ARCHIVES, reviews)
+        review.start()
+        self.addCleanup(review.stop)
+
+    def test_canonical_pdf_evidence_reaches_report_record_and_offline_replay(self):
+        source = UniverseResponses()
+        source.add_company("AAA", 2)
+        config = source.earnings_sources["AAA"]
+        original = config["listing_url"].rsplit("/", 1)[0] + "/files/results.pdf"
+        canonical = "https://cdn.example.com/aaa/results.pdf"
+        u.ir.REVIEWED_ARCHIVES[
+            tuple(config[key] for key in ("company", "listing_url", "article_prefix"))
+        ]["document_routes"] = {
+            original.rsplit("/", 1)[0] + "/": "https://cdn.example.com/aaa/"
+        }
+        raw = b"%PDF-1.7 synthetic external document"
+        payload = "data:application/pdf;base64," + base64.b64encode(raw).decode()
+
+        def fetch(url):
+            if url == canonical:
+                return payload
+            if url.startswith(
+                config["listing_url"].rsplit("/", 1)[0]
+                + "/feed/PressRelease.svc/GetPressReleaseList?"
+            ):
+                return json.dumps(
+                    {
+                        "GetPressReleaseListResult": []
+                        if "pageNumber=1" in url
+                        else [
+                            {
+                                "LinkToDetailPage": original,
+                                "Headline": "AAA Corporation Announces Earnings Schedule",
+                                "PressReleaseDate": "2026-09-01T12:00:00Z",
+                                "Body": "",
+                            }
+                        ]
+                    }
+                )
+            return source(url)
+
+        def extract(command, **kwargs):
+            self.assertEqual(kwargs["input"], raw)
+            kwargs["stdout"].write(
+                b"AAA Corporation will release financial results on September 17, 2026."
+            )
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch("subprocess.run", side_effect=extract):
+            record, report = self.run_case(
+                fetch, earnings_sources=source.earnings_sources
+            )
+        event = record["inputs"]["stocks"]["AAA"]["inputs"]["earnings"]
+        self.assertEqual(event["source"], original)
+        self.assertEqual(event["evidence_url"], canonical)
+        self.assertEqual(event["date"], "2026-09-17")
+        self.assertIn("AAA", record["result"]["candidates"])
+        self.assertIn("AAA", report)
+        self.assertEqual(
+            next(
+                item["body"] for item in record["responses"] if item["url"] == canonical
+            ),
+            payload,
+        )
+
+    def test_unreviewed_complete_archive_is_held_and_replays(self):
+        source = UniverseResponses()
+        source.add_company("AAA", 2)
+        with patch.dict(u.ir.REVIEWED_ARCHIVES, {}, clear=True):
+            record, report = self.run_case(
+                source, earnings_sources=source.earnings_sources
+            )
+        row = record["inputs"]["stocks"]["AAA"]
+        self.assertEqual(row["result"]["status"], "held")
+        self.assertEqual(row["inputs"]["earnings"]["collection_status"], "complete")
+        self.assertTrue(row["inputs"]["earnings"]["scope"]["archive_verified"])
+        self.assertEqual(row["inputs"]["earnings"]["scope_status"], "unverified")
+        self.assertEqual(row["inputs"]["skipped"]["turnover"], "unverified_earnings")
+        self.assertIn(
+            "earnings:earnings_scope_unreviewed_source", row["result"]["reasons"]
+        )
+        self.assertIn("earnings_scope_unreviewed_source", report)
+
     def test_initial_failures_preserve_per_stock_price_collection_and_replay(self):
         for mode, issues, prices, skipped in [
             (
@@ -177,6 +326,14 @@ class UniverseRunTests(unittest.TestCase):
                     ):
                         return '<script src="/q4Api.js"></script>'
                     if urlparse(url).netloc == "investors.repligen.com":
+                        if "GetPressReleaseListCount?" in url:
+                            return json.dumps(
+                                {
+                                    "GetPressReleaseListCountResult": 2
+                                    if mode == "later_announcement"
+                                    else 1
+                                }
+                            )
                         rows = []
                         if parse_qs(urlparse(url).query)["pageNumber"] == ["0"]:
                             first = (
@@ -317,6 +474,7 @@ class UniverseRunTests(unittest.TestCase):
     ):
         source = UniverseResponses()
         source.add_company("AAA", 2)
+        source.sources["AAA"].html_earnings = True
         article_url = source.earnings_sources["AAA"]["article_prefix"] + "release"
         for mode in ("name", "both", "passive", "same_day", "postponed", "conflicting"):
             with self.subTest(mode=mode):
@@ -357,7 +515,7 @@ class UniverseRunTests(unittest.TestCase):
                         )
                     return source(url)
 
-                record, report = self.run_case(
+                record, _report = self.run_case(
                     fetch, earnings_sources=source.earnings_sources
                 )
                 row = record["inputs"]["stocks"]["AAA"]
@@ -365,9 +523,11 @@ class UniverseRunTests(unittest.TestCase):
                     self.assertEqual(row["result"]["status"], "held")
                     self.assertIsNone(row["result"]["plan"])
                 else:
-                    self.assertEqual(row["result"]["status"], "selected")
-                    self.assertEqual(row["inputs"]["earnings"]["date"], "2026-09-17")
-                    self.assertIn(article_url, report)
+                    self.assertEqual(row["result"]["status"], "held")
+                    self.assertEqual(
+                        row["inputs"]["earnings"].get("date"), "2026-09-17"
+                    )
+                    self.assertEqual(row["inputs"]["earnings"]["source"], article_url)
 
     def test_production_ir_probe_preserves_page_split_errors_and_replays(self):
         import probe_earnings_sources as probe
@@ -383,6 +543,8 @@ class UniverseRunTests(unittest.TestCase):
                 def fetch(url, failure=failure, **kwargs):
                     if url == source["listing_url"]:
                         return '<script src="/q4Api.js"></script>'
+                    if "GetPressReleaseListCount?" in url:
+                        return json.dumps({"GetPressReleaseListCountResult": 1})
                     query = parse_qs(urlparse(url).query)
                     if failure == "http_403":
                         raise u.s.DataError("http_403")
@@ -449,7 +611,7 @@ class UniverseRunTests(unittest.TestCase):
                         )
                     self.assertEqual(
                         len(record["requests"]),
-                        {"split": 4, "single_item_too_large": 3, "http_403": 2}[
+                        {"split": 5, "single_item_too_large": 3, "http_403": 2}[
                             failure
                         ],
                     )
@@ -763,7 +925,9 @@ class UniverseRunTests(unittest.TestCase):
                 requests = [
                     entry
                     for entry in record["responses"]
-                    if "/feed/PressRelease.svc/" in entry["url"]
+                    if urlparse(entry["url"]).netloc
+                    == urlparse(config["listing_url"]).netloc
+                    and "/feed/PressRelease.svc/" in entry["url"]
                 ]
                 self.assertEqual(
                     len(requests), 2 if failure == "response_too_large" else 1
@@ -790,6 +954,11 @@ class UniverseRunTests(unittest.TestCase):
         def fetch(url):
             if url == config["listing_url"]:
                 return '<script src="/q4Api.js"></script>'
+            if (
+                "GetPressReleaseListCount?" in url
+                and urlparse(url).netloc == urlparse(config["listing_url"]).netloc
+            ):
+                return json.dumps({"GetPressReleaseListCountResult": 8})
             if "/feed/PressRelease.svc/" in url:
                 query = parse_qs(urlparse(url).query)
                 page, size = int(query["pageNumber"][0]), int(query["pageSize"][0])
@@ -803,7 +972,7 @@ class UniverseRunTests(unittest.TestCase):
         record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
         row = record["inputs"]["stocks"]["AAA"]
         self.assertEqual(row["result"]["status"], "selected")
-        self.assertEqual(row["inputs"]["earnings"]["date"], "2026-09-17")
+        self.assertEqual(row["inputs"]["earnings"].get("date"), "2026-09-17")
         self.assertIn(
             "pageNumber=6&pageSize=1", row["inputs"]["earnings"]["evidence_url"]
         )
@@ -828,7 +997,7 @@ class UniverseRunTests(unittest.TestCase):
 
         record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
         row = record["inputs"]["stocks"]["AAA"]
-        self.assertEqual(row["result"]["status"], "selected")
+        self.assertEqual(row["result"]["status"], "held")
         self.assertEqual(
             row["inputs"]["earnings"]["source"], config["article_prefix"] + "release"
         )
@@ -844,7 +1013,7 @@ class UniverseRunTests(unittest.TestCase):
                     '<link rel="next" href="/AAA?page=2">'
                     '<a href="/releases/AAA/release">Earnings</a>'
                 )
-            if url == "https://ir.example.com/AAA?page=2":
+            if url == config["listing_url"] + "?page=2":
                 return '<a href="/releases/AAA/change">Updated schedule</a>'
             if url == config["article_prefix"] + "change":
                 return (
@@ -879,6 +1048,7 @@ class UniverseRunTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 source = UniverseResponses()
                 source.add_company("AAA", 2)
+                source.sources["AAA"].html_earnings = True
                 config = source.earnings_sources["AAA"]
 
                 def fetch(url, *, config=config, mode=mode, source=source):
@@ -919,12 +1089,18 @@ class UniverseRunTests(unittest.TestCase):
                 row = record["inputs"]["stocks"]["AAA"]
                 self.assertEqual(row["result"]["status"], "held")
                 self.assertIsNone(row["result"]["plan"])
+                if mode == "same_day_unknown_time":
+                    self.assertEqual(
+                        row["inputs"]["earnings"]["reason"],
+                        "publication_time_unverified",
+                    )
 
     def test_ir_uses_release_date_not_fiscal_period_end_or_forward_looking_boilerplate(
         self,
     ):
         source = UniverseResponses()
         source.add_company("AAA", 2)
+        source.sources["AAA"].html_earnings = True
         article_url = source.earnings_sources["AAA"]["article_prefix"] + "release"
 
         def fetch(url):
@@ -946,8 +1122,8 @@ class UniverseRunTests(unittest.TestCase):
 
         record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
         row = record["inputs"]["stocks"]["AAA"]
-        self.assertEqual(row["result"]["status"], "selected")
-        self.assertEqual(row["inputs"]["earnings"]["date"], "2026-09-17")
+        self.assertEqual(row["result"]["status"], "held")
+        self.assertEqual(row["inputs"]["earnings"].get("date"), "2026-09-17")
 
     def test_ir_fetch_failure_is_distinct_from_completed_search_without_evidence(self):
         for failed in (False, True):
@@ -1165,6 +1341,20 @@ class UniverseRunTests(unittest.TestCase):
                 row = record["inputs"]["stocks"]["AAA"]
                 self.assertEqual(row["result"]["status"], "held")
                 self.assertIsNone(row["result"]["plan"])
+                event = row["inputs"]["earnings"]
+                if mode in {
+                    "tentative_title",
+                    "expected_body",
+                    "tentative_body",
+                    "html_tentative",
+                }:
+                    self.assertEqual(event["reason"], "uncertain_earnings_announcement")
+                elif mode == "generic_change_title":
+                    self.assertEqual(event["reason"], "earnings_schedule_changed")
+                elif mode in {"conflicting_body", "html_conflict"}:
+                    self.assertEqual(event["reason"], "earnings_dates_conflict")
+                else:
+                    self.assertNotIn("date", event)
 
     def test_conflicting_future_ir_announcements_do_not_choose_an_arbitrary_date(self):
         source = UniverseResponses()
@@ -1239,6 +1429,11 @@ class UniverseRunTests(unittest.TestCase):
         def fetch(url):
             if url == config["listing_url"]:
                 return '<script src="/js/evergreen.q4Api.min.js"></script>'
+            if (
+                "GetPressReleaseListCount?" in url
+                and urlparse(url).netloc == urlparse(config["listing_url"]).netloc
+            ):
+                return json.dumps({"GetPressReleaseListCountResult": 2})
             if "/feed/PressRelease.svc/GetPressReleaseList?" in url:
                 number = int(parse_qs(urlparse(url).query)["pageNumber"][0])
                 rows = (
@@ -1277,7 +1472,7 @@ class UniverseRunTests(unittest.TestCase):
         def fetch(url):
             if url == config["listing_url"]:
                 return '<a rel="next" href="/AAA?page=2">Next</a>'
-            if url == "https://ir.example.com/AAA?page=2":
+            if url == config["listing_url"] + "?page=2":
                 return '<a href="/releases/AAA/release">AAA Corporation earnings schedule</a>'
             if url == article_url:
                 return (
@@ -1301,8 +1496,8 @@ class UniverseRunTests(unittest.TestCase):
 
         record, _ = self.run_case(fetch, earnings_sources=source.earnings_sources)
         row = record["inputs"]["stocks"]["AAA"]
-        self.assertEqual(row["result"]["status"], "selected")
-        self.assertEqual(row["inputs"]["earnings"]["date"], "2026-09-17")
+        self.assertEqual(row["result"]["status"], "held")
+        self.assertEqual(row["inputs"]["earnings"].get("date"), "2026-09-17")
         self.assertEqual(row["inputs"]["earnings"]["source"], article_url)
         self.assertEqual(row["inputs"]["earnings"]["collection_status"], "complete")
 
