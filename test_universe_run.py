@@ -248,27 +248,39 @@ class UniverseRunTests(unittest.TestCase):
                 current[0] = cutoff + timedelta(seconds=1)
             return body
 
-        record, report = self.run_case(
-            fetch, clock=lambda: current[0], collection_cutoff=cutoff
-        )
-        stocks = record["inputs"]["stocks"]
-        self.assertEqual(stocks["IBM"]["result"]["status"], "excluded")
-        self.assertEqual(stocks["MU"]["result"]["status"], "held")
-        self.assertIn(
-            "price_reference:report_data_cutoff_reached",
-            stocks["MU"]["result"]["reasons"],
-        )
-        late = next(row for row in record["responses"] if "/chart/MU?" in row["url"])
-        self.assertIn("body", late)
-        self.assertEqual(late["error"], "report_data_cutoff_reached")
-        self.assertNotIn("price_reference", stocks["MU"]["inputs"])
-        self.assertEqual(stocks["ZZZ"]["result"]["status"], "held")
-        self.assertTrue(
-            any(row.get("requested") is False for row in record["responses"])
-        )
-        self.assertEqual(record["collection_cutoff"], cutoff.isoformat())
-        self.assertIn("자료 마감", report)
-        self.assertFalse(any("micron.com" in url for url in fetched))
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            record = u.run(
+                out,
+                DAY,
+                fetch=fetch,
+                clock=lambda: current[0],
+                synthetic=True,
+                collection_cutoff=cutoff,
+            )
+            report = (out / "report.md").read_text()
+            stocks = record["inputs"]["stocks"]
+            self.assertEqual(stocks["IBM"]["result"]["status"], "excluded")
+            self.assertEqual(stocks["MU"]["result"]["status"], "held")
+            self.assertIn(
+                "price_reference:report_data_cutoff_reached",
+                stocks["MU"]["result"]["reasons"],
+            )
+            late = next(
+                row for row in record["responses"] if "/chart/MU?" in row["url"]
+            )
+            self.assertIn("body", late)
+            self.assertEqual(late.get("error"), "report_data_cutoff_reached")
+            self.assertNotIn("price_reference", stocks["MU"]["inputs"])
+            self.assertEqual(stocks["ZZZ"]["result"]["status"], "held")
+            self.assertTrue(
+                any(row.get("requested") is False for row in record["responses"])
+            )
+            self.assertEqual(record["collection_cutoff"], cutoff.isoformat())
+            self.assertIn("자료 마감", report)
+            self.assertFalse(any("micron.com" in url for url in fetched))
+
+            self.assertEqual(u.replay(out), record)
 
     def setUp(self):
         sources = UniverseResponses()

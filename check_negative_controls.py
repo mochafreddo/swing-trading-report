@@ -915,6 +915,99 @@ def main() -> int:
             ),
         ]
     ]
+    # Public report/replay and delivery boundaries from the deadline-policy regression checks.
+    cases += [
+        (
+            "execution_record.py",
+            "test_universe_run.UniverseRunTests",
+            (
+                "data_cutoff_before_fetch",
+                "if cutoff and (checked := self._clock()) >= cutoff:",
+                "if False:",
+                "test_data_cutoff_preserves_exclusion_and_holds_late_candidate_and_replays",
+            ),
+        ),
+        (
+            "execution_record.py",
+            "test_universe_run.UniverseRunTests",
+            (
+                "data_cutoff_after_response",
+                "if cutoff and datetime.fromisoformat(self.checked_at) >= cutoff:",
+                "if False:",
+                "test_data_cutoff_preserves_exclusion_and_holds_late_candidate_and_replays",
+            ),
+        ),
+        (
+            "single_run.py",
+            "test_universe_run.UniverseRunTests",
+            (
+                "data_cutoff_after_rate_limit",
+                "if remaining <= 0:",
+                "if False:",
+                "test_cutoff_crossed_during_rate_limit_wait_never_opens_http",
+            ),
+        ),
+        (
+            "execution_record.py",
+            "test_universe_run.UniverseRunTests",
+            (
+                "readiness_deadline_consistency",
+                'or timing["report_ready_on_time"] != bool(deadline and ready <= deadline)',
+                "or False",
+                "test_report_readiness_measures_artifact_writes_and_replays_without_clock",
+            ),
+        ),
+        (
+            "telegram_delivery.py",
+            "test_telegram_delivery.TelegramDeliveryTests",
+            (
+                "publication_requires_ready_report",
+                'and readiness["report_ready_on_time"]',
+                "and True",
+                "test_universe_delivery_separates_late_readiness_from_publication_time",
+            ),
+        ),
+        (
+            "telegram_delivery.py",
+            "test_telegram_delivery.TelegramDeliveryTests",
+            (
+                "delivery_requires_calendar",
+                'deadline = report_deadline(record["inputs"].get("calendar"))',
+                'deadline = report_deadline(record["inputs"].get("calendar")) or moment',
+                "test_universe_cutoff_before_calendar_records_missed_without_send",
+            ),
+        ),
+        (
+            "universe_run.py",
+            "test_universe_run.UniverseRunTests",
+            (
+                "ir_review_unverified_scope",
+                'or row["inputs"].get("earnings", {}).get("scope_status") == "unverified"',
+                "or False",
+                "test_ir_review_frontier_contains_only_price_passed_unverified_sources",
+            ),
+        ),
+        (
+            "telegram_delivery.py",
+            "test_telegram_delivery.TelegramDeliveryTests",
+            (
+                "late_publication_caption_edit",
+                'and attempt["status"] == "sent"',
+                "and False",
+                "test_universe_publication_crossing_deadline_edits_once_without_resending",
+            ),
+        ),
+        (
+            "telegram_delivery.py",
+            "test_telegram_delivery.TelegramDeliveryTests",
+            (
+                "delivery_window_after_save",
+                "sending_at > deadline + timedelta(minutes=30)",
+                "False",
+                "test_universe_delay_saving_intent_rechecks_window_before_http",
+            ),
+        ),
+    ]
     for filename, test_class, (name, old, new, test) in cases:
         source = (ROOT / filename).read_text()
         if source.count(old) != 1:

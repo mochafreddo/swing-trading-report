@@ -179,7 +179,7 @@ class TelegramDeliveryTests(unittest.TestCase):
                     attempt["timing"], "delayed" if minutes == 31 else "missed_deadline"
                 )
                 self.assertEqual(
-                    attempt["caption_update"], "updated" if edit_ok else "unknown"
+                    attempt.get("caption_update"), "updated" if edit_ok else "unknown"
                 )
                 editor.assert_called_once()
                 send.assert_called_once()
