@@ -6,7 +6,7 @@
 
 - [첫 버전의 요구사항](docs/requirements.md)
 - [첫 보고서 구현 계획](docs/first-milestone.md)
-- [도메인 용어](CONTEXT.md)
+- [도메인 용어](GLOSSARY.md)
 - [AI 입력 범위 결정](docs/adr/0001-public-data-ai.md)
 - [한 종목 평가 실행](docs/single-run.md)
 - [텔레그램 단건 전송과 수신 확인](docs/telegram-delivery.md)
