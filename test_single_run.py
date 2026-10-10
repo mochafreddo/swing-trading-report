@@ -1102,6 +1102,11 @@ class SingleRunTests(unittest.TestCase):
                         str(secret_file),
                         "--issue-tokens",
                     ]
+                    if cli.__module__ == "universe_run":
+                        args += [
+                            "--collection-cutoff",
+                            (NOW + timedelta(minutes=15)).isoformat(),
+                        ]
                     stdout = StringIO()
                     with (
                         patch("sys.argv", args),

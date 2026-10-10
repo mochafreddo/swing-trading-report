@@ -4,19 +4,198 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.client import BadStatusLine
 from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+import universe_run as u
 from single_run import DataError, run
 from telegram_delivery import deliver, main
 from test_single_run import DAY, NOW, PublicResponses
+from test_universe_run import UniverseResponses
 
 
 class TelegramDeliveryTests(unittest.TestCase):
+    def test_universe_cutoff_before_calendar_records_missed_without_send(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            u.run(
+                output,
+                DAY,
+                fetch=UniverseResponses(),
+                now=NOW,
+                synthetic=True,
+                collection_cutoff=NOW,
+            )
+            send = unittest.mock.Mock()
+            state = deliver(output, send=send, target="chat", now=NOW)
+            send.assert_not_called()
+            self.assertEqual(state["attempts"][-1]["timing"], "missed")
+            self.assertEqual(state["attempts"][-1]["status"], "not_sent")
+
+    def test_universe_delivery_after_recovery_window_records_missed_without_send(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            u.run(
+                output,
+                DAY,
+                fetch=UniverseResponses(),
+                now=NOW,
+                synthetic=True,
+                collection_cutoff=NOW + timedelta(minutes=15),
+            )
+            send = unittest.mock.Mock()
+            state = deliver(
+                output,
+                send=send,
+                target="chat",
+                now=NOW + timedelta(hours=1, seconds=1),
+            )
+            send.assert_not_called()
+            attempt = state["attempts"][-1]
+            self.assertEqual(attempt["status"], "not_sent")
+            self.assertEqual(attempt["timing"], "missed")
+            self.assertEqual(attempt["reason"], "premarket_delivery_window_closed")
+
+    def test_universe_delivery_separates_late_readiness_from_publication_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            current = [NOW]
+            write_text = Path.write_text
+
+            def write(path, *args, **kwargs):
+                result = write_text(path, *args, **kwargs)
+                if path.name == "report.md":
+                    current[0] = NOW + timedelta(minutes=30, seconds=1)
+                return result
+
+            with patch.object(Path, "write_text", write):
+                u.run(
+                    output,
+                    DAY,
+                    fetch=UniverseResponses(),
+                    clock=lambda: current[0],
+                    synthetic=True,
+                    collection_cutoff=NOW + timedelta(minutes=15),
+                )
+            published = NOW + timedelta(minutes=30, seconds=59)
+            captions = []
+
+            def send(report, caption):
+                captions.append(caption)
+                self.assertEqual(report, (output / "report.md").read_bytes())
+                return {
+                    "ok": True,
+                    "result": {"message_id": 9, "date": int(published.timestamp())},
+                }
+
+            state = deliver(output, send=send, target="chat", now=published)
+            attempt = state["attempts"][-1]
+            self.assertEqual(state["scope"], "universe_report")
+            self.assertEqual(attempt["status"], "sent")
+            self.assertTrue(attempt["publication_on_time"])
+            self.assertFalse(attempt["report_ready_on_time"])
+            self.assertFalse(attempt["on_time"])
+            self.assertEqual(attempt["timing"], "delayed")
+            self.assertIn("지연", captions[0])
+
+    def test_universe_delay_saving_intent_rechecks_window_before_http(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "run"
+            u.run(
+                output,
+                DAY,
+                fetch=UniverseResponses(),
+                now=NOW,
+                synthetic=True,
+                collection_cutoff=NOW + timedelta(minutes=15),
+            )
+            import telegram_delivery as delivery
+
+            save = delivery._save
+            current = [NOW + timedelta(minutes=59, seconds=59)]
+
+            def delayed_save(path, state):
+                save(path, state)
+                current[0] = NOW + timedelta(hours=1, seconds=1)
+
+            send = unittest.mock.Mock()
+            with (
+                patch("telegram_delivery._save", side_effect=delayed_save),
+                patch("telegram_delivery.datetime", wraps=datetime) as clock,
+            ):
+                clock.now.side_effect = lambda zone: current[0]
+                state = deliver(output, send=send, target="chat")
+            send.assert_not_called()
+            self.assertEqual(state["attempts"][-1]["status"], "not_sent")
+            self.assertEqual(state["attempts"][-1]["timing"], "missed")
+
+    def test_universe_publication_crossing_deadline_edits_once_without_resending(self):
+        for minutes, edit_ok in ((31, True), (60, True), (31, False)):
+            with (
+                self.subTest(minutes=minutes, edit_ok=edit_ok),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                output = Path(directory) / "run"
+                u.run(
+                    output,
+                    DAY,
+                    fetch=UniverseResponses(),
+                    now=NOW,
+                    synthetic=True,
+                    collection_cutoff=NOW + timedelta(minutes=15),
+                )
+                published = NOW + timedelta(minutes=minutes, seconds=1)
+                started = published - timedelta(seconds=2)
+                send = unittest.mock.Mock(
+                    return_value={
+                        "ok": True,
+                        "result": {"message_id": 9, "date": int(published.timestamp())},
+                    }
+                )
+
+                def edit(message_id, caption, output=output, edit_ok=edit_ok):
+                    saved = json.loads((output / "delivery.json").read_text())[
+                        "attempts"
+                    ][-1]
+                    self.assertEqual(saved["status"], "sent")
+                    self.assertEqual(saved["caption_update"], "unknown")
+                    self.assertEqual(message_id, 9)
+                    self.assertIn("지연", caption)
+                    if not edit_ok:
+                        raise OSError("sensitive upstream detail")
+                    return {"ok": True, "result": {"message_id": 9, "caption": caption}}
+
+                editor = unittest.mock.Mock(side_effect=edit)
+                state = deliver(
+                    output, send=send, edit_caption=editor, target="chat", now=started
+                )
+                attempt = state["attempts"][-1]
+                self.assertEqual(attempt["status"], "sent")
+                self.assertEqual(
+                    attempt["timing"], "delayed" if minutes == 31 else "missed_deadline"
+                )
+                self.assertEqual(
+                    attempt["caption_update"], "updated" if edit_ok else "unknown"
+                )
+                editor.assert_called_once()
+                send.assert_called_once()
+                with self.assertRaises(DataError):
+                    deliver(
+                        output,
+                        send=send,
+                        edit_caption=editor,
+                        target="chat",
+                        now=published,
+                    )
+                send.assert_called_once()
+                self.assertNotIn(
+                    "sensitive upstream detail", (output / "delivery.json").read_text()
+                )
+
     def test_unknown_response_stops_until_user_confirms_missing(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "run"

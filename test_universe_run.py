@@ -132,6 +132,144 @@ class UniverseResponses:
 
 
 class UniverseRunTests(unittest.TestCase):
+    def test_cutoff_crossed_during_rate_limit_wait_never_opens_http(self):
+        current = [NOW]
+        cutoff = NOW + timedelta(minutes=15)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(u.s, "datetime", wraps=u.datetime) as clock,
+            patch.object(u.s.time, "sleep") as sleep,
+            patch.object(u.s, "build_opener") as opener,
+        ):
+            clock.now.side_effect = lambda *args: current[0]
+            sleep.side_effect = lambda delay: current.__setitem__(0, cutoff)
+            out = Path(tmp) / "run"
+            record = u.run(
+                out,
+                DAY,
+                clock=lambda: current[0],
+                synthetic=True,
+                collection_cutoff=cutoff,
+                fetch=lambda url: u.s.fetch_public(
+                    url,
+                    credentials={"TOSS_ACCESS_TOKEN": "synthetic"},
+                    collection_cutoff=cutoff,
+                ),
+            )
+            opener.assert_not_called()
+            self.assertFalse(record["result"]["coverage_complete"])
+            self.assertTrue(
+                all(row["requested"] is False for row in record["responses"])
+            )
+            self.assertEqual(u.replay(out), record)
+
+    def test_ir_review_frontier_contains_only_price_passed_unverified_sources(self):
+        source = UniverseResponses()
+        source.sources["IBM"].stock["sharesOutstanding"] = "99999999"
+        source.add_company("AAA", 3)
+        source.sources["AAA"].html_earnings = True
+        source.add_company("BBB", 4)
+        record, report = self.run_case(
+            source, earnings_sources={"AAA": source.earnings_sources["AAA"]}
+        )
+        self.assertEqual(record["result"]["earnings_review_needed"], ["AAA", "BBB"])
+        self.assertEqual(record["inputs"]["stocks"]["AAA"]["result"]["status"], "held")
+        self.assertEqual(record["inputs"]["stocks"]["BBB"]["result"]["status"], "held")
+        self.assertEqual(record["result"]["candidates"], ["MU"])
+        self.assertIn("IR 경로 검토 필요: AAA, BBB", report)
+
+    def test_live_run_requires_explicit_cutoff_and_rejects_late_cutoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            with self.assertRaisesRegex(u.s.DataError, "collection_cutoff_required"):
+                u.run(out, DAY, now=NOW, fetch=UniverseResponses())
+            self.assertFalse(out.exists())
+            with self.assertRaisesRegex(
+                u.s.DataError, "collection_cutoff_after_report_deadline"
+            ):
+                u.run(
+                    out,
+                    DAY,
+                    now=NOW,
+                    fetch=UniverseResponses(),
+                    collection_cutoff=NOW + timedelta(minutes=31),
+                )
+
+    def test_report_readiness_measures_artifact_writes_and_replays_without_clock(self):
+        source = UniverseResponses()
+        current = [NOW]
+        write_text = Path.write_text
+
+        def write(path, *args, **kwargs):
+            result = write_text(path, *args, **kwargs)
+            if path.name == "report.md":
+                current[0] = NOW + timedelta(minutes=30, seconds=1)
+            return result
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "run"
+            with patch.object(Path, "write_text", write):
+                record = u.run(
+                    out,
+                    DAY,
+                    fetch=source,
+                    clock=lambda: current[0],
+                    synthetic=True,
+                    collection_cutoff=NOW + timedelta(minutes=15),
+                )
+            timing = json.loads((out / "readiness.json").read_text())
+            self.assertEqual(timing["collection_finished_at"], NOW.isoformat())
+            self.assertEqual(timing["report_ready_at"], "2026-09-10T12:30:01+00:00")
+            self.assertEqual(timing["report_ready_by"], "2026-09-10T12:30:00+00:00")
+            self.assertFalse(timing["report_ready_on_time"])
+            with patch.object(u, "datetime") as clock:
+                clock.now.side_effect = AssertionError("clock during replay")
+                self.assertEqual(u.replay(out), record)
+            timing["report_ready_on_time"] = True
+            timing.pop("sha256")
+            timing["sha256"] = u.records.digest(timing)
+            (out / "readiness.json").write_text(json.dumps(timing))
+            with self.assertRaisesRegex(u.s.DataError, "readiness_timing_mismatch"):
+                u.replay(out)
+
+    def test_data_cutoff_preserves_exclusion_and_holds_late_candidate_and_replays(self):
+        source = UniverseResponses()
+        source.add_company("ZZZ", 4)
+        source.sources["IBM"].stock["sharesOutstanding"] = "99999999"
+        current = [NOW]
+        cutoff = NOW + timedelta(minutes=15)
+        fetched = []
+
+        def fetch(url):
+            self.assertLess(current[0], cutoff, "external request after data cutoff")
+            fetched.append(url)
+            body = source(url)
+            if "/chart/MU?" in url:
+                current[0] = cutoff + timedelta(seconds=1)
+            return body
+
+        record, report = self.run_case(
+            fetch, clock=lambda: current[0], collection_cutoff=cutoff
+        )
+        stocks = record["inputs"]["stocks"]
+        self.assertEqual(stocks["IBM"]["result"]["status"], "excluded")
+        self.assertEqual(stocks["MU"]["result"]["status"], "held")
+        self.assertIn(
+            "price_reference:report_data_cutoff_reached",
+            stocks["MU"]["result"]["reasons"],
+        )
+        late = next(row for row in record["responses"] if "/chart/MU?" in row["url"])
+        self.assertIn("body", late)
+        self.assertEqual(late["error"], "report_data_cutoff_reached")
+        self.assertNotIn("price_reference", stocks["MU"]["inputs"])
+        self.assertEqual(stocks["ZZZ"]["result"]["status"], "held")
+        self.assertTrue(
+            any(row.get("requested") is False for row in record["responses"])
+        )
+        self.assertEqual(record["collection_cutoff"], cutoff.isoformat())
+        self.assertIn("자료 마감", report)
+        self.assertFalse(any("micron.com" in url for url in fetched))
+
     def setUp(self):
         sources = UniverseResponses()
         for symbol in ("AAA", "BBB", "CCC", "DDD", "IBM"):

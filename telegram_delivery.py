@@ -1,4 +1,4 @@
-"""Manually deliver a saved single-report preview without automatic retries."""
+"""Manually deliver a saved report without automatic retries."""
 
 import argparse
 import fcntl
@@ -15,6 +15,8 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener
 
+import universe_run
+from execution_record import report_deadline, verify_readiness
 from single_run import NY, DataError, NoRedirect, credentials_for_run, replay, timestamp
 
 
@@ -40,6 +42,7 @@ def deliver(
     output: Path,
     *,
     send=None,
+    edit_caption=None,
     target=None,
     now=None,
     retry=False,
@@ -52,7 +55,9 @@ def deliver(
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise DataError("delivery_busy") from None
-        record = replay(output)
+        whole = "markets" in json.loads((output / "record.json").read_text())["rules"]
+        record = universe_run.replay(output) if whole else replay(output)
+        readiness = verify_readiness(output, record)
         report = (output / "report.md").read_bytes()
         report_hash = hashlib.sha256(report).hexdigest()
         path = output / "delivery.json"
@@ -63,7 +68,7 @@ def deliver(
                 "version": 1,
                 "record_sha256": record["sha256"],
                 "report_sha256": report_hash,
-                "scope": "single_symbol_preview",
+                "scope": "universe_report" if whole else "single_symbol_preview",
                 "synthetic": record["synthetic"],
                 "attempts": [],
             }
@@ -106,14 +111,52 @@ def deliver(
             "receipt": None,
             "timing": "preview",
             "on_time": False,
+            "publication_on_time": False,
+            "report_ready_on_time": readiness["report_ready_on_time"],
+            "report_ready_at": readiness["report_ready_at"],
         }
-        opening = record["inputs"].get("calendar", {}).get("open")
-        deadline = timestamp(opening) - timedelta(minutes=60) if opening else None
+        deadline = report_deadline(record["inputs"].get("calendar"))
         if deadline is not None:
             attempt["scheduled_at"] = deadline.isoformat()
         attempts.append(attempt)
+        if whole and (
+            deadline is None
+            or moment > deadline + timedelta(minutes=30)
+            or moment.astimezone(NY).date().isoformat() != record["report_date"]
+        ):
+            attempt.update(
+                status="not_sent",
+                timing="missed",
+                reason="premarket_delivery_window_closed",
+            )
+            _save(path, state)
+            return state
+        if whole and live and edit_caption is None:
+            raise DataError("delivery_caption_editor_missing")
         _save(path, state)
-        caption = f"미리보기: MU 한 종목 보고서 ({record['report_date']}). 전체 탐색 보고서가 아닙니다."
+        delayed = False
+        if whole:
+            delayed = deadline is not None and (
+                moment >= deadline + timedelta(minutes=1)
+                or not readiness["report_ready_on_time"]
+            )
+            caption = f"{'지연 ' if delayed else ''}전체 종목군 보고서 ({record['report_date']})."
+            if record["synthetic"]:
+                caption = "검증용 사례: " + caption
+        else:
+            caption = f"미리보기: MU 한 종목 보고서 ({record['report_date']}). 전체 탐색 보고서가 아닙니다."
+        sending_at = now or datetime.now(UTC)
+        if whole and (
+            sending_at > deadline + timedelta(minutes=30)
+            or sending_at.astimezone(NY).date().isoformat() != record["report_date"]
+        ):
+            attempt.update(
+                status="not_sent",
+                timing="missed",
+                reason="premarket_delivery_window_closed",
+            )
+            _save(path, state)
+            return state
         try:
             response = send(report, caption)
             if not isinstance(response, dict):
@@ -150,14 +193,26 @@ def deliver(
                     published_at=published.isoformat(),
                 )
                 if deadline is not None:
-                    attempt["on_time"] = (
+                    attempt["publication_on_time"] = (
                         deadline <= published < deadline + timedelta(minutes=1)
                         and timestamp(record["as_of"]) <= published
                         and published.astimezone(NY).date().isoformat()
                         == record["report_date"]
                     )
+                    attempt["on_time"] = (
+                        attempt["publication_on_time"]
+                        and readiness["report_ready_on_time"]
+                        and timestamp(readiness["report_ready_at"]) <= published
+                    )
                     attempt["timing"] = (
-                        "opening_minus_60_minutes" if attempt["on_time"] else "preview"
+                        "opening_minus_60_minutes"
+                        if attempt["on_time"]
+                        else "delayed"
+                        if whole
+                        and deadline <= published <= deadline + timedelta(minutes=30)
+                        else "missed_deadline"
+                        if whole and published > deadline + timedelta(minutes=30)
+                        else "preview"
                     )
             else:
                 raise ValueError("invalid_response")
@@ -165,6 +220,37 @@ def deliver(
             attempt.update(status="unknown", reason="interrupted_or_response_unknown")
         attempt["response_checked_at"] = (now or datetime.now(UTC)).isoformat()
         _save(path, state)
+        if (
+            whole
+            and attempt["status"] == "sent"
+            and (
+                attempt["timing"] == "missed_deadline"
+                or (attempt["timing"] == "delayed" and not delayed)
+            )
+        ):
+            corrected = (
+                ("시한 초과 " if delayed else "시한 초과 지연 ")
+                if attempt["timing"] == "missed_deadline"
+                else "지연 "
+            ) + caption
+            attempt["caption_update"] = "unknown"
+            _save(path, state)
+            if edit_caption is not None:
+                try:
+                    edited = edit_caption(attempt["message_id"], corrected)
+                    message = edited.get("result") if isinstance(edited, dict) else None
+                    if (
+                        edited.get("ok") is True
+                        and isinstance(message, dict)
+                        and (
+                            message.get("message_id") == attempt["message_id"]
+                            and message.get("caption") == corrected
+                        )
+                    ):
+                        attempt["caption_update"] = "updated"
+                except OSError, ValueError, KeyError, TypeError, AttributeError:
+                    pass
+            _save(path, state)
         return state
 
 
@@ -223,6 +309,27 @@ def send_document(token, chat_id, report, caption):
     return result
 
 
+def edit_message_caption(token, chat_id, message_id, caption):
+    result = _request(
+        token,
+        "editMessageCaption",
+        json.dumps(
+            {"chat_id": chat_id, "message_id": message_id, "caption": caption}
+        ).encode(),
+        "application/json",
+    )
+    if result.get("ok") is True:
+        message = result.get("result")
+        chat = message.get("chat") if isinstance(message, dict) else None
+        if (
+            not isinstance(chat, dict)
+            or chat.get("type") != "private"
+            or str(chat.get("id")) != chat_id
+        ):
+            return {"ok": None}
+    return result
+
+
 def telegram_sender(credentials):
     token = credentials.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = credentials.get("TELEGRAM_CHAT_ID", "")
@@ -269,6 +376,11 @@ def main():
             state = deliver(
                 args.output,
                 send=sender,
+                edit_caption=partial(
+                    edit_message_caption,
+                    credentials["TELEGRAM_BOT_TOKEN"],
+                    credentials["TELEGRAM_CHAT_ID"],
+                ),
                 target=target,
                 retry=args.command == "retry",
                 live=True,

@@ -19,7 +19,7 @@ import execution_record as records
 import single_run as s
 
 RULES = {
-    "version": 7,
+    "version": 8,
     "calculation": {key: value for key, value in s.RULES.items() if key != "symbol"},
     "markets": ["NASDAQ", "NYSE"],
     "types": ["STOCK", "FOREIGN_STOCK"],
@@ -296,13 +296,17 @@ def classify_non_common(read, universe, item, row, symbol, as_of, checked_at):
     }
 
 
-def collect(read, report_day, as_of, earnings_sources, checked_at):
+def collect(
+    read, report_day, as_of, earnings_sources, checked_at, collection_cutoff=None
+):
     universe = discover(read)
     inputs = {"universe": universe, "issues": [], "stocks": {}}
     cal = attempt(
         inputs["issues"], "calendar", lambda: s.calendar(read, report_day, as_of)
     )
     inputs["calendar"] = cal
+    if cal and collection_cutoff and collection_cutoff > records.report_deadline(cal):
+        raise s.DataError("collection_cutoff_after_report_deadline")
     symbols = sorted(universe["symbols"])
     for start in range(0, len(symbols), 200):
         batch = symbols[start : start + 200]
@@ -454,6 +458,17 @@ def finalize(inputs):
         "verified_non_common": sorted(resolved),
         "ranking_complete": not unresolved,
         "ranking_held": unresolved,
+        "earnings_review_needed": sorted(
+            symbol
+            for symbol, row in stocks.items()
+            if row["result"]["status"] == "held"
+            and row["result"]["metrics"]
+            and (
+                row["inputs"].get("earnings", {}).get("collection_status")
+                in ("not_configured", "unsupported", "incomplete")
+                or row["inputs"].get("earnings", {}).get("scope_status") == "unverified"
+            )
+        ),
         "collection_skipped": {
             name: sum(
                 name in row["inputs"].get("skipped", {}) for row in stocks.values()
@@ -491,7 +506,11 @@ def render(record):
         "",
         f"실적 일정 조회 생략 {result['collection_skipped']['earnings']}종목. 거래대금 조회 생략 {result['collection_skipped']['turnover']}종목.",
         "",
-        f"요청 {len(record['responses'])}회. 수집 소요 시간 {record['elapsed_seconds']}초.",
+        f"요청 {sum(item.get('requested', True) for item in record['responses'])}회. 수집 소요 시간 {record['elapsed_seconds']}초.",
+        "",
+        f"자료 마감: {record['collection_cutoff'] or '미설정(합성 검증 실행)'}. 마감 이후 응답은 판정에 사용하지 않는다.",
+        "",
+        f"IR 경로 검토 필요: {', '.join(result['earnings_review_needed']) or '없음'}. 출처와 보류 사유는 종목별 기록에서 확인한다.",
         "",
     ]
     for market, coverage in inputs["universe"]["markets"].items():
@@ -606,11 +625,18 @@ def run(
     synthetic=False,
     earnings_sources=None,
     clock=None,
+    collection_cutoff=None,
 ):
     sources = checked_sources(earnings_sources)
     clock = clock or (lambda: now or datetime.now(UTC))
     as_of = clock()
     s.timestamp(as_of.isoformat())
+    if collection_cutoff is not None:
+        s.timestamp(collection_cutoff.isoformat())
+        if collection_cutoff.astimezone(s.NY).date() != report_day:
+            raise s.DataError("collection_cutoff_report_date_mismatch")
+    elif not synthetic:
+        raise s.DataError("collection_cutoff_required")
     metadata = records.identity(
         RULES, (Path(__file__), Path(s.__file__), Path(ir.__file__)), CONTRACT
     )
@@ -619,13 +645,19 @@ def run(
         as_of=as_of.isoformat(),
         synthetic=synthetic,
         earnings_sources=sources,
+        collection_cutoff=collection_cutoff.isoformat() if collection_cutoff else None,
     )
     execution = records.ExecutionRecord.start(output, metadata, fetch, clock)
     start = time.monotonic()
     with localcontext() as context:
         context.prec = 28
         inputs = collect(
-            execution.read, report_day, as_of, sources, lambda: execution.checked_at
+            execution.read,
+            report_day,
+            as_of,
+            sources,
+            lambda: execution.checked_at,
+            collection_cutoff,
         )
         inputs, result = finalize(inputs)
     return execution.save(
@@ -647,6 +679,9 @@ def replay(output):
             s.timestamp(record["as_of"]),
             checked_sources(record["earnings_sources"]),
             lambda: execution.checked_at,
+            s.timestamp(record["collection_cutoff"])
+            if record["collection_cutoff"]
+            else None,
         )
         inputs, result = finalize(inputs)
     return execution.verify(inputs, result, render)
@@ -660,6 +695,12 @@ def main():
     live.add_argument("--report-date", type=date.fromisoformat)
     live.add_argument("--credentials-file", type=Path)
     live.add_argument("--issue-tokens", action="store_true")
+    live.add_argument(
+        "--collection-cutoff",
+        type=s.timestamp,
+        required=True,
+        help="Timezone-aware last data receipt time, no later than opening minus 60 minutes.",
+    )
     live.add_argument(
         "--earnings-sources",
         type=Path,
@@ -697,9 +738,13 @@ def main():
                 args.output,
                 args.report_date or datetime.now(s.NY).date(),
                 fetch=partial(
-                    s.fetch_public, credentials=credentials, public_hosts=hosts
+                    s.fetch_public,
+                    credentials=credentials,
+                    public_hosts=hosts,
+                    collection_cutoff=args.collection_cutoff,
                 ),
                 earnings_sources=sources,
+                collection_cutoff=args.collection_cutoff,
             )
         print(
             json.dumps(

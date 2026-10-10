@@ -61,7 +61,11 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def fetch_public(
-    url: str, *, credentials: dict | None = None, public_hosts: tuple = ()
+    url: str,
+    *,
+    credentials: dict | None = None,
+    public_hosts: tuple = (),
+    collection_cutoff: datetime | None = None,
 ) -> str:
     """Use existing tokens only, in headers; never issue or persist a token."""
     host = urlparse(url).netloc
@@ -104,9 +108,15 @@ def fetch_public(
             time.sleep(1.05)
         else:
             time.sleep(0.35)
+    timeout = 20
+    if collection_cutoff is not None:
+        remaining = (collection_cutoff - datetime.now(UTC)).total_seconds()
+        if remaining <= 0:
+            raise DataError("report_data_cutoff_reached")
+        timeout = min(timeout, remaining)
     try:
         with build_opener(NoRedirect).open(
-            Request(url, headers=headers), timeout=20
+            Request(url, headers=headers), timeout=timeout
         ) as response:
             body = response.read(4_000_001)
             if len(body) > 4_000_000:

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -29,6 +30,44 @@ def identity(rules, paths, contract) -> dict:
         "code_sha256": code_hash(paths),
         "contract": contract.read_text(),
     }
+
+
+def report_deadline(calendar):
+    """Return the preparation deadline from the verified session, or no deadline."""
+    return (
+        datetime.fromisoformat(calendar["open"]) - timedelta(minutes=60)
+        if calendar
+        else None
+    )
+
+
+def verify_readiness(output, record):
+    """Validate saved preparation timing without consulting the current clock."""
+    timing = json.loads((output / "readiness.json").read_text())
+    checksum = timing.pop("sha256")
+    if (
+        digest(timing) != checksum
+        or timing["record_sha256"] != record["sha256"]
+        or timing["report_sha256"]
+        != hashlib.sha256((output / "report.md").read_bytes()).hexdigest()
+    ):
+        raise DataError("readiness_integrity_mismatch")
+    finished = datetime.fromisoformat(timing["collection_finished_at"])
+    ready = datetime.fromisoformat(timing["report_ready_at"])
+    if any(
+        value.tzinfo is None or value.utcoffset() is None for value in (finished, ready)
+    ):
+        raise DataError("readiness_timing_mismatch")
+    deadline = report_deadline(record["inputs"].get("calendar"))
+    if (
+        timing["collection_finished_at"] != record["collection_finished_at"]
+        or ready < finished
+        or timing["report_ready_by"] != (deadline.isoformat() if deadline else None)
+        or timing["report_ready_on_time"] != bool(deadline and ready <= deadline)
+        or timing["preparation_seconds"] != (ready - finished).total_seconds()
+    ):
+        raise DataError("readiness_timing_mismatch")
+    return timing | {"sha256": checksum}
 
 
 class ExecutionRecord:
@@ -60,6 +99,8 @@ class ExecutionRecord:
         return cls(output, record)
 
     def read(self, url):
+        cutoff = self.record.get("collection_cutoff")
+        cutoff = datetime.fromisoformat(cutoff) if cutoff else None
         if self._remaining is not None:
             if self._replay_failure:
                 raise DataError(self._replay_failure)
@@ -72,28 +113,71 @@ class ExecutionRecord:
                 )
                 raise DataError(self._replay_failure)
             self.checked_at = item["checked_at"]
+            if cutoff and (datetime.fromisoformat(self.checked_at) >= cutoff) != (
+                item.get("error") == "report_data_cutoff_reached"
+            ):
+                self._replay_failure = "replay_cutoff_mismatch"
+                raise DataError(self._replay_failure)
             if "error" in item:
                 raise DataError(item["error"])
             return item["body"]
         item = {"url": url}
+        if cutoff and (checked := self._clock()) >= cutoff:
+            self.checked_at = checked.isoformat()
+            item.update(
+                checked_at=self.checked_at,
+                error="report_data_cutoff_reached",
+                requested=False,
+            )
+            self.record["responses"].append(item)
+            raise DataError(item["error"])
         try:
             item["body"] = self._fetch(url)
         except DataError as error:
             item["error"] = str(error)
-            raise
+            if str(error) == "report_data_cutoff_reached":
+                item["requested"] = False
         finally:
             self.checked_at = self._clock().isoformat()
             item["checked_at"] = self.checked_at
             self.record["responses"].append(item)
+        if cutoff and datetime.fromisoformat(self.checked_at) >= cutoff:
+            if "error" in item:
+                item["request_error"] = item["error"]
+            item["error"] = "report_data_cutoff_reached"
+        if "error" in item:
+            raise DataError(item["error"])
         return item["body"]
 
     def save(self, inputs, result, render, **metadata):
-        self.record.update(metadata, inputs=inputs, result=result)
+        self.record.update(
+            metadata,
+            inputs=inputs,
+            result=result,
+            collection_finished_at=self._clock().isoformat(),
+        )
         self.record["sha256"] = digest(self.record)
         (self.output / "record.json").write_text(
             json.dumps(self.record, indent=2, ensure_ascii=False) + "\n"
         )
         (self.output / "report.md").write_text(render(self.record))
+        ready = self._clock()
+        deadline = report_deadline(inputs.get("calendar"))
+        timing = {
+            "record_sha256": self.record["sha256"],
+            "report_sha256": hashlib.sha256(
+                (self.output / "report.md").read_bytes()
+            ).hexdigest(),
+            "collection_finished_at": self.record["collection_finished_at"],
+            "report_ready_at": ready.isoformat(),
+            "report_ready_by": deadline.isoformat() if deadline else None,
+            "report_ready_on_time": bool(deadline and ready <= deadline),
+            "preparation_seconds": (
+                ready - datetime.fromisoformat(self.record["collection_finished_at"])
+            ).total_seconds(),
+        }
+        timing["sha256"] = digest(timing)
+        (self.output / "readiness.json").write_text(json.dumps(timing, indent=2) + "\n")
         return self.record
 
     def verify(self, inputs, result, render):
@@ -107,4 +191,5 @@ class ExecutionRecord:
             raise DataError("replay_result_mismatch")
         if (self.output / "report.md").read_text() != render(self.record):
             raise DataError("replay_report_mismatch")
+        verify_readiness(self.output, self.record)
         return self.record
