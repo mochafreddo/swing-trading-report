@@ -14,6 +14,7 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
+import earnings as ir
 import execution_record as records
 import single_run as s
 
@@ -284,7 +285,7 @@ def classify_non_common(read, universe, item, row, symbol, as_of, checked_at):
         if body_sha256 != evidence["required_body_sha256"]:
             raise s.DataError("security_classification_evidence_missing")
     else:
-        page = s.NewsPage()
+        page = ir.NewsPage()
         page.feed(body)
         text = " ".join("".join(page.text).split())
         if not all(fragment in text for fragment in evidence["required_text"]):
@@ -593,7 +594,7 @@ def render(record):
 
 
 def code_hash():
-    return records.code_hash((Path(__file__), Path(s.__file__)))
+    return records.code_hash((Path(__file__), Path(s.__file__), Path(ir.__file__)))
 
 
 def run(
@@ -610,7 +611,9 @@ def run(
     clock = clock or (lambda: now or datetime.now(UTC))
     as_of = clock()
     s.timestamp(as_of.isoformat())
-    metadata = records.identity(RULES, (Path(__file__), Path(s.__file__)), CONTRACT)
+    metadata = records.identity(
+        RULES, (Path(__file__), Path(s.__file__), Path(ir.__file__)), CONTRACT
+    )
     metadata.update(
         report_date=str(report_day),
         as_of=as_of.isoformat(),
@@ -631,7 +634,9 @@ def run(
 
 
 def replay(output):
-    expected = records.identity(RULES, (Path(__file__), Path(s.__file__)), CONTRACT)
+    expected = records.identity(
+        RULES, (Path(__file__), Path(s.__file__), Path(ir.__file__)), CONTRACT
+    )
     execution = records.ExecutionRecord.load(output, expected)
     record = execution.record
     with localcontext() as context:

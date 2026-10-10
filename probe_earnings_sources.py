@@ -20,6 +20,7 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zoneinfo import ZoneInfo
 
+import earnings as ir
 import single_run as s
 
 # These are source locations, not earnings dates or preselected article URLs.
@@ -643,7 +644,7 @@ def production_probe(read, as_of, max_articles):
                 raise s.DataError("source_fetch_failed")
             return body
 
-        event = s.earnings(required_read, as_of.astimezone(s.NY).date(), as_of, source)
+        event = ir.earnings(required_read, as_of.astimezone(s.NY).date(), as_of, source)
         results.append({"symbol": symbol, "event": event})
         print(
             f"{symbol}: {event['status']}; {event.get('reason', event.get('date'))}",

@@ -168,26 +168,29 @@ class ExecutionRecordTests(unittest.TestCase):
 
     def test_v2_records_include_shared_code_and_reject_its_changes(self):
         read_bytes = Path.read_bytes
-        shared = Path(s.__file__).with_name("execution_record.py")
-        for module, fetch in ((s, PublicResponses), (u, UniverseResponses)):
-            with (
-                self.subTest(module=module.__name__),
-                tempfile.TemporaryDirectory() as tmp,
-            ):
-                output = Path(tmp) / "run"
-                record = module.run(output, DAY, fetch=fetch(), now=NOW, synthetic=True)
-                self.assertEqual(record["format_version"], 2)
-                self.assertIn(shared.name, record["code_sha256"])
-
-                def changed(path):
-                    body = read_bytes(path)
-                    return body + b"\n# changed\n" if path == shared else body
-
+        for shared_name in ("execution_record.py", "earnings.py"):
+            shared = Path(s.__file__).with_name(shared_name)
+            for module, fetch in ((s, PublicResponses), (u, UniverseResponses)):
                 with (
-                    patch.object(Path, "read_bytes", changed),
-                    self.assertRaisesRegex(s.DataError, "replay_version_mismatch"),
+                    self.subTest(module=module.__name__),
+                    tempfile.TemporaryDirectory() as tmp,
                 ):
-                    module.replay(output)
+                    output = Path(tmp) / "run"
+                    record = module.run(
+                        output, DAY, fetch=fetch(), now=NOW, synthetic=True
+                    )
+                    self.assertEqual(record["format_version"], 2)
+                    self.assertIn(shared.name, record["code_sha256"])
+
+                    def changed(path, shared=shared):
+                        body = read_bytes(path)
+                        return body + b"\n# changed\n" if path == shared else body
+
+                    with (
+                        patch.object(Path, "read_bytes", changed),
+                        self.assertRaisesRegex(s.DataError, "replay_version_mismatch"),
+                    ):
+                        module.replay(output)
 
     def test_both_replays_reject_changed_contract(self):
         read_text = Path.read_text

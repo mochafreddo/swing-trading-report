@@ -30,6 +30,6 @@ NYSE·NASDAQ 각각의 토스 ACTIVE 보통주 전체 목록을 조회하고 STO
 
 보고서는 최대 3개 후보의 선정 근거·가격 계획, 전체 목록 범위, 평가·제외·보류 건수, 보류 사유와 데이터 시각을 담는다. 전체 평가 불가와 검증된 범위의 후보 없음을 구분한다. 목록이 불완전해도 확인된 종목의 판정은 보존하되 전체 탐색 성공으로 표시하지 않는다. 모든 종목별 결과와 요청 URL·응답·확인 시각·오류·호출 수·소요 시간은 record.json에 보존한다. 인증정보는 저장하지 않는다. 재현은 저장 응답과 코드·계약·규칙·보고서 무결성을 확인하며 네트워크를 사용하지 않는다.
 
-실행 기록의 형식 v2와 공통 재현 검증은 [한 종목 계약](single-run-contract.md)의 기록과 검증 기준을 따른다. 전체 종목군의 `code_sha256`에는 `universe_run.py`, `single_run.py`, `execution_record.py`의 파일별 SHA-256을 보존한다. 재현 중에는 현재 시계를 읽지 않고 마지막으로 재생한 응답의 확인 시각을 사용하며, 개장 이후 수집된 종목을 보류하는 기준도 그대로 유지한다.
+실행 기록의 형식 v2와 공통 재현 검증은 [한 종목 계약](single-run-contract.md)의 기록과 검증 기준을 따른다. 전체 종목군의 `code_sha256`에는 `universe_run.py`, `single_run.py`, `earnings.py`, `execution_record.py`의 파일별 SHA-256을 보존한다. 재현 중에는 현재 시계를 읽지 않고 마지막으로 재생한 응답의 확인 시각을 사용하며, 개장 이후 수집된 종목을 보류하는 기준도 그대로 유지한다.
 
 공식 근거는 [토스 종목 API](https://openapi.tossinvest.com/openapi-docs/latest/api-reference/Apis/StockInfoApi.md), [호출 한도](https://openapi.tossinvest.com/openapi-docs/overview.md), [KIS 일봉 예제](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/overseas_stock/dailyprice/chk_dailyprice.py)다. 2026-09-14 조회한 토스 문서는 STOCK_ALL 초당 1회, STOCK 초당 5회, MARKET_INFO 초당 3회를 명시한다. 실행은 순차 수집하며 전체 목록 요청은 1.05초, 다른 인증 GET은 기존 0.35초 간격을 사용한다. 호출 실패는 자동 재시도하지 않는다.

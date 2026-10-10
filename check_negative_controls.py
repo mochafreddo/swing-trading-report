@@ -10,174 +10,203 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CONTROLS = [
     (
+        "single_run.py",
         "binary32_representation",
         '        return struct.unpack("!f", struct.pack("!f", float(original)))[0] == float(\n            reference\n        )',
         "        return False",
         "test_binary32_reference_preserves_cent_boundary_prices_without_tolerance",
     ),
     (
+        "single_run.py",
         "binary32_not_generic_tolerance",
         '        return struct.unpack("!f", struct.pack("!f", float(original)))[0] == float(\n            reference\n        )',
         "        return True",
         "test_binary32_reference_preserves_cent_boundary_prices_without_tolerance",
     ),
     (
+        "single_run.py",
         "binary32_precision_limit",
         '    if abs(original - reference) >= Decimal(".005")',
         "    if False",
         "test_binary32_reference_preserves_cent_boundary_prices_without_tolerance",
     ),
     (
+        "single_run.py",
         "calendar_rate_limit",
         "            time.sleep(0.3",
         "            time.sleep(0.1",
         "test_calendar_collection_respects_three_requests_per_second",
     ),
     (
+        "single_run.py",
         "held_quote_validation",
         '    if not all(key in inputs for key in ("stock", "calendar", "bars_0"))',
         "    if held",
         "test_live_session_hold_does_not_hide_invalid_quotes",
     ),
     (
+        "single_run.py",
         "breakout_equality",
         '            "close_not_above_breakout": last["clos"] >',
         '            "close_not_above_breakout": last["clos"] >=',
         "test_breakout_equality_is_excluded",
     ),
     (
+        "single_run.py",
         "volume_boundary",
         '            "volume_below_multiple": last["tvol"]\n            >= avg_volume * Decimal(RULES["volume_multiple"]',
         '            "volume_below_multiple": last["tvol"] >= avg_volume * Decimal("1.4"',
         "test_volume_multiple_below_boundary_is_excluded",
     ),
     (
+        "single_run.py",
         "market_cap_boundary",
         '            "market_cap_below_minimum": cap >= Decimal(RULES["market_cap_min_usd"]',
         '            "market_cap_below_minimum": cap >= Decimal("9000000000"',
         "test_market_cap_below_boundary_is_excluded",
     ),
     (
+        "single_run.py",
         "liquidity_boundary",
         "        if turnover <",
         "        if turnover <=",
         "test_turnover_inclusive_boundary",
     ),
     (
+        "single_run.py",
         "sma_equality",
         '            "close_not_above_sma50": last["clos"] >',
         '            "close_not_above_sma50": last["clos"] >=',
         "test_sma_equality_is_excluded",
     ),
     (
+        "single_run.py",
         "bad_quotes",
         '                raise DataError("invalid_ohlc")',
         "                pass",
         "test_bad_quotes_are_held_without_a_price_plan",
     ),
     (
+        "earnings.py",
         "estimated_earnings",
         '            return {\n                "status": "unconfirmed",\n                "source": url,\n                "reason": "uncertain_earnings_announcement",\n            }',
         "            pass",
         "test_unconfirmed_and_estimated_earnings_are_held",
     ),
     (
+        "earnings.py",
         "newer_earnings_change",
         '    return (\n        max(newer_changes, key=lambda item: timestamp(item["published_at"]))\n        if newer_changes\n        else next_event\n    )',
         "    return next_event",
         "test_newer_earnings_postponement_invalidates_original_announcement",
     ),
     (
+        "single_run.py",
         "missing_earnings",
         '    if inputs["earnings"].get("status") != "confirmed"',
         "    if False",
         "test_unconfirmed_and_estimated_earnings_are_held",
     ),
     (
+        "single_run.py",
         "earnings_fifth_session",
         "            if not (event >",
         "            if not (event >=",
         "test_earnings_window_includes_today_fifth_session_and_weekend",
     ),
     (
+        "single_run.py",
         "wrong_target",
         '            "target": entry + risk * 2',
         '            "target": entry + risk * 3',
         "test_selected_report_and_offline_replay",
     ),
     (
+        "single_run.py",
         "unverified_live_data",
         "    if any(meta.get(key) != value for key, value in required.items())",
         "    if False",
         "test_unverified_live_session_cannot_become_candidate",
     ),
     (
+        "single_run.py",
         "reference_price",
         '                    raise DataError("daily_price_reference_mismatch")',
         "                    pass",
         "test_reference_disagreement_or_unknown_adjustment_is_held",
     ),
     (
+        "single_run.py",
         "reference_volume",
         '                    raise DataError("invalid_daily_volume_units")',
         "                    pass",
         "test_reference_disagreement_or_unknown_adjustment_is_held",
     ),
     (
+        "single_run.py",
         "corporate_action_metadata",
         '        raise DataError("corporate_action_metadata_invalid")',
         "        pass",
         "test_reference_disagreement_or_unknown_adjustment_is_held",
     ),
     (
+        "single_run.py",
         "split_window",
         '        if reference["events"].get("splits")',
         "        if False",
         "test_split_window_is_held",
     ),
     (
+        "single_run.py",
         "report_day_split",
         "    end = datetime.combine(report_day + timedelta(days=1)",
         "    end = datetime.combine(report_day",
         "test_report_day_split_is_checked_before_publishing_prices",
     ),
     (
+        "single_run.py",
         "dividend_policy",
         '        if reference["events"].get("splits")',
         '        if reference["events"].get("splits") or reference["events"].get("dividends")',
         "test_cash_dividend_keeps_the_unadjusted_price_plan",
     ),
     (
+        "single_run.py",
         "amount_rounding",
         "            found[moment] = max(Decimal(0), amount - 1)",
         "            found[moment] = amount",
         "test_turnover_inclusive_boundary",
     ),
     (
+        "single_run.py",
         "insufficient_bound",
         '            raise DataError("turnover_lower_bound_insufficient")',
         '            return result | {"status": "excluded"}',
         "test_turnover_inclusive_boundary",
     ),
     (
+        "single_run.py",
         "missing_minutes",
         "    if set(found) != expected_set",
         "    if False",
         "test_invalid_regular_turnover_is_held",
     ),
     (
+        "single_run.py",
         "duplicate_minutes",
         '                raise DataError("duplicate_or_unordered_minutes")',
         "                pass",
         "test_invalid_regular_turnover_is_held",
     ),
     (
+        "single_run.py",
         "minute_amount_units",
         '                raise DataError("turnover_unit_or_session_mismatch")',
         "                pass",
         "test_invalid_regular_turnover_is_held",
     ),
     (
+        "single_run.py",
         "minute_timezone",
         '                raise DataError("minute_timezone_mismatch")',
         "                pass",
@@ -358,8 +387,8 @@ RECORD_CONTROLS = [
 def main() -> int:
     results = []
     cases = [
-        ("single_run.py", "test_single_run.SingleRunTests", control)
-        for control in CONTROLS
+        (filename, "test_single_run.SingleRunTests", (name, old, new, test))
+        for filename, name, old, new, test in CONTROLS
     ]
     cases += [
         ("universe_run.py", "test_universe_run.UniverseRunTests", control)
@@ -543,111 +572,129 @@ def main() -> int:
         ]
     ]
     cases += [
-        ("single_run.py", "test_universe_run.UniverseRunTests", control)
-        for control in [
+        (filename, "test_universe_run.UniverseRunTests", (name, old, new, test))
+        for filename, name, old, new, test in [
             (
+                "earnings.py",
                 "ir_past_conflict",
                 "        if not parsed_dates or max(parsed_dates) < report_day",
                 "        if not parsed_dates",
                 "test_repligen_archive_ignores_only_wholly_past_date_conflicts",
             ),
             (
+                "earnings.py",
                 "ir_mixed_conflict",
                 "        if not parsed_dates or max",
                 "        if not parsed_dates or min",
                 "test_repligen_archive_ignores_only_wholly_past_date_conflicts",
             ),
             (
+                "single_run.py",
                 "pdf_transport",
                 '            if body.startswith(b"%PDF-")',
                 "            if False",
                 "test_reviewed_pdf_requires_exact_bytes_and_replays_without_network",
             ),
             (
+                "earnings.py",
                 "ir_embedded_calendar",
                 "        if listing.event_calendars",
                 "        if False",
                 "test_embedded_issuer_calendar_is_collected_without_treating_calls_as_releases",
             ),
             (
+                "earnings.py",
                 "ir_calendar_call",
                 "                future_earnings |= event_day >= report_day",
                 "                future_earnings |= False",
                 "test_embedded_issuer_calendar_is_collected_without_treating_calls_as_releases",
             ),
             (
+                "earnings.py",
                 "ir_calendar_partial",
                 '            if section != "all" or ',
                 "            if ",
                 "test_embedded_issuer_calendar_is_collected_without_treating_calls_as_releases",
             ),
             (
+                "earnings.py",
                 "ir_article_name",
                 '        headline = article.get("headline") or article["nam',
                 '        headline = article["headlin',
                 "test_ir_article_name_and_local_publication_time_preserve_confirmed_release",
             ),
             (
+                "earnings.py",
                 "ir_local_publication",
                 "                published_day = datetime.fromisoformat(raw_published).date(",
                 "                published_day = date.fromisoformat(raw_published",
                 "test_ir_article_name_and_local_publication_time_preserve_confirmed_release",
             ),
             (
+                "earnings.py",
                 "ir_publish_announcement",
                 "(?:release|report|announce|publish)",
                 "(?:release|report|announce)",
                 "test_ir_article_name_and_local_publication_time_preserve_confirmed_release",
             ),
             (
+                "earnings.py",
                 "ir_published_announcement",
                 "(?:released|reported|announced|published)",
                 "(?:released|reported|announced)",
                 "test_ir_article_name_and_local_publication_time_preserve_confirmed_release",
             ),
             (
+                "earnings.py",
                 "ir_split_offset",
                 "                    page_number *= page_size",
                 "                    pass",
                 "test_oversized_ir_page_resumes_at_same_offset_with_full_bodies",
             ),
             (
+                "earnings.py",
                 "ir_split_http_failure",
                 '                    if str(error) != "response_too_large" or ',
                 "                    if ",
                 "test_ir_page_split_does_not_hide_single_item_or_http_failures",
             ),
             (
+                "earnings.py",
                 "ir_head_pagination",
                 '        if tag == "link" and "next" in attributes.get("rel", "").split()',
                 "        if False",
                 "test_head_next_link_cannot_hide_a_later_earnings_postponement",
             ),
             (
+                "earnings.py",
                 "ir_listing_as_article",
                 "    links.difference_update(visited)",
                 "    pass",
                 "test_ir_navigation_root_and_next_page_are_not_articles",
             ),
             (
+                "earnings.py",
                 "ir_root_as_article",
                 '                and target != source["article_prefix"]\n                and ',
                 "                and ",
                 "test_ir_navigation_root_and_next_page_are_not_articles",
             ),
             (
+                "single_run.py",
                 "verified_exclusion",
                 "        if excluded",
                 "        if excluded and not held",
                 "test_verified_exclusion_skips_earnings_and_turnover_and_replays",
             ),
             (
+                "single_run.py",
                 "earnings_source_skip",
                 '        inputs["skipped"]["earnings"] = "source_not_configured"',
                 "        pass",
                 "test_unknown_earnings_after_price_validation_skips_turnover",
             ),
             (
+                "single_run.py",
                 "unverified_price_exclusion",
                 '                    raise DataError("daily_price_reference_mismatch")',
                 "                    pass",
@@ -656,69 +703,80 @@ def main() -> int:
         ]
     ]
     cases += [
-        ("single_run.py", "test_universe_run.UniverseRunTests", control)
-        for control in [
+        (filename, "test_universe_run.UniverseRunTests", (name, old, new, test))
+        for filename, name, old, new, test in [
             (
+                "single_run.py",
                 "exchange_identity",
                 '        if data["output1"]["rsym"] != "D" + exchange + symbol',
                 "        if False",
                 "test_exchange_or_symbol_mismatch_is_held",
             ),
             (
+                "single_run.py",
                 "collection_after_open",
                 '            inputs["issues"].append("collection_outside_premarket")',
                 "            pass",
                 "test_collection_crossing_open_holds_only_late_symbols",
             ),
             (
+                "single_run.py",
                 "universe_null_inputs",
                 '        if execution == "single" or value is not Non',
                 "        if Tru",
                 "test_initial_failures_preserve_per_stock_price_collection_and_replay",
             ),
             (
+                "single_run.py",
                 "universe_rejected_price",
                 '            raise DataError(\n                "provider_rejected_request"\n                if execution == "single"\n                else "price_identity_mismatch"\n            ',
                 '            raise DataError("provider_rejected_request"',
                 "test_initial_failures_preserve_per_stock_price_collection_and_replay",
             ),
             (
+                "single_run.py",
                 "earnings_open_crossing",
                 '            inputs["issues"].append("collection_outside_premarket")',
                 "            pass",
                 "test_open_crossing_during_earnings_preserves_turnover_evidence_and_replays",
             ),
             (
+                "earnings.py",
                 "ir_feed_terminal",
                 "                if not rows",
                 "                if len(rows) < 5",
                 "test_dynamic_ir_walks_short_pages_until_explicit_empty_page",
             ),
             (
+                "earnings.py",
                 "ir_feed_repeat",
                 '                        raise DataError("earnings_feed_did_not_progress")',
                 "                        pass",
                 "test_dynamic_ir_repeated_page_is_a_failed_collection",
             ),
             (
+                "earnings.py",
                 "ir_conflicting_announcements",
                 '    if len({item["date"] for item in dates}) > 1',
                 "    if False",
                 "test_conflicting_future_ir_announcements_do_not_choose_an_arbitrary_date",
             ),
             (
+                "earnings.py",
                 "ir_uncertainty_body",
                 '            return {\n                "status": "unconfirmed",\n                "source": url,\n                "reason": "uncertain_earnings_announcement",\n            }',
                 "            pass",
                 "test_ir_body_qualifications_changes_and_call_dates_cannot_confirm_an_event",
             ),
             (
+                "earnings.py",
                 "ir_call_date",
                 '                event_dates.extend(\n                    re.findall(r"\\bon\\s+" + date_pattern, release_clause)\n                ',
                 '                event_dates.extend(re.findall(r"\\bon\\s+" + date_pattern, sentence)',
                 "test_ir_body_qualifications_changes_and_call_dates_cannot_confirm_an_event",
             ),
             (
+                "earnings.py",
                 "ir_publication_time",
                 "            if published_day >= as_of.astimezone(NY).date()",
                 "            if False",
@@ -799,21 +857,24 @@ def main() -> int:
         for name, old, new, test in RECORD_CONTROLS
     ]
     cases += [
-        ("single_run.py", "test_single_run.SingleRunTests", control)
-        for control in [
+        (filename, "test_single_run.SingleRunTests", (name, old, new, test))
+        for filename, name, old, new, test in [
             (
+                "earnings.py",
                 "ir_failure_reason",
                 "        reason = str(error)",
                 '        reason = "source_fetch_or_parse_failed"',
                 "test_earnings_fetch_failure_returns_complete_result",
             ),
             (
+                "earnings.py",
                 "ir_invalid_response_details",
                 '        reason = "invalid_response"',
                 '        reason = "private upstream detail"',
                 "test_earnings_invalid_responses_hide_upstream_details",
             ),
             (
+                "earnings.py",
                 "ir_replay_error_propagation",
                 '        if reason in ("replay_response_missing", "replay_request_mismatch")',
                 "        if False",
@@ -867,6 +928,8 @@ def main() -> int:
                 "single_run.py",
                 "universe_run.py",
                 "execution_record.py",
+                "earnings.py",
+                "test_earnings.py",
                 "probe_earnings_sources.py",
                 "probe_alpaca_trades.py",
                 "test_single_run.py",
