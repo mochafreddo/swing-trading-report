@@ -183,6 +183,19 @@ class PublicResponses:
             key = query.get("KEYB", ["99999999999999"])[0]
             selected = [r for r in rows if r["xymd"] + r["xhms"] <= key][:120]
             value = {"rt_cd": "0", "output1": {"rsym": "DNASMU"}, "output2": selected}
+        elif path == "/submissions/CIK0000723125.json":
+            value = {
+                "cik": 723125,
+                "tickers": ["MU"],
+                "filings": {
+                    "recent": {
+                        "acceptanceDateTime": [],
+                        "form": [],
+                        "accessionNumber": [],
+                        "primaryDocument": [],
+                    }
+                },
+            }
         elif url == NEWS_URL:
             value = {
                 "@type": "NewsArticle",
@@ -331,10 +344,7 @@ class SingleRunTests(unittest.TestCase):
             {"earnings": "verified_exclusion", "turnover": "verified_exclusion"},
         )
         self.assertFalse(
-            any(
-                "micron.com" in r["url"] or "inquire-time-itemchartprice" in r["url"]
-                for r in record["responses"]
-            )
+            any("inquire-time-itemchartprice" in r["url"] for r in record["responses"])
         )
 
     def test_confirmed_near_earnings_skip_turnover(self):

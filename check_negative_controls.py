@@ -818,8 +818,8 @@ def main() -> int:
             ),
             (
                 "single_replay_clock",
-                'timestamp(record["as_of"])',
-                "datetime.now(UTC)",
+                '            timestamp(record["as_of"]),\n        )',
+                "            datetime.now(UTC),\n        )",
                 "test_single_evaluation_keeps_start_time_when_responses_cross_open",
             ),
         ]
@@ -924,10 +924,12 @@ def main() -> int:
             (folder / "docs").mkdir()
             for relative in [
                 "docs/single-run-contract.md",
+                "docs/report-explanation-contract.md",
                 "docs/universe-run-contract.md",
                 "single_run.py",
                 "universe_run.py",
                 "execution_record.py",
+                "report_explanation.py",
                 "earnings.py",
                 "test_earnings.py",
                 "probe_earnings_sources.py",

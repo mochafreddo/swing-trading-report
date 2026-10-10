@@ -23,6 +23,17 @@ from zoneinfo import ZoneInfo
 from earnings import NEWS, NY, earnings, timestamp
 from execution_record import DataError, ExecutionRecord, identity
 from execution_record import digest as digest
+from report_explanation import (
+    call_openai,
+    collect_news,
+    explain,
+    openai_key,
+    public_payload,
+    render_claim,
+    render_evidence,
+    usage_cost,
+    verify_claims,
+)
 
 TOSS = "https://openapi.tossinvest.com"
 KIS = "https://openapi.koreainvestment.com:9443"
@@ -63,6 +74,7 @@ def fetch_public(
     elif host in {
         "www.micron.com",
         "investors.micron.com",
+        "data.sec.gov",
         urlparse(YAHOO).netloc,
         *public_hosts,
     }:
@@ -124,6 +136,7 @@ def credentials_for_run(
             "KIS_APP_KEY",
             "KIS_APP_SECRET",
             "KIS_ACCESS_TOKEN",
+            "OPENAI_API_KEY",
         }
     )
     credentials = {name: os.environ.get(name, "") for name in names}
@@ -812,9 +825,11 @@ def render(record: dict) -> str:
         "",
         f"판정: {labels[result['status']]}. 사유: {', '.join(result['reasons'])}.",
         "",
-        "탐색 대상은 MU 한 종목이다. 전체 종목군·후보 순위 비교는 미검증이며 첫 마일스톤 완료가 아니다.",
+        "탐색 대상은 MU 한 종목입니다. 전체 종목군·후보 순위 비교는 미검증이며 첫 마일스톤 완료가 아닙니다.",
         "",
-        "AI 설명: 미연결. 텔레그램 전송: 미연결. 뉴스 위험 요약·이전 후보 경과: 후속 범위.",
+        "약 5분 안에 읽는 분량을 목표로 합니다. 전송 결과는 텔레그램 전송 기록에서 별도로 확인하세요.",
+        "",
+        "## 신규 후보와 가격 계획",
         "",
     ]
     cal = inputs.get("calendar", {})
@@ -859,17 +874,17 @@ def render(record: dict) -> str:
         ]
         lines += [
             "",
-            "시가총액은 조회 시점 발행주식수 × 전일 종가(USD) 계산값이다.",
+            "시가총액은 조회 시점 발행주식수 × 전일 종가(USD) 계산값입니다.",
             "",
-            "거래대금 하한은 KIS Nasdaq TotalView에서 확인된 정규장 연속거래의 실제 금액만 합산한 값이다. 마감경매·다른 거래소를 포함한 정확한 전시장 평균이 아니며 후보 간 동순위 비교에 사용할 수 없다. 이 하한이 5,000만 USD 이상이면 전체 금액도 기준 이상이다. 하한이 미만이면 탈락 대신 보류한다.",
+            "거래대금 하한은 KIS Nasdaq TotalView에서 확인된 정규장 연속거래의 실제 금액만 합산한 값입니다. 마감경매·다른 거래소를 포함한 정확한 전시장 평균이 아니며 후보 간 동순위 비교에 사용할 수 없습니다. 이 하한이 5,000만 USD 이상이면 전체 금액도 기준 이상입니다. 하한이 미만이면 탈락 대신 보류합니다.",
             "",
-            "가격은 KIS 원주가를 Yahoo 정규장 일봉과 센트 단위로 대조한다. 거래량은 Yahoo 일봉 계열이다. 현금배당은 가격에 소급 조정하지 않으며 분할 발생 구간은 보류한다.",
+            "가격은 KIS 원주가를 Yahoo 정규장 일봉과 센트 단위로 대조합니다. 거래량은 Yahoo 일봉 계열입니다. 현금배당은 가격에 소급 조정하지 않으며 분할 발생 구간은 보류합니다.",
             "",
         ]
     if result["plan"]:
         plan = {key: f"{Decimal(value):.2f}" for key, value in result["plan"].items()}
         lines += [
-            f"진입 검토 구간: {plan['entry_low']}~{plan['entry_high']} USD (전일 종가~전일 종가 + 0.5ATR). 구간 밖에서는 진입을 보류한다.",
+            f"진입 검토 구간: {plan['entry_low']}~{plan['entry_high']} USD (전일 종가~전일 종가 + 0.5ATR). 구간 밖에서는 진입을 보류하세요.",
             "",
             f"손실 제한 기준: {plan['stop']} USD = 돌파 기준선 − ATR.",
             "",
@@ -877,18 +892,46 @@ def render(record: dict) -> str:
             "",
             f"예시 이익 실현 기준: {plan['target']} USD = 전일 종가 + 2R.",
             "",
-            "진입 계획은 보고일 정규장 하루에만 유효하다. 실제 진입가가 다르면 1R과 이익 실현 기준을 다시 계산한다. 실제 체결과 최대 손실을 보장하지 않는다.",
+            "진입 계획은 보고일 정규장 하루에만 유효합니다. 실제 진입가가 다르면 1R과 이익 실현 기준을 다시 계산하세요. 실제 체결과 최대 손실을 보장하지 않습니다.",
             "",
         ]
     else:
         lines += [
-            "선정된 매수 후보가 없어 진입·손실 제한·이익 실현 가격 계획을 제시하지 않는다.",
+            "선정된 매수 후보가 없어 진입·손실 제한·이익 실현 가격 계획을 제시하지 않습니다.",
             "",
         ]
-    lines += ["수집 근거와 요청별 확인 시각:", ""]
+    explanation = record["explanation"]
+    lines += render_claim(explanation, "selection")
+    lines += render_claim(explanation, "invalidation")
     lines += [
-        f"- [{item['url']}]({item['url']}) — {item['checked_at']}: {item.get('error', '수집됨')}"
-        for item in record["responses"]
+        "## 이전 후보의 주요 변화",
+        "",
+        "첫 보고서의 이전 후보 경과는 없습니다. 실제 매수·체결을 가정하지 않습니다.",
+        "",
+        "## 오늘의 학습 포인트",
+        "",
+    ]
+    if explanation["status"] == "generated":
+        lines += render_claim(explanation, "learning")
+    else:
+        lines += [
+            "1R은 진입가와 손실 제한 기준의 차이입니다. 실제 진입가가 달라지면 1R과 목표 가격을 다시 계산하세요.",
+            "",
+        ]
+    lines += render_evidence(record["news"], explanation)
+    lines += ["필수 자료 수집 근거 (요청별 원문·확인 시각은 record.json):", ""]
+    sources = {}
+    for item in record["responses"]:
+        parsed = urlparse(item["url"])
+        if parsed.netloc in (
+            urlparse(TOSS).netloc,
+            urlparse(KIS).netloc,
+            urlparse(YAHOO).netloc,
+        ):
+            sources.setdefault((parsed.netloc, parsed.path), item)
+    lines += [
+        f"- [{urlparse(item['url']).path}]({item['url']}): {item['checked_at']}, {item.get('error', '수집됨')}."
+        for item in sources.values()
     ]
     return "\n".join(lines) + "\n"
 
@@ -900,14 +943,23 @@ def run(
     fetch: Callable[[str], str] = fetch_public,
     now: datetime | None = None,
     synthetic: bool = False,
+    ai_request=None,
+    usage_directory: Path | None = None,
 ) -> dict:
     as_of = now or datetime.now(UTC)
     timestamp(as_of.isoformat())
     metadata = identity(
         RULES,
-        (Path(__file__), Path(__file__).with_name("earnings.py")),
+        (
+            Path(__file__),
+            Path(__file__).with_name("earnings.py"),
+            Path(__file__).with_name("report_explanation.py"),
+        ),
         Path(__file__).with_name("docs") / "single-run-contract.md",
     )
+    metadata["explanation_contract"] = (
+        Path(__file__).with_name("docs") / "report-explanation-contract.md"
+    ).read_text()
     metadata.update(
         report_date=str(report_day), as_of=as_of.isoformat(), synthetic=synthetic
     )
@@ -917,15 +969,30 @@ def run(
     with localcontext() as context:
         context.prec = 28
         inputs, result = collect(execution.read, report_day, as_of)
-    return execution.save(inputs, result, render)
+    news = collect_news(execution.read, as_of, lambda: execution.checked_at)
+    payload = public_payload(inputs, result, news, as_of.isoformat(), report_day)
+    explanation = explain(
+        payload,
+        ai_request,
+        usage_directory or Path("runs/ai-usage"),
+        (now or datetime.now(UTC)).isoformat(),
+    )
+    return execution.save(inputs, result, render, news=news, explanation=explanation)
 
 
 def replay(output: Path) -> dict:
     expected = identity(
         RULES,
-        (Path(__file__), Path(__file__).with_name("earnings.py")),
+        (
+            Path(__file__),
+            Path(__file__).with_name("earnings.py"),
+            Path(__file__).with_name("report_explanation.py"),
+        ),
         Path(__file__).with_name("docs") / "single-run-contract.md",
     )
+    expected["explanation_contract"] = (
+        Path(__file__).with_name("docs") / "report-explanation-contract.md"
+    ).read_text()
     execution = ExecutionRecord.load(output, expected)
     record = execution.record
     with localcontext() as context:
@@ -935,6 +1002,22 @@ def replay(output: Path) -> dict:
             date.fromisoformat(record["report_date"]),
             timestamp(record["as_of"]),
         )
+    news = collect_news(
+        execution.read, timestamp(record["as_of"]), lambda: execution.checked_at
+    )
+    if news != record["news"]:
+        raise DataError("replay_news_mismatch")
+    payload = public_payload(
+        inputs, result, news, record["as_of"], record["report_date"]
+    )
+    explanation = record["explanation"]
+    if digest(payload) != explanation["payload_sha256"]:
+        raise DataError("replay_ai_input_mismatch")
+    if explanation["status"] == "generated" and (
+        verify_claims(explanation["response"], payload) != explanation["claims"]
+        or usage_cost(explanation["response"]) != explanation["usage"]
+    ):
+        raise DataError("replay_ai_result_mismatch")
     return execution.verify(inputs, result, render)
 
 
@@ -954,6 +1037,9 @@ def main() -> int:
         action="store_true",
         help="Issue tokens in memory. Invalidates the previous Toss token; KIS may send an alert.",
     )
+    live.add_argument(
+        "--ai-key-file", type=Path, help="Owner-only file containing OPENAI_API_KEY."
+    )
     saved = sub.add_parser("replay")
     saved.add_argument("output", type=Path)
     args = parser.parse_args()
@@ -964,10 +1050,16 @@ def main() -> int:
             if args.output.exists():
                 raise DataError("output_already_exists")
             credentials = credentials_for_run(args.credentials_file, args.issue_tokens)
+            key = (
+                openai_key(args.ai_key_file)
+                if args.ai_key_file
+                else credentials.get("OPENAI_API_KEY", "")
+            )
             record = run(
                 args.output,
                 args.report_date or datetime.now(NY).date(),
                 fetch=partial(fetch_public, credentials=credentials),
+                ai_request=partial(call_openai, key=key) if key else None,
             )
         print(
             json.dumps(

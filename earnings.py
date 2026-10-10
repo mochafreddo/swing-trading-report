@@ -16,6 +16,8 @@ NY = ZoneInfo("America/New_York")
 
 
 def timestamp(value: str) -> datetime:
+    if not isinstance(value, str):
+        raise DataError("invalid_timestamp")
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         raise DataError("timezone_missing")
