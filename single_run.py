@@ -114,15 +114,21 @@ def fetch_public(
         raise DataError("network_or_encoding_error") from None
 
 
-def credentials_for_run(path: Path | None, issue_tokens: bool) -> dict:
-    names = {
-        "TOSS_CLIENT_ID",
-        "TOSS_CLIENT_SECRET",
-        "TOSS_ACCESS_TOKEN",
-        "KIS_APP_KEY",
-        "KIS_APP_SECRET",
-        "KIS_ACCESS_TOKEN",
-    }
+def credentials_for_run(
+    path: Path | None, issue_tokens: bool, *, names: set[str] | None = None
+) -> dict:
+    names = (
+        names
+        if names is not None
+        else {
+            "TOSS_CLIENT_ID",
+            "TOSS_CLIENT_SECRET",
+            "TOSS_ACCESS_TOKEN",
+            "KIS_APP_KEY",
+            "KIS_APP_SECRET",
+            "KIS_ACCESS_TOKEN",
+        }
+    )
     credentials = {name: os.environ.get(name, "") for name in names}
     if path is not None:
         resolved = path.expanduser().resolve()

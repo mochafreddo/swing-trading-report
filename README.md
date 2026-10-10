@@ -9,5 +9,6 @@
 - [도메인 용어](CONTEXT.md)
 - [AI 입력 범위 결정](docs/adr/0001-public-data-ai.md)
 - [한 종목 평가 실행](docs/single-run.md)
+- [텔레그램 단건 전송과 수신 확인](docs/telegram-delivery.md)
 - [전체 종목군 평가 실행과 현재 한계](docs/universe-run.md)
 - [CI 설계와 로컬 검증](docs/ci-design.md)

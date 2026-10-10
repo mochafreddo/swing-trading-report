@@ -833,6 +833,27 @@ def main() -> int:
             ),
         )
     )
+    cases += [
+        (
+            "telegram_delivery.py",
+            "test_telegram_delivery.TelegramDeliveryTests",
+            control,
+        )
+        for control in [
+            (
+                "telegram_unknown_automatic_retry",
+                '            attempt.update(status="unknown", reason="interrupted_or_response_unknown")',
+                '            try:\n                send(report, caption)\n            except (OSError, ValueError):\n                pass\n            attempt.update(status="unknown", reason="interrupted_or_response_unknown")',
+                "test_unknown_response_stops_until_user_confirms_missing",
+            ),
+            (
+                "telegram_user_confirmation_required",
+                '            if not retry or attempts[-1].get("receipt") != "missing":',
+                "            if not retry:",
+                "test_confirmation_allows_only_one_manual_retry_and_preserves_history",
+            ),
+        ]
+    ]
     for filename, test_class, (name, old, new, test) in cases:
         source = (ROOT / filename).read_text()
         if source.count(old) != 1:
@@ -852,6 +873,8 @@ def main() -> int:
                 "test_universe_run.py",
                 "test_execution_record.py",
                 "test_probe_alpaca_trades.py",
+                "telegram_delivery.py",
+                "test_telegram_delivery.py",
             ]:
                 shutil.copyfile(ROOT / relative, folder / relative)
             command = [sys.executable, "-m", "unittest", test_class + "." + test]
